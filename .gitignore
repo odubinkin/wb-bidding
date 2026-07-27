@@ -1,0 +1,19 @@
+
+# agentplane: ignore runtime/transient workspace artifacts
+.env
+.agentplane/worktrees
+.agentplane/cache
+.agentplane/recipes-cache
+.agentplane/.upgrade
+.agentplane/.release
+.agentplane/upgrade
+.agentplane/tasks.json
+.agentplane/index.md
+.agentplane/tasks.md
+.agentplane/by-status
+.agentplane/by-tag
+.agentplane/by-owner
+AGENTS.md.bak-*
+CLAUDE.md.bak-*
+.agentplane/agents/*.bak-*
+.agentplane/policy/**/*.bak-*
