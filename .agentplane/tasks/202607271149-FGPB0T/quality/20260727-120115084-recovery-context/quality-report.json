@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "task_id": "202607271149-FGPB0T",
+  "evaluator_id": "recovery-context",
+  "evaluator_profile": "EVALUATOR",
+  "generated_at": "2026-07-27T12:01:15.084Z",
+  "provenance": "evaluator_supplied",
+  "verdict": "pass",
+  "summary": "The specification consistently defines profit as the sole optimization objective and provides implementable product economics ingestion contracts.",
+  "evaluated_sha": "ff1f9c6730e32fd85866cdeeecd24118171c5543",
+  "blueprint_digest": "9c477cefcc2420b0c149332e02ea210f82033580fdf654ade37f9229fcad5679",
+  "findings": [
+    "Legacy ACOS/ROAS objective modes and component-level UnitEconomics are removed; ACOS/ROAS remain diagnostics only, while missing product economics fails closed per nmId.",
+    "Single-item PUT and asynchronous batch import define monetary serialization, versioning, optimistic locking, idempotency, validation, partial success, dry-run, recovery, audit, pagination, and Decision Engine concurrency effects.",
+    "BidPerformanceObservation closes the data-model gap required to evaluate candidate profit at confirmed historical bids."
+  ],
+  "evidence_refs": [
+    ".agentplane/tasks/202607271149-FGPB0T/README.md",
+    "commit ff1f9c6730e32fd85866cdeeecd24118171c5543",
+    "docs/technical-specification.md sections 2.1, 8, 9, 17, 25, 27",
+    "JSON parse, git diff --check, node .agentplane/policy/check-routing.mjs, and ap doctor all passed"
+  ],
+  "missing_tests": [],
+  "hidden_assumptions": [],
+  "residual_risks": [
+    "The exact deterministic smoothing and conservative estimation method for sparse bid buckets remains an implementation-level versioned algorithm choice, explicitly gated by golden tests in section 9.4."
+  ]
+}
