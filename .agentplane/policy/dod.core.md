@@ -9,7 +9,7 @@ The task is complete only if all core checks are true:
 4. Required task documentation sections are populated.
 5. Verification steps are executed and results recorded.
 6. Drift was either absent or explicitly re-approved.
-7. Final repo state contains no unintended tracked changes.
+7. Final repo state contains no unintended tracked changes or unreviewed untracked artifacts; final evidence includes `git status --short --untracked-files=all`.
 
 
 ## Required task README contract

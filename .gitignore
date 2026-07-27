@@ -17,3 +17,7 @@ AGENTS.md.bak-*
 CLAUDE.md.bak-*
 .agentplane/agents/*.bak-*
 .agentplane/policy/**/*.bak-*
+
+.agentplane/cache.sqlite
+.agentplane/cache.sqlite-wal
+.agentplane/cache.sqlite-shm

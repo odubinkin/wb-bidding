@@ -37,6 +37,7 @@ evaluator:
   required_checks:
     - "agentplane doctor"
     - "node .agentplane/policy/check-routing.mjs"
+  skepticism_level: "standard"
   verdicts:
     - "pass"
     - "rework"
@@ -66,8 +67,8 @@ execution:
     - "Credential, keychain, or SSH material changes."
 framework:
   cli:
-    expected_version: "0.5.0"
-  last_update: null
+    expected_version: "0.6.24"
+  last_update: "2026-07-27T10:27:35.212Z"
   source: "https://github.com/basilisk-labs/agentplane"
 in_scope_paths:
   - "**"

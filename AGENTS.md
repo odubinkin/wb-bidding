@@ -16,9 +16,8 @@ Detailed procedures live in canonical modules from `## CANONICAL DOCS`.
 ## PROJECT
 
 - Repository type: user project initialized with `agentplane`.
-- Gateway role: keep this file compact and deterministic; move scenario-specific details to policy modules.
 - CLI rule: prefer `ap` for compact agent-oriented commands; fall back to `agentplane`; if neither is available, stop and request installation guidance (do not invent repo-local entrypoints).
-- Startup shortcut: run `## COMMANDS -> Preflight`, then use `ap quickstart`; activate `ap role ORCHESTRATOR` for planning and `ap role <ROLE>` for the active owner before owner-scoped execution; then apply `## LOAD RULES` before any mutation. The guarded route is determined by `workflow.mode` in `.agentplane/WORKFLOW.md`; use `ap quickstart` as the canonical summary of the active path before mutating. In `branch_pr`, start from `ap work start ... --worktree`; in `direct`, stay in the current checkout and use the task lifecycle route.
+- Startup shortcut: run `## COMMANDS -> Preflight`; use `ap quickstart`; activate `ap role ORCHESTRATOR` for planning and `ap role <ROLE>` for execution; then apply `## LOAD RULES` before mutation. The guarded route is determined by `workflow.mode` in `.agentplane/WORKFLOW.md`; treat `ap task brief <task-id>` and `ap task next-action <task-id> --explain` as the route oracle: follow the emitted checkout, blocker, and next command instead of reconstructing workflow state.
 
 
 ## SOURCES OF TRUTH
@@ -52,8 +51,18 @@ Conflict rule:
 ap config show
 ap quickstart
 ap task list
+ap task active
 git status --short --untracked-files=no
+git status --short --untracked-files=all
 git rev-parse --abbrev-ref HEAD
+```
+
+### Route commands
+
+```bash
+ap task brief <task-id>
+ap task next-action <task-id> --explain
+ap work resume <task-id>
 ```
 
 ### Task lifecycle
@@ -71,8 +80,12 @@ ap finish <task-id> --author <ROLE> --body "Verified: ..." --result "..." --comm
 
 ```bash
 ap work start <task-id> --agent <ROLE> --slug <slug> --worktree
+ap task start-ready <task-id> --author <ROLE> --body "Start: ..."
+git commit -m "Implement <task>"
+ap task verify-show <task-id>
 ap pr open <task-id> --branch task/<task-id>/<slug> --author <ROLE>
-ap pr update <task-id>
+ap verify <task-id> --ok|--rework --by <ROLE> --note "..."
+ap evaluator run <task-id> --provenance human_supplied|evaluator_supplied --verdict pass|rework|blocked|human_review --summary "..." --finding "..." --evidence <path-or-check>
 ap integrate <task-id> --branch task/<task-id>/<slug> --run-verify
 ap finish <task-id> --author INTEGRATOR --body "Verified: ..." --result "..." --commit <git-rev> --close-commit
 ```
@@ -82,6 +95,7 @@ ap finish <task-id> --author INTEGRATOR --body "Verified: ..." --result "..." --
 ```bash
 ap vshow <task-id>
 ap verify <task-id> --ok|--rework --by <ROLE> --note "..." [--observation "..." --impact "..." --resolution "..."] [--local-only]
+ap evaluator run <task-id> --provenance human_supplied|evaluator_supplied --verdict pass|rework|blocked|human_review --summary "..." --finding "..." --evidence <path-or-check> [--missing-test "..." --hidden-assumption "..." --residual-risk "..."]
 ap incidents advise <task-id>
 ap incidents collect <task-id> --check
 ap doctor
@@ -98,8 +112,13 @@ node .agentplane/policy/check-routing.mjs
 
 ## SHARED PROMPT CONTRACT
 
-- Outcome-first, concise, evidence-first: state goal, success criteria, constraints, stop rules, and output; use procedure only for command contracts, state machines, or irreversible gates; ask one narrow question only when missing information changes scope, task graph, security, or irreversible action.
-- Retrieval/progress/cache: preamble before multi-step or tool-heavy work; load only matched policy, task README, Verify Steps, and relevant files; use incidents only for analogous scope/tags; final output names actions, checks, blockers/drift, and next approval; keep stable gateway/policy/role before dynamic context and never cache mutable task state.
+- Outcome contract: state the goal, success criteria, important constraints, required evidence, output, and stop rules; prescribe procedure only for command contracts, state machines, or irreversible gates.
+- Autonomy rule: inspection and analysis stay read-only; after plan approval, complete safe in-scope local edits and validation without extra pauses; require re-approval for external writes, destructive actions, or material scope expansion.
+- Ambiguity rule: ask one narrow question only when missing information changes scope, security, task graph, or an irreversible action; otherwise act under explicit assumptions.
+- Tool rule: load only matched policy, task README, Verify Steps, and relevant files; parallelize independent reads, keep dependent actions sequential, and try a bounded fallback when required evidence is empty or suspiciously narrow.
+- Route/persistence rule: for multi-step or tool-heavy work, send a short preamble, load `ap task brief <task-id>`, follow `ap task next-action <task-id> --explain`, and persist through implementation and verification unless blocked.
+- Response rule: lead with the outcome; preserve required facts, evidence, caveats, blockers, and next actions; remove repetition and optional background before removing decision-critical content.
+- Keep role prompts limited to role-specific behavior; they MUST NOT repeat this shared contract or full gateway command procedures.
 
 
 IF `.agentplane/user-instructions.md` exists THEN LOAD it as `gateway.user.instructions`.
@@ -134,8 +153,6 @@ Routing constraints:
 - MUST keep loaded policy set minimal (target: 2-4 files per task).
 - If routing is ambiguous, ask one clarifying question before loading extra modules.
 
----
-
 
 ## MUST / MUST NOT
 
@@ -150,30 +167,14 @@ Routing constraints:
 - MUST stage/commit only intentional changes for the active task scope.
 - MUST stop and request re-approval when scope, risk, or verification criteria materially drift.
 - MUST NOT let ORCHESTRATOR perform owner-scoped implementation or verification once a task owner is known, unless the approved plan explicitly makes ORCHESTRATOR the owner.
+- MUST treat user-authenticated GitHub actions as user-attributed publication and route post-merge fixes through a new task or explicit `post-merge-` branch or `followup` slug token.
 
-Role boundaries:
-
-- ORCHESTRATOR: preflight + plan + approvals.
-- PLANNER: executable task graph creation/update.
-- INTEGRATOR: base integration/finish in `branch_pr`.
-
----
+Role boundaries: ORCHESTRATOR = preflight + plan + approvals; PLANNER = executable task graph creation/update; INTEGRATOR = base integration/finish in `branch_pr`.
 
 
 ## CORE DOD
 
-A task is done only when all are true:
-
-1. Approved scope is satisfied; no unresolved drift.
-2. Required checks from loaded policy modules passed.
-3. Security and approval gates were respected.
-4. Traceability exists (task ID + updated task docs).
-5. Verification evidence is recorded.
-6. No unintended tracked changes remain.
-
-Detailed DoD rules are in `.agentplane/policy/dod.core.md`, `.agentplane/policy/dod.code.md`, and `.agentplane/policy/dod.docs.md`.
-
----
+A task is done only when approved scope, loaded DoD modules, security gates, task traceability, recorded verification, and clean final tracked state all pass. Detailed DoD rules live in `.agentplane/policy/dod.core.md`, `.agentplane/policy/dod.code.md`, and `.agentplane/policy/dod.docs.md`.
 
 
 ## SIZE BUDGET
@@ -182,8 +183,6 @@ Detailed DoD rules are in `.agentplane/policy/dod.core.md`, `.agentplane/policy/
 - Every policy markdown module under `.agentplane/policy/*.md` MUST stay <= 100 lines.
 - Worst-case loaded policy graph (always imports + all conditional imports) MUST stay <= 600 lines.
 - Enforced by `node .agentplane/policy/check-routing.mjs`.
-
----
 
 
 ## CANONICAL DOCS
@@ -199,8 +198,6 @@ Detailed DoD rules are in `.agentplane/policy/dod.core.md`, `.agentplane/policy/
 - DOC `.agentplane/policy/dod.docs.md`
 - DOC `.agentplane/policy/governance.md`
 - DOC `.agentplane/policy/incidents.md`
-
----
 
 
 ## REFERENCE EXAMPLES
