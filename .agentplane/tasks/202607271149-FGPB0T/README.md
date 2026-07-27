@@ -1,10 +1,11 @@
 ---
 id: "202607271149-FGPB0T"
 title: "Align specification with profit-only optimization"
-status: "DOING"
+result_summary: "Updated the technical specification for profit-only optimization and added complete single-item and asynchronous batch product economics API contracts."
+status: "DONE"
 priority: "med"
 owner: "DOCS"
-revision: 15
+revision: 17
 origin:
   system: "manual"
 depends_on: []
@@ -18,7 +19,7 @@ plan_approval:
   note: null
 verification:
   state: "ok"
-  updated_at: "2026-07-27T12:01:27.359Z"
+  updated_at: "2026-07-27T12:01:42.192Z"
   updated_by: "DOCS"
   note: "Verified documentation consistency, JSON examples, routing policy, repository health, and evaluator quality review."
   attempts: 0
@@ -43,11 +44,16 @@ quality_review:
     - "Legacy ACOS/ROAS objective modes and component-level UnitEconomics are removed; ACOS/ROAS remain diagnostics only, while missing product economics fails closed per nmId."
     - "Single-item PUT and asynchronous batch import define monetary serialization, versioning, optimistic locking, idempotency, validation, partial success, dry-run, recovery, audit, pagination, and Decision Engine concurrency effects."
     - "BidPerformanceObservation closes the data-model gap required to evaluate candidate profit at confirmed historical bids."
-commit: null
+commit:
+  hash: "ff1f9c6730e32fd85866cdeeecd24118171c5543"
+  message: "docs: revise profit optimization specification"
 comments:
   -
     author: "DOCS"
     body: "Start: continue direct-mode task in current checkout."
+  -
+    author: "DOCS"
+    body: "Verified: profit-only objective and product economics API contracts are documented, internally consistent, evaluator-approved, and pass all required checks."
 events:
   -
     type: "status"
@@ -74,8 +80,21 @@ events:
     author: "DOCS"
     state: "ok"
     note: "Verified documentation consistency, JSON examples, routing policy, repository health, and evaluator quality review."
+  -
+    type: "verify"
+    at: "2026-07-27T12:01:42.192Z"
+    author: "DOCS"
+    state: "ok"
+    note: "Verified documentation consistency, JSON examples, routing policy, repository health, and evaluator quality review."
+  -
+    type: "status"
+    at: "2026-07-27T12:01:42.581Z"
+    author: "DOCS"
+    from: "DOING"
+    to: "DONE"
+    note: "Verified: profit-only objective and product economics API contracts are documented, internally consistent, evaluator-approved, and pass all required checks."
 doc_version: 3
-doc_updated_at: "2026-07-27T12:01:27.657Z"
+doc_updated_at: "2026-07-27T12:01:42.582Z"
 doc_updated_by: "DOCS"
 description: "Revise docs/technical-specification.md so profit maximization is the only optimization objective, replace detailed unit economics with expectedContributionBeforeAds, and define single-item and batch import API contracts."
 sections:
@@ -163,6 +182,36 @@ sections:
     Attempts: 0
 
     VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-27T12:00:46.269Z, excerpt_hash=sha256:6792ff53d1a949361592a2c5c944d5ce38c215cb7472b6a3c617b82cc440d0f4
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607271149-FGPB0T/blueprint/resolved-snapshot.json
+    - old_digest: 9c477cefcc2420b0c149332e02ea210f82033580fdf654ade37f9229fcad5679
+    - current_digest: 9c477cefcc2420b0c149332e02ea210f82033580fdf654ade37f9229fcad5679
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202607271149-FGPB0T
+
+    DecisionContextRef:
+    - operator_action: stop
+    - can_execute_now: false
+    - safe_command: none
+    - diagnostic_command: none
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: false
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: none
+
+    ### 2026-07-27T12:01:42.192Z — VERIFY — ok
+
+    By: DOCS
+
+    Note: Verified documentation consistency, JSON examples, routing policy, repository health, and evaluator quality review.
+    Attempts: 0
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-27T12:01:27.657Z, excerpt_hash=sha256:6792ff53d1a949361592a2c5c944d5ce38c215cb7472b6a3c617b82cc440d0f4
 
     Details:
 
@@ -291,6 +340,36 @@ Note: Verified documentation consistency, JSON examples, routing policy, reposit
 Attempts: 0
 
 VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-27T12:00:46.269Z, excerpt_hash=sha256:6792ff53d1a949361592a2c5c944d5ce38c215cb7472b6a3c617b82cc440d0f4
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607271149-FGPB0T/blueprint/resolved-snapshot.json
+- old_digest: 9c477cefcc2420b0c149332e02ea210f82033580fdf654ade37f9229fcad5679
+- current_digest: 9c477cefcc2420b0c149332e02ea210f82033580fdf654ade37f9229fcad5679
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202607271149-FGPB0T
+
+DecisionContextRef:
+- operator_action: stop
+- can_execute_now: false
+- safe_command: none
+- diagnostic_command: none
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: false
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: none
+
+### 2026-07-27T12:01:42.192Z — VERIFY — ok
+
+By: DOCS
+
+Note: Verified documentation consistency, JSON examples, routing policy, repository health, and evaluator quality review.
+Attempts: 0
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-27T12:01:27.657Z, excerpt_hash=sha256:6792ff53d1a949361592a2c5c944d5ce38c215cb7472b6a3c617b82cc440d0f4
 
 Details:
 
