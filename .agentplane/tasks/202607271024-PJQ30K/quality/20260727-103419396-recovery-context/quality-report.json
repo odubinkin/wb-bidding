@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "task_id": "202607271024-PJQ30K",
+  "evaluator_id": "recovery-context",
+  "evaluator_profile": "EVALUATOR",
+  "generated_at": "2026-07-27T10:34:19.396Z",
+  "provenance": "evaluator_supplied",
+  "verdict": "pass",
+  "summary": "ТЗ содержательно покрывает утверждённый scope и пригодно для декомпозиции реализации: архитектура, WB API-контракт, алгоритмы, данные, отказоустойчивость, mock, эксплуатация и проверяемые критерии согласованы.",
+  "evaluated_sha": "48c49be2b5a93915385aedd8e82b8c980961a9c5",
+  "blueprint_digest": "312b816b04eae43c80b7bb2437c6187e40d511f22216d79bde09aaa6d8e28f1a",
+  "findings": [
+    "Все 14 исходных требований имеют явную трассировку; критические неоднозначности прибыли, денежных единиц, eventual consistency, rate limits и timeout-after-write разрешены нормативными правилами и acceptance criteria."
+  ],
+  "evidence_refs": [
+    ".agentplane/tasks/202607271024-PJQ30K/README.md",
+    "docs/technical-specification.md",
+    "node .agentplane/policy/check-routing.mjs: pass",
+    "ap doctor: pass",
+    "requirement audit: 18/18 evidence groups"
+  ],
+  "missing_tests": [],
+  "hidden_assumptions": [
+    "Фактические значения лимитов и схем WB API изменяемы и должны повторно проверяться перед реализацией и production-релизом, что прямо закреплено в ТЗ."
+  ],
+  "residual_risks": [
+    "Product owner ещё должен утвердить источник unit economics, policy defaults, attribution lag и production write enable; эти решения перечислены как pre-production gates, а не скрыты."
+  ]
+}
