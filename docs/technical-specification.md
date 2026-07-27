@@ -5,7 +5,7 @@
 | Поле | Значение |
 |---|---|
 | Назначение | Техническое задание на разработку сервиса автоматического управления ставками в кампаниях WB Продвижение |
-| Версия | 1.0 |
+| Версия | 1.1 |
 | Статус | Готово к декомпозиции и оценке разработки |
 | Дата актуализации сведений WB API | 27 июля 2026 года |
 | Язык продукта и документации | Русский |
@@ -37,20 +37,33 @@
 
 ### 2.1. Важное ограничение бизнес-цели
 
-Выручка не равна прибыли. Одних показов, кликов, заказов, расходов и рекламной выручки недостаточно для расчёта прибыли: необходимы как минимум себестоимость товара и переменные издержки.
+Выручка не равна прибыли. Одних показов, кликов, заказов, рекламных расходов и атрибутированной выручки недостаточно, чтобы определить, какое изменение ставки увеличит прибыль.
 
-Поэтому система ДОЛЖНА поддерживать для каждого артикула WB (`nmId`) модель unit economics:
+Единственная цель автоматического управления ставками в первой версии — максимизация ожидаемой маржинальной прибыли после рекламы. Оптимизация по заданному ACOS, ROAS, числу заказов или выручке как самостоятельная цель в первую версию НЕ ВХОДИТ. ACOS и ROAS рассчитываются только как диагностические показатели.
 
-- ожидаемая доля выкупа;
-- цена или ожидаемая выручка с выкупленной единицы;
-- себестоимость;
-- комиссия WB;
-- логистика и обратная логистика;
+Для каждого артикула WB (`nmId`) продавец ДОЛЖЕН предоставить `expectedContributionBeforeAdsMinor` — ожидаемый денежный вклад одной заказанной единицы до рекламных расходов. Значение уже учитывает в агрегированном виде:
+
+- вероятность выкупа, отмены и возврата;
+- ожидаемую фактически получаемую выручку;
+- закупочную или производственную себестоимость;
+- комиссию WB;
+- прямую и обратную логистику;
 - налоги;
-- другие переменные расходы;
-- требуемая минимальная прибыль.
+- прочие переменные расходы, изменяющиеся вместе с количеством заказов.
 
-Если полная unit economics отсутствует, система НЕ ДОЛЖНА заявлять, что оптимизирует прибыль. Для такого объекта разрешён только явно выбранный fallback-режим `TARGET_ACOS` или `TARGET_ROAS`. По умолчанию объект без unit economics исключается из автоматического применения ставок.
+Постоянные расходы, не зависящие от дополнительного заказа и рекламной ставки, в этот показатель не включаются. Значение задаётся в minor units валюты продавца на одну единицу, может быть положительным, нулевым или отрицательным и имеет период действия.
+
+Для окна статистики:
+
+```text
+expectedContributionBeforeAdsTotal =
+  expectedOrderedUnits * expectedContributionBeforeAdsMinor
+
+expectedProfit =
+  expectedContributionBeforeAdsTotal - expectedAdvertisingSpend
+```
+
+Если действующее значение `expectedContributionBeforeAdsMinor` отсутствует, невалидно или задано в другой валюте, объект получает решение `BLOCKED` с причиной `MISSING_PRODUCT_ECONOMICS` либо `INVALID_PRODUCT_ECONOMICS`. Ставка этого объекта не изменяется. Автоматический переход к другой цели оптимизации запрещён.
 
 ## 3. Границы продукта
 
@@ -79,7 +92,7 @@
 - WB Медиа и календарь акций;
 - ML, прогнозирование спроса, multi-armed bandit;
 - пользовательский web-интерфейс;
-- самостоятельное получение себестоимости из внешней ERP;
+- самостоятельное чтение product economics из внешней ERP; ERP или оператор могут передавать агрегированное значение через внутренний API;
 - изменение цен и скидок товара;
 - попытка обойти или увеличить лимиты WB API.
 
@@ -158,7 +171,7 @@
 | `sum_price` | атрибутированная сумма заказов, не гарантированная net revenue |
 | `canceled` | отмены, если поле доступно |
 
-`orderedUnits` для profit-формулы берётся из `shks`. Если `shks` отсутствует, fallback на `orders` разрешён только с флагом качества `ORDER_COUNT_AS_UNIT_FALLBACK` и отражается в explanation.
+`orderedUnits` для profit-формулы берётся из `shks`. Если `shks` отсутствует, fallback на `orders` разрешён только с флагом качества `ORDER_COUNT_AS_UNIT_FALLBACK` и отражается в explanation. Предоставленный продавцом `expectedContributionBeforeAdsMinor` должен иметь ту же семантику единицы, которая применяется к `orderedUnits`.
 
 ## 5. Архитектурные принципы
 
@@ -184,7 +197,7 @@ Executor Engine <─────────────────────
   ├── WB API write
   └── verification read ──> audit/result
 
-Internal REST API ──> policies, unit economics, pause/resume, audit
+Internal REST API ──> policies, product economics, pause/resume, audit
 Observability ──────> logs, /health/live, /health/ready, /metrics
 ```
 
@@ -202,7 +215,7 @@ Observability ──────> logs, /health/live, /health/ready, /metrics
 - `ExecutorModule`;
 - `ReconciliationModule`;
 - `PolicyModule`;
-- `UnitEconomicsModule`;
+- `ProductEconomicsModule`;
 - `AuditModule`;
 - `ObservabilityModule`;
 - `AdminApiModule`.
@@ -247,6 +260,8 @@ Data Sync Worker ДОЛЖЕН:
 
 Повторная загрузка одного периода должна быть идемпотентной: используется `upsert` по естественному составному ключу.
 
+Между последовательными статистическими snapshots система формирует interval deltas и связывает их с подтверждённой ставкой target. Интервал, внутри которого ставка изменялась либо была неизвестна, не используется для оценки bid response.
+
 ### 7.3. Шаг 3. Расчёт метрик
 
 Метрики рассчитываются только из PostgreSQL и сохраняются как версионированный snapshot:
@@ -265,9 +280,9 @@ Data Sync Worker ДОЛЖЕН:
 - CR click-to-order;
 - ACOS;
 - ROAS;
-- ожидаемая валовая прибыль;
-- ожидаемая прибыль после рекламы;
-- доля рекламных расходов в доступной марже;
+- ожидаемый вклад до рекламы;
+- ожидаемая прибыль после рекламы для текущей ставки;
+- оценки заказанных единиц, расхода и прибыли candidate bids;
 - полнота и свежесть данных.
 
 ### 7.4. Шаг 4. Решение
@@ -275,11 +290,13 @@ Data Sync Worker ДОЛЖЕН:
 Decision Engine ДОЛЖЕН:
 
 1. получить согласованный snapshot данных и активную версию политики;
-2. проверить допуски и свежесть;
-3. рассчитать целевую ставку;
-4. применить floor, cap, hysteresis, cooldown и ограничение скорости изменения;
-5. сформировать `NO_CHANGE`, `INCREASE`, `DECREASE` или `BLOCKED`;
-6. сохранить объяснение независимо от наличия изменения.
+2. разрешить действующую версию `ProductEconomics` для `sellerId + nmId`;
+3. проверить полноту, валюту, допуски и свежесть;
+4. построить допустимые candidate bids и оценить ожидаемую прибыль каждого;
+5. выбрать ставку с максимальной ожидаемой прибылью;
+6. применить floor, cap, hysteresis, cooldown и ограничение скорости изменения;
+7. сформировать `NO_CHANGE`, `INCREASE`, `DECREASE` или `BLOCKED`;
+8. сохранить объяснение независимо от наличия изменения.
 
 ### 7.5. Шаг 5. Постановка в очередь
 
@@ -373,32 +390,78 @@ Executor ДОЛЖЕН:
 - составной unique по измерениям дня;
 - партиционирование по `date` SHOULD применяться при подтверждённом объёме.
 
-#### `UnitEconomics`
+#### `BidPerformanceObservation`
 
+Один нормализованный интервал, в течение которого target имел одну подтверждённую ставку:
+
+- `targetId`;
+- `confirmedBidKopecks`;
+- `periodStart`, `periodEnd`;
+- `orderedUnitsDelta`, `ordersDelta`, `spendDeltaMinor`, `attributedRevenueDeltaMinor`;
+- `exposureMinutes`;
+- ссылки на начальный и конечный statistical snapshot;
+- `qualityFlags`;
+- `inputChecksum`, `createdAt`;
+- unique `(targetId, periodStart, periodEnd, confirmedBidKopecks)`.
+
+Observation создаётся только из неотрицательных согласованных deltas. Интервал с изменением ставки, разрывом статистики, reset счётчика или неподтверждённым bid получает quality flag и исключается из profit estimator. Эти наблюдения являются источником `minBidObservations` из раздела 9.
+
+#### `ProductEconomics`
+
+- `id UUID PK`;
 - `sellerId`, `nmId`;
-- `effectiveFrom`, `effectiveTo`;
-- `expectedBuyoutRatePpm`;
-- `cogsMinor`;
-- `commissionRatePpm`;
-- `logisticsMinor`;
-- `returnLogisticsMinor`;
-- `taxRatePpm`;
-- `otherVariableCostMinor`;
-- `desiredProfitRatePpm`;
+- `effectiveFrom`, `effectiveTo NULL`;
+- `currency`;
+- `expectedContributionBeforeAdsMinor BIGINT`;
 - `source MANUAL | IMPORT`;
-- `version`;
+- `sourceUpdatedAt NULL`;
+- `sourceReference NULL`;
+- `version BIGINT`;
+- `mutationKey`;
+- `inputChecksum`;
+- `createdAt`, `createdByActor`;
+- unique `(sellerId, nmId, version)`;
+- unique `(sellerId, mutationKey)`;
 - запрет пересекающихся периодов для одной пары `(sellerId, nmId)`.
 
-Коэффициенты хранятся в parts-per-million (`ppm`), где `1_000_000 = 100%`.
+`expectedContributionBeforeAdsMinor` хранится как signed `BIGINT`: отрицательное значение является допустимым экономическим сигналом, а не ошибкой данных. Версии неизменяемы. Исправление создаёт новую версию; использованная версия сохраняется в каждом snapshot и решении.
+
+#### `ProductEconomicsImport`
+
+- `id UUID PK`;
+- `sellerId`;
+- `status QUEUED | PROCESSING | COMPLETED | COMPLETED_WITH_ERRORS | FAILED`;
+- `dryRun`;
+- `idempotencyScope`, `idempotencyKey`, `requestChecksum`;
+- `totalItems`, `processedItems`, `validatedItems`, `succeededItems`, `failedItems`;
+- `leaseOwner`, `leaseUntil`, `attemptCount`, `lastError`;
+- `createdAt`, `startedAt`, `finishedAt`;
+- `createdByActor`, `correlationId`;
+- unique `(sellerId, idempotencyScope, idempotencyKey)`.
+
+#### `ProductEconomicsImportItem`
+
+- `importId`;
+- `rowId`;
+- `nmId`;
+- нормализованные входные поля и checksum строки;
+- `status PENDING | PROCESSING | VALIDATED | SUCCEEDED | FAILED`;
+- `errorCode`, `errorDetail`;
+- `expectedCurrentVersion`, `actualCurrentVersion`, `createdVersion`;
+- unique `(importId, rowId)`;
+- unique `(importId, nmId)`.
+
+Исходный токен авторизации не хранится. Payload и тексты ошибок проходят общую redaction policy.
 
 #### `BiddingPolicy`
 
 - область: seller, campaign или target;
 - приоритет: target > campaign > seller default;
-- `mode PROFIT | TARGET_ACOS | TARGET_ROAS | OBSERVE_ONLY`;
+- `executionMode APPLY | OBSERVE_ONLY`;
 - окна статистики;
 - minimum sample thresholds;
-- `targetAcosPpm` или `targetRoasPpm`;
+- `candidateBidStepKopecks`, `minBidObservations`;
+- `minExpectedProfitImprovementMinor`;
 - min/max bid;
 - max increase/decrease per cycle;
 - max daily change;
@@ -414,7 +477,10 @@ Executor ДОЛЖЕН:
 #### `MetricSnapshot`
 
 - ссылка на target и статистический период;
+- `productEconomicsId`, `productEconomicsVersion`;
+- `expectedContributionBeforeAdsMinor`;
 - все рассчитанные метрики;
+- оценки и profit score рассмотренных candidate bids;
 - completeness flags;
 - input checksum;
 - algorithm version;
@@ -529,60 +595,70 @@ CPM = spend * 1000 / views
 ACOS = spend / attributedRevenue
 ROAS = attributedRevenue / spend
 
-expectedBoughtUnits = orderedUnits * expectedBuyoutRate
-expectedReturnedUnits = orderedUnits - expectedBoughtUnits
-expectedNetRevenue =
-  attributedRevenue * expectedBuyoutRate
-
-expectedVariableCosts =
-  expectedBoughtUnits * (cogs + logistics + otherPerUnit)
-  + expectedNetRevenue * (commissionRate + taxRate)
-  + expectedReturnedUnits * returnLogistics
-
-contributionBeforeAds =
-  expectedNetRevenue - expectedVariableCosts
+expectedContributionBeforeAdsTotal =
+  expectedOrderedUnits * expectedContributionBeforeAdsMinor
 
 expectedProfit =
-  contributionBeforeAds - spend
-
-availableAdShare =
-  max(0, contributionBeforeAds / expectedNetRevenue - desiredProfitRate)
+  expectedContributionBeforeAdsTotal - expectedAdvertisingSpend
 ```
 
-Если конкретное поле WB описывает заказы, а не выкупы, название внутреннего поля ДОЛЖНО сохранять эту семантику. Запрещено автоматически называть `orders` продажами.
+`expectedContributionBeforeAdsMinor` уже содержит ожидание выкупа, возврата, полученной выручки и всех переменных расходов. Decision Engine НЕ ДОЛЖЕН повторно применять к нему buyout rate, комиссию, налог или логистику.
 
-### 9.4. Целевой ACOS для режима прибыли
+Если конкретное поле WB описывает заказы, а не выкупы, название внутреннего поля ДОЛЖНО сохранять эту семантику. Запрещено автоматически называть `orders` продажами. ACOS и ROAS сохраняются в snapshot и explanation, но не являются целями выбора ставки.
 
-При наличии unit economics:
+### 9.4. Оценка прибыли допустимых ставок
+
+Decision Engine строит конечное множество `candidateBids` из:
+
+- текущей подтверждённой ставки;
+- `max(policyMin, wbMinimumBid)`;
+- `policyMaxBid`;
+- исторически наблюдавшихся подтверждённых ставок объекта;
+- соседних ставок `currentBid ± candidateBidStepKopecks`, не выходящих за floor/cap;
+- exploration candidate, только если он разрешён разделом 9.7.
+
+Для каждой ставки детерминированный versioned estimator рассчитывает по наблюдениям того же target:
 
 ```text
-breakEvenAcos = contributionBeforeAds / expectedNetRevenue
-targetAcos = max(0, breakEvenAcos - desiredProfitRate)
+expectedOrderedUnits(candidateBid)
+expectedAdvertisingSpend(candidateBid)
+
+expectedProfit(candidateBid) =
+  expectedOrderedUnits(candidateBid)
+  * expectedContributionBeforeAdsMinor
+  - expectedAdvertisingSpend(candidateBid)
 ```
 
-`desiredProfitRate` задаётся относительно ожидаемой net revenue. Валидация запрещает отрицательные коэффициенты и `targetAcos > breakEvenAcos`.
+Оценка строится только по периодам, в которых фактическая ставка была подтверждена после последнего изменения. Наблюдения группируются по ставке и нормализуются на одинаковую длительность окна. Кандидат без `minBidObservations` и минимального объёма данных исключается, если это не отдельно разрешённый exploration candidate.
 
-### 9.5. Базовый регулятор ставки
+Источником оценки являются `BidPerformanceObservation`, а не произвольное сопоставление дневной статистики с последней известной ставкой.
 
-Для объекта с достаточной статистикой:
+Алгоритм первой версии не использует ML. Конкретный способ сглаживания соседних bid buckets, поправки на сезонность и формирования доверительной консервативной оценки ДОЛЖЕН иметь отдельную версию и golden tests. При одинаковых входах он обязан возвращать одинаковые оценки.
+
+### 9.5. Выбор ставки с максимальной ожидаемой прибылью
+
+Среди допустимых и обеспеченных данными кандидатов выбирается:
 
 ```text
-efficiencyRatio = targetAcos / actualAcos
-boundedRatio = clamp(
-  efficiencyRatio,
-  1 - maxDecreasePerCycle,
-  1 + maxIncreasePerCycle
-)
-rawBid = currentBid * boundedRatio
+bestBid = argmax(expectedProfit(candidateBid))
 ```
+
+Правила разрешения равенства:
+
+- сначала текущая ставка;
+- затем меньшая ставка;
+- затем меньшее абсолютное изменение.
+
+Изменение применяется, только если ожидаемая прибыль лучшего кандидата превышает ожидаемую прибыль текущей ставки минимум на `minExpectedProfitImprovementMinor`. Иначе результат `NO_CHANGE` с причиной `NO_PROFIT_IMPROVEMENT`. Абсолютный порог используется потому, что относительное улучшение неоднозначно при нулевой или отрицательной текущей прибыли.
 
 Правила:
 
-- если `actualAcos == 0` из-за нулевого расхода, ставка не повышается по этой формуле;
-- если есть расход, но нет выручки, применяется отдельное правило zero-conversion;
-- если отношение попадает в hysteresis-band, результат `NO_CHANGE`;
+- если только текущая ставка обеспечена достаточными наблюдениями, результат `NO_CHANGE` с причиной `INSUFFICIENT_BID_RESPONSE_DATA`;
+- нулевое или отрицательное `expectedContributionBeforeAdsMinor` является валидным входом, запрещает повышение и выбирает допустимый floor с причиной `NEGATIVE_CONTRIBUTION_BEFORE_ADS`, если текущая ставка выше floor;
+- если есть расход, но нет заказов, применяется отдельное правило zero-conversion;
 - округление ставки выполняется в копейках предсказуемым способом и тестируется;
 - итоговая ставка ограничивается `max(policyMin, wbMinimumBid)` и `policyMaxBid`;
+- ограничения скорости изменения могут заменить `bestBid` ближайшим допустимым кандидатом только после повторного расчёта его ожидаемой прибыли;
 - если WB minimum выше policy maximum, применение блокируется с `MIN_ABOVE_POLICY_MAX`.
 
 ### 9.6. Правило zero-conversion
@@ -594,7 +670,7 @@ rawBid = currentBid * boundedRatio
 
 ставка снижается на `zeroConversionDecreasePpm`, но не ниже допустимого floor.
 
-Если floor уже достигнут, решение `NO_CHANGE_AT_FLOOR`. Автоматическое удаление кластера или остановка кампании не выполняется.
+Защитная пониженная ставка добавляется как candidate bid и проходит обычные ограничения раздела 9.5. Для неё используется консервативная оценка с нулём ожидаемых заказов; повышение в zero-conversion сценарии запрещено. Если floor уже достигнут, решение `NO_CHANGE` с причиной `AT_FLOOR`. Автоматическое удаление кластера или остановка кампании не выполняется.
 
 ### 9.7. Правило недостатка трафика
 
@@ -610,13 +686,15 @@ rawBid = currentBid * boundedRatio
 
 По умолчанию `explorationEnabled=false`.
 
+Exploration является ограниченным способом получить данные для последующей максимизации прибыли, а не отдельной целью оптимизации. В explanation сохраняются ожидаемая стоимость эксперимента, его предел и причина недостатка bid-response данных.
+
 ### 9.8. Hysteresis, cooldown и ограничения
 
 - изменение меньше `minAbsoluteChangeKopecks` или `minRelativeChangePpm` не применяется;
 - после подтверждённого изменения объект не меняется в течение `cooldownMinutes`;
 - суммарное изменение от первой подтверждённой ставки текущих суток ограничено `maxDailyIncreasePpm` и `maxDailyDecreasePpm`;
 - policy min/max применяются после расчёта, но до округления к допустимой ставке;
-- внезапное изменение unit economics или policy version снимает cooldown только при явном флаге администратора;
+- внезапное изменение product economics или policy version снимает cooldown только при явном флаге администратора;
 - защитное снижение при превышении бюджета MAY игнорировать обычный cooldown, но не идемпотентность.
 
 ### 9.9. Budget guardrail
@@ -636,12 +714,16 @@ Decision Engine блокирует повышение и разрешает то
 Минимальный enum:
 
 - `PROFITABLE_INCREASE`;
-- `TARGET_BAND_NO_CHANGE`;
+- `MAX_PROFIT_CURRENT_BID`;
+- `NO_PROFIT_IMPROVEMENT`;
 - `UNPROFITABLE_DECREASE`;
 - `ZERO_CONVERSION_DECREASE`;
 - `INSUFFICIENT_DATA`;
+- `INSUFFICIENT_BID_RESPONSE_DATA`;
 - `STALE_DATA`;
-- `MISSING_UNIT_ECONOMICS`;
+- `MISSING_PRODUCT_ECONOMICS`;
+- `INVALID_PRODUCT_ECONOMICS`;
+- `NEGATIVE_CONTRIBUTION_BEFORE_ADS`;
 - `BUDGET_GUARDRAIL`;
 - `COOLDOWN`;
 - `BELOW_MIN_CHANGE`;
@@ -681,6 +763,7 @@ placement
 normalizedNormQuery
 targetBidKopecks
 inputSnapshotChecksum
+productEconomicsVersion
 policyVersion
 algorithmVersion
 ```
@@ -847,7 +930,7 @@ Decision Engine использует только snapshot, у которого:
 - завершены обязательные стадии;
 - `fetchedAt` не старше policy threshold;
 - период статистики непрерывен либо пробел явно допустим;
-- currency совпадает с unit economics;
+- currency совпадает с действующей версией product economics;
 - текущая ставка подтверждена после последнего отправленного решения.
 
 ### 13.3. Аномалии данных
@@ -880,7 +963,7 @@ Decision Engine использует только snapshot, у которого:
 
 1. защитное снижение при перерасходе;
 2. обычное снижение;
-3. обычное повышение;
+3. обычное повышение по убыванию ожидаемого прироста прибыли на единицу дополнительного рекламного расхода;
 4. exploration.
 
 Приоритет не отменяет fairness между seller accounts.
@@ -892,6 +975,7 @@ Executor повторно проверяет:
 - автоматизация не выключена;
 - решение не superseded;
 - политика всё ещё действительна;
+- версия product economics всё ещё является действующей;
 - current confirmed bid совпадает с исходной ставкой решения;
 - min bid не изменился;
 - decision age не превышает `MAX_DECISION_AGE_MINUTES`;
@@ -942,6 +1026,7 @@ Mock ДОЛЖЕН реализовать совместимое подмноже
 
 - profitable campaign;
 - unprofitable campaign;
+- bid-response history for several confirmed bids;
 - zero conversions;
 - insufficient data;
 - stale statistics;
@@ -1006,7 +1091,7 @@ API version prefix: `/api/v1`.
 
 - seller accounts: создать/изменить метаданные и secret reference;
 - policies: CRUD с неизменяемыми версиями;
-- unit economics: CRUD/import с валидацией периодов;
+- product economics: чтение, единичное версионированное изменение и асинхронный batch-импорт;
 - campaign automation: включить, выключить, observe-only;
 - manual resync/recalculate без обхода блокировок;
 - decisions: список, детали, explanation;
@@ -1014,6 +1099,234 @@ API version prefix: `/api/v1`.
 - audit events: фильтрация по seller/campaign/target/correlation ID.
 
 Токен WB никогда не возвращается API. Все mutating endpoints должны быть аутентифицированы, авторизованы и создавать audit event. Конкретный корпоративный identity provider выбирается до production; до этого API слушает только localhost/private network и защищается service token.
+
+### 17.1. Общий контракт product economics
+
+Во всех product economics endpoints:
+
+- чтение требует permission `product-economics:read`, single update — `product-economics:write`, batch import — `product-economics:import`;
+- `sellerId` является UUID внутреннего seller account;
+- `nmId` передаётся десятичной строкой положительного WB ID;
+- `expectedContributionBeforeAdsMinor` передаётся signed decimal string в minor units, например `"125000"` для `1250,00` RUB и `"-500"` для `-5,00` RUB;
+- `currency` является ISO 4217 кодом и должна совпадать с валютой seller account;
+- даты передаются как RFC 3339 UTC;
+- `effectiveTo`, если задан, строго больше `effectiveFrom`;
+- изменение никогда не перезаписывает использованную версию, а создаёт следующую immutable-версию;
+- два периода одной пары `(sellerId, nmId)` не могут пересекаться;
+- исторические `MetricSnapshot` и `BidDecision` после изменения не пересчитываются автоматически;
+- request-level ошибки возвращаются как `application/problem+json` с `type`, `title`, `status`, `code`, `detail`, `correlationId` и опциональным `errors[]`.
+- область уникальности `Idempotency-Key` — seller + HTTP method + canonical path; срок хранения результата не меньше audit retention.
+
+`expectedContributionBeforeAdsMinor` относится к одной единице `orderedUnits` из раздела 4.4 и уже включает ожидание невыкупа, возврата, полученной выручки, всех налогов и переменных расходов. API не принимает отдельные поля себестоимости, комиссии, логистики или налога.
+
+### 17.2. Чтение значения одной позиции
+
+```http
+GET /api/v1/sellers/{sellerId}/product-economics/{nmId}?at={RFC3339}
+Authorization: Bearer <service-token>
+```
+
+`at` опционален, default — текущее время. Ответ `200`:
+
+```json
+{
+  "id": "8af46341-08fd-4d2c-9d16-4911f1d2eacd",
+  "sellerId": "e11dbe92-55d9-4af8-94ab-129b2fd598de",
+  "nmId": "123456789",
+  "currency": "RUB",
+  "expectedContributionBeforeAdsMinor": "125000",
+  "effectiveFrom": "2026-08-01T00:00:00Z",
+  "effectiveTo": null,
+  "source": "MANUAL",
+  "sourceUpdatedAt": "2026-07-31T18:20:00Z",
+  "sourceReference": "operator-ticket-481",
+  "version": 4,
+  "createdAt": "2026-07-31T18:21:10Z",
+  "createdByActor": "service-account:pricing-admin"
+}
+```
+
+Ответ содержит `ETag: "product-economics-4"`. Если на момент `at` действующей версии нет, возвращается `404 PRODUCT_ECONOMICS_NOT_FOUND`.
+
+### 17.3. Единичное изменение позиции
+
+```http
+PUT /api/v1/sellers/{sellerId}/product-economics/{nmId}
+Authorization: Bearer <service-token>
+Idempotency-Key: <UUID>
+If-Match: "product-economics-4"
+Content-Type: application/json
+```
+
+Для первой версии позиции вместо `If-Match` обязателен `If-None-Match: *`. Тело:
+
+```json
+{
+  "currency": "RUB",
+  "expectedContributionBeforeAdsMinor": "137500",
+  "effectiveFrom": "2026-08-05T00:00:00Z",
+  "effectiveTo": null,
+  "sourceUpdatedAt": "2026-08-04T15:00:00Z",
+  "sourceReference": "operator-ticket-519",
+  "changeReason": "Updated expected contribution after supplier price change"
+}
+```
+
+Семантика:
+
+1. Сервер валидирует seller, валюту, signed `BIGINT`, даты, optimistic-lock header и отсутствие конфликтующей будущей версии.
+2. В одной транзакции открытая предыдущая версия закрывается на `effectiveFrom`, а новая версия вставляется с `source=MANUAL`.
+3. Если предыдущий период нельзя закрыть без пересечения или отрицательной длительности, запрос отклоняется целиком.
+4. Успешный ответ — `201 Created`, полное представление новой версии, `Location` на endpoint чтения с `at=effectiveFrom` и новый `ETag`.
+5. Повтор с тем же `Idempotency-Key` и тем же checksum возвращает тот же результат без новой версии и audit event. Повтор ключа с другим payload возвращает `409 IDEMPOTENCY_KEY_REUSED`.
+6. `If-Match` должен совпадать с версией, действующей непосредственно перед `effectiveFrom`; устаревшая версия возвращает `412 VERSION_MISMATCH`, отсутствие обязательного conditional header — `428 PRECONDITION_REQUIRED`.
+7. Каждое успешное изменение создаёт append-only audit event с before/after, actor, причиной, idempotency key и correlation ID.
+
+Дополнительные ошибки: `400 INVALID_JSON`, `401 UNAUTHENTICATED`, `403 FORBIDDEN`, `404 SELLER_NOT_FOUND`, `409 EFFECTIVE_PERIOD_OVERLAP`, `422 INVALID_NM_ID`, `422 CURRENCY_MISMATCH`, `422 VALUE_OUT_OF_BIGINT_RANGE`.
+
+### 17.4. Создание batch-импорта
+
+```http
+POST /api/v1/sellers/{sellerId}/product-economics/imports
+Authorization: Bearer <service-token>
+Idempotency-Key: <UUID>
+Content-Type: application/json
+```
+
+Один запрос содержит от 1 до 10 000 позиций:
+
+```json
+{
+  "dryRun": false,
+  "changeReason": "Scheduled ERP product economics refresh",
+  "items": [
+    {
+      "rowId": "erp-row-000001",
+      "nmId": "123456789",
+      "expectedCurrentVersion": 4,
+      "currency": "RUB",
+      "expectedContributionBeforeAdsMinor": "137500",
+      "effectiveFrom": "2026-08-05T00:00:00Z",
+      "effectiveTo": null,
+      "sourceUpdatedAt": "2026-08-04T15:00:00Z",
+      "sourceReference": "erp-export-2026-08-04"
+    },
+    {
+      "rowId": "erp-row-000002",
+      "nmId": "987654321",
+      "expectedCurrentVersion": 0,
+      "currency": "RUB",
+      "expectedContributionBeforeAdsMinor": "-2500",
+      "effectiveFrom": "2026-08-05T00:00:00Z",
+      "effectiveTo": null,
+      "sourceUpdatedAt": "2026-08-04T15:00:00Z",
+      "sourceReference": "erp-export-2026-08-04"
+    }
+  ]
+}
+```
+
+Правила:
+
+- `rowId` обязателен, уникален внутри импорта и возвращается во всех результатах;
+- `nmId` не может повторяться внутри одного импорта;
+- `changeReason` обязателен и сохраняется в audit;
+- `expectedCurrentVersion=0` означает, что у позиции ещё не должно существовать версии; иное значение должно совпадать с версией, действующей непосредственно перед `effectiveFrom`;
+- request-level валидация проверяет размер массива, уникальность `rowId`/`nmId`, типы и лимит payload `20 MiB` до постановки задания в очередь;
+- item-level валидация и запись выполняются worker-ом независимо для каждой позиции;
+- каждая успешная строка в своей транзакции закрывает предыдущий период и создаёт immutable-версию с `source=IMPORT`;
+- single update записывает `mutationKey` из canonical path и idempotency key; batch row использует `IMPORT:{importId}:{rowId}`, поэтому retry строки не создаёт дубликат;
+- ошибка одной строки не откатывает успешные строки; итоговый статус становится `COMPLETED_WITH_ERRORS`;
+- при `dryRun=true` выполняются все проверки, но версии product economics и их audit events не создаются;
+- один seller может иметь не более одного batch import в `PROCESSING`; остальные задания остаются `QUEUED`;
+- повтор с тем же idempotency key и payload возвращает тот же `importId`; другой payload с тем же ключом возвращает `409 IDEMPOTENCY_KEY_REUSED`;
+- request checksum, actor, correlation ID и агрегированные результаты сохраняются в audit.
+
+Request-level ошибки включают `400 EMPTY_ITEMS`, `400 DUPLICATE_ROW_ID`, `400 DUPLICATE_NM_ID`, `413 PAYLOAD_TOO_LARGE` и `422 TOO_MANY_ITEMS`. Item-level ошибки включают все ошибки single update, а также `VERSION_MISMATCH` и `ROW_PROCESSING_FAILED`.
+
+Ответ `202 Accepted`:
+
+```json
+{
+  "importId": "6bd2135d-3c3d-4a9e-ac0c-84600e9aaf31",
+  "sellerId": "e11dbe92-55d9-4af8-94ab-129b2fd598de",
+  "status": "QUEUED",
+  "dryRun": false,
+  "totalItems": 2,
+  "createdAt": "2026-08-04T15:02:00Z",
+  "links": {
+    "self": "/api/v1/sellers/e11dbe92-55d9-4af8-94ab-129b2fd598de/product-economics/imports/6bd2135d-3c3d-4a9e-ac0c-84600e9aaf31",
+    "items": "/api/v1/sellers/e11dbe92-55d9-4af8-94ab-129b2fd598de/product-economics/imports/6bd2135d-3c3d-4a9e-ac0c-84600e9aaf31/items"
+  }
+}
+```
+
+Импорт имеет состояния `QUEUED`, `PROCESSING`, `COMPLETED`, `COMPLETED_WITH_ERRORS`, `FAILED`. `FAILED` используется только для сбоя задания целиком; item-level ошибки дают `COMPLETED_WITH_ERRORS`.
+
+Для dry-run `validatedItems` содержит число строк `VALIDATED`, `succeededItems=0`; для обычного импорта `validatedItems=0`. Всегда выполняется инвариант `processedItems = validatedItems + succeededItems + failedItems`.
+
+Import worker использует lease. После рестарта задание с истёкшим lease продолжается с незавершённых строк. Повторная обработка уже успешной строки не создаёт новую версию благодаря уникальным import item, version и idempotency constraints. После исчерпания ограниченного числа job-level попыток задание получает `FAILED`, а уже успешно записанные строки не откатываются.
+
+### 17.5. Статус и результаты batch-импорта
+
+```http
+GET /api/v1/sellers/{sellerId}/product-economics/imports/{importId}
+Authorization: Bearer <service-token>
+```
+
+Ответ `200`:
+
+```json
+{
+  "importId": "6bd2135d-3c3d-4a9e-ac0c-84600e9aaf31",
+  "status": "COMPLETED_WITH_ERRORS",
+  "dryRun": false,
+  "totalItems": 1000,
+  "processedItems": 1000,
+  "validatedItems": 0,
+  "succeededItems": 998,
+  "failedItems": 2,
+  "createdAt": "2026-08-04T15:02:00Z",
+  "startedAt": "2026-08-04T15:02:03Z",
+  "finishedAt": "2026-08-04T15:02:17Z",
+  "requestChecksum": "sha256:...",
+  "errorSummary": {
+    "VERSION_MISMATCH": 1,
+    "CURRENCY_MISMATCH": 1
+  }
+}
+```
+
+Построчные результаты читаются с cursor pagination:
+
+```http
+GET /api/v1/sellers/{sellerId}/product-economics/imports/{importId}/items?status=FAILED&cursor={cursor}&limit=100
+Authorization: Bearer <service-token>
+```
+
+`limit` имеет диапазон `1..500`, default `100`. Элемент результата:
+
+```json
+{
+  "rowId": "erp-row-000417",
+  "nmId": "123456789",
+  "status": "FAILED",
+  "code": "VERSION_MISMATCH",
+  "detail": "Expected current version 3, actual version 4",
+  "actualCurrentVersion": 4,
+  "createdVersion": null
+}
+```
+
+Для успешной записанной строки `status=SUCCEEDED`, `createdVersion` содержит созданную версию, а `code` и `detail` равны `null`. Успешная строка dry-run имеет `status=VALIDATED` и `createdVersion=null`. Результаты batch import хранятся не меньше срока, заданного audit retention policy.
+
+### 17.6. Конкуренция и влияние на Decision Engine
+
+- Single update и строки batch import используют одну блокировку `(sellerId, nmId)` и не могут создать пересекающиеся версии.
+- Snapshot фиксирует `productEconomicsVersion`; изменение во время расчёта приводит к отмене результата и повторному расчёту.
+- Ещё не отправленное решение со старой версией product economics получает `SUPERSEDED`.
+- После `SENT` сначала завершается reconciliation; новая экономика применяется только к следующему решению.
+- Импорт не включает automation автоматически и не обходит `OBSERVE_ONLY`, cooldown, budget или write safety flags.
 
 ## 18. Конфигурация
 
@@ -1070,7 +1383,8 @@ Production logs — JSON в stdout/stderr. Обязательные поля:
 
 - исходная и целевая ставка;
 - метрики и окно;
-- unit economics version;
+- `productEconomicsVersion` и `expectedContributionBeforeAdsMinor`;
+- оценки ordered units, рекламных расходов и прибыли для всех рассмотренных candidate bids;
 - policy и algorithm version;
 - причины;
 - все применённые ограничения;
@@ -1110,6 +1424,9 @@ Audit events append-only. Изменение или удаление audit recor
 - `bidder_wb_429_total{endpoint}`;
 - `bidder_circuit_breaker_state{group}`;
 - `bidder_data_invalid_total{reason}`;
+- `bidder_product_economics_imports_total{status,dry_run}`;
+- `bidder_product_economics_import_items_total{status,reason}`;
+- `bidder_targets_without_product_economics`;
 - `bidder_audit_write_failures_total`.
 
 Нельзя помещать seller/campaign/nm/query в Prometheus labels из-за высокой кардинальности. Для этого используются logs и audit query.
@@ -1127,11 +1444,13 @@ Audit events append-only. Изменение или удаление audit recor
 - нет успешного scheduler run;
 - DB pool saturation;
 - audit write failure;
+- незавершённый product economics import или рост доли targets без действующей экономики;
 - неожиданный рост расходов.
 
 ## 21. Безопасность
 
 - Секреты не хранятся в git, env examples, логах и audit payload.
+- Product economics являются коммерчески чувствительными данными: значения не помещаются в обычные logs и Prometheus labels, а доступ к ним в Admin API и audit ограничивается отдельными permissions.
 - Предпочтительно хранить WB token во внешнем secret manager; допустимо зашифрованное хранение в БД с ключом вне БД.
 - Токен расшифровывается только перед запросом и не кешируется дольше необходимого.
 - Разные seller accounts изолируются во всех запросах к БД.
@@ -1228,7 +1547,11 @@ JSDoc НЕ ДОЛЖЕН пересказывать очевидный код и�
 
 - всех формул и нулевых знаменателей;
 - денежных округлений;
-- profit/ACOS/ROAS modes;
+- profit scoring и выбора максимума среди candidate bids;
+- положительного, нулевого и отрицательного `expectedContributionBeforeAdsMinor`;
+- immutable-версий и периодов product economics;
+- optimistic locking и идемпотентности single/batch economics endpoints;
+- частично успешного batch import и dry-run;
 - выборки окон и conversion lag;
 - zero-conversion;
 - floor/cap/hysteresis/cooldown/daily cap;
@@ -1246,6 +1569,7 @@ JSDoc НЕ ДОЛЖЕН пересказывать очевидный код и�
 - ставка никогда не ниже WB minimum;
 - ставка никогда не выше policy maximum;
 - при равных входах результат идентичен;
+- выбранная ставка имеет максимальную ожидаемую прибыль среди допустимых и обеспеченных данными кандидатов;
 - рост/снижение не превышает cap;
 - невалидные или stale данные никогда не создают write;
 - деньги не теряют копейки из-за float.
@@ -1256,6 +1580,10 @@ JSDoc НЕ ДОЛЖЕН пересказывать очевидный код и�
 
 - Prisma migrations;
 - upsert статистики;
+- формирование `BidPerformanceObservation` только для интервалов с одной подтверждённой ставкой;
+- immutable product economics versions и запрет пересекающихся периодов;
+- single update с optimistic locking;
+- идемпотентный batch import, dry-run, partial success и сериализация конкурирующих строк одного `nmId`;
 - транзакция decision + queue;
 - unique idempotency key;
 - `SKIP LOCKED` с несколькими workers;
@@ -1280,6 +1608,8 @@ JSDoc НЕ ДОЛЖЕН пересказывать очевидный код и�
 
 Один и тот же набор consumer contract tests запускается против mock и, где безопасно, sandbox. Production contract tests выполняют только read methods.
 
+Для внутренних product economics endpoints отдельные contract tests покрывают JSON schemas, decimal-string сериализацию `BIGINT`, conditional headers, idempotency, request-level и item-level ошибки, pagination и все состояния import job.
+
 ### 25.4. End-to-end tests
 
 Через `docker-compose.mock.yml`:
@@ -1300,7 +1630,11 @@ JSDoc НЕ ДОЛЖЕН пересказывать очевидный код и�
 14. superseded decision;
 15. observe-only;
 16. выключение automation;
-17. sandbox/prod write safety flags.
+17. sandbox/prod write safety flags;
+18. отсутствие product economics блокирует только соответствующий `nmId`;
+19. single economics update supersedes неотправленное старое решение;
+20. batch import с успешными и ошибочными строками;
+21. выбор максимальной ожидаемой прибыли по нескольким подтверждённым bid buckets.
 
 ### 25.5. Негативные и нагрузочные тесты
 
@@ -1374,7 +1708,7 @@ Production deployment SHOULD включать:
 
 ### AC-05. Прибыль
 
-Режим `PROFIT` не работает без unit economics. Формулы учитывают ожидаемый выкуп и переменные затраты. Fallback назван ACOS/ROAS, а не прибылью.
+Decision Engine выбирает допустимую ставку с максимальной детерминированно оценённой прибылью. Без действующего `expectedContributionBeforeAdsMinor` объект блокируется; переключение на другую цель не происходит. ACOS и ROAS используются только как диагностические метрики.
 
 ### AC-06. Guardrails
 
@@ -1420,6 +1754,10 @@ Lint подтверждает обязательный JSDoc; комплект �
 
 Нагрузочный сценарий 10 000 кампаний / 100 000 targets завершается без потери данных, нарушения лимитов и неограниченного роста памяти.
 
+### AC-17. Product economics API
+
+Единичный `PUT` создаёт immutable-версию с conditional update и идемпотентностью. Batch endpoint принимает до 10 000 позиций, возвращает `202`, обрабатывает строки асинхронно и предоставляет агрегированный статус и построчные результаты. Dry-run не изменяет product economics; частичная ошибка не откатывает успешные строки.
+
 ## 28. Матрица трассировки исходных требований
 
 | № | Исходное требование | Разделы | Критерии |
@@ -1438,6 +1776,8 @@ Lint подтверждает обязательный JSDoc; комплект �
 | 12 | Постоянно работающий scheduler service | 5, 11 | AC-01, AC-03 |
 | 13 | Семь шагов цикла | 7 | AC-03–AC-09 |
 | 14 | Data Sync, Decision, queue, Executor | 6, 7, 13, 14 | AC-03–AC-09 |
+| 15 | Максимизация прибыли продавца | 2.1, 8, 9 | AC-04, AC-05 |
+| 16 | Предоставление экономики множества позиций | 8, 17 | AC-17 |
 
 ## 29. Этапы реализации
 
@@ -1468,10 +1808,10 @@ Lint подтверждает обязательный JSDoc; комплект �
 
 ### Этап 3. Decision Engine
 
-- unit economics;
+- product economics и batch import;
 - policy versioning;
 - metrics;
-- deterministic rules;
+- детерминированная оценка прибыли candidate bids;
 - explanation и property-based tests;
 - observe-only.
 
@@ -1500,8 +1840,8 @@ Lint подтверждает обязательный JSDoc; комплект �
 |---|---|
 | WB меняет методы и лимиты | Версионировать endpoint profile, проверять release notes, contract tests |
 | Статистика и ставка видимы с задержкой | Conversion lag, delayed verification, reconciliation |
-| Рекламные заказы не равны выкупам | Unit economics с buyout rate; не называть orders продажами |
-| Нет себестоимости | Блокировать PROFIT или явно использовать ACOS/ROAS |
+| Рекламные заказы не равны выкупам | Требовать, чтобы `expectedContributionBeforeAdsMinor` уже учитывал ожидаемый невыкуп и возврат; не называть orders продажами |
+| Нет product economics | Блокировать изменение ставки конкретного `nmId`; не переключать цель оптимизации |
 | Ручное изменение конфликтует с bidder | Pre-send compare, audit, cancel + recalculate |
 | Две реплики превышают общий лимит | Distributed limiter по seller |
 | HTTP success без фактического изменения | Read-after-write verification |
@@ -1511,7 +1851,7 @@ Lint подтверждает обязательный JSDoc; комплект �
 
 До production владелец продукта ДОЛЖЕН утвердить:
 
-1. источник и точность unit economics;
+1. источник, семантику и допустимую погрешность `expectedContributionBeforeAdsMinor`;
 2. attribution window и conversion lag;
 3. допустимые default policy values;
 4. лимиты дневного расхода;
@@ -1525,7 +1865,7 @@ Lint подтверждает обязательный JSDoc; комплект �
 
 Система считается готовой, только когда:
 
-1. выполнены AC-01–AC-16;
+1. выполнены AC-01–AC-17;
 2. нет известных нарушений денежных единиц и WB rate limits;
 3. все критические тесты и CI gates зелёные;
 4. sandbox soak завершён без необъяснённых расхождений;
