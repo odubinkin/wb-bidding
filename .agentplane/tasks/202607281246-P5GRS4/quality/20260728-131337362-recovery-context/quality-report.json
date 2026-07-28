@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "task_id": "202607281246-P5GRS4",
+  "evaluator_id": "recovery-context",
+  "evaluator_profile": "EVALUATOR",
+  "generated_at": "2026-07-28T13:13:37.362Z",
+  "verdict": "pass",
+  "summary": "Specification changes cover every approved review finding and preserve the exclusions selected by the user.",
+  "evaluated_sha": "28c729937d4bbc6de2eb4915e6645a8481460c69",
+  "blueprint_digest": "70370dec6348a09c547ccb7c6c38442066ba6cde74cf859d030bf7d9b9be80be",
+  "findings": [
+    "Document contracts are internally consistent: immutable env binding, non-overlapping current-state sync, directional guards, bounded write recovery, live pre-write reads, lower-only exploration, exact cluster DELETE audit, NFC query identity, and explicit acceptance tests."
+  ],
+  "evidence_refs": [
+    ".agentplane/tasks/202607281246-P5GRS4/README.md",
+    "docs/technical-specification.md"
+  ],
+  "missing_tests": [],
+  "hidden_assumptions": [],
+  "residual_risks": []
+}

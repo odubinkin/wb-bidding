@@ -4,7 +4,7 @@ title: "Revise WB bidder technical specification after API review"
 status: "DOING"
 priority: "high"
 owner: "ORCHESTRATOR"
-revision: 5
+revision: 6
 origin:
   system: "manual"
 depends_on: []
@@ -22,6 +22,22 @@ verification:
   updated_by: "ORCHESTRATOR"
   note: "Technical specification updated for all approved P0/P1/P2 findings; consistency, routing, and workspace checks pass."
   attempts: 0
+quality_review:
+  state: "pass"
+  updated_at: "2026-07-28T13:13:37.362Z"
+  updated_by: "EVALUATOR"
+  note: "Specification changes cover every approved review finding and preserve the exclusions selected by the user."
+  evaluated_sha: "28c729937d4bbc6de2eb4915e6645a8481460c69"
+  blueprint_digest: "70370dec6348a09c547ccb7c6c38442066ba6cde74cf859d030bf7d9b9be80be"
+  evidence_refs:
+    - ".agentplane/tasks/202607281246-P5GRS4/README.md"
+    - ".agentplane/tasks/202607281246-P5GRS4/quality/20260728-131337362-recovery-context/quality-report.json"
+    - ".agentplane/tasks/202607281246-P5GRS4/quality/20260728-131337362-recovery-context/evaluator-prompt.md"
+    - ".agentplane/tasks/202607281246-P5GRS4/quality/20260728-131337362-recovery-context/evaluator-opinion.md"
+    - ".agentplane/tasks/202607281246-P5GRS4/blueprint/resolved-snapshot.json"
+    - "docs/technical-specification.md"
+  findings:
+    - "Document contracts are internally consistent: immutable env binding, non-overlapping current-state sync, directional guards, bounded write recovery, live pre-write reads, lower-only exploration, exact cluster DELETE audit, NFC query identity, and explicit acceptance tests."
 commit: null
 comments:
   -
