@@ -1,10 +1,12 @@
 ---
 id: "202607280917-7XFVZX"
 title: "Define decision checksum and idempotency"
-status: "BLOCKED"
+result_summary: "Defined deterministic checksum-based decision deduplication with UUIDv7 identity."
+risk_level: "low"
+status: "DONE"
 priority: "med"
 owner: "DOCS"
-revision: 21
+revision: 23
 origin:
   system: "manual"
 depends_on: []
@@ -43,7 +45,9 @@ quality_review:
     - "The old nine-field BidDecision idempotency formula is removed; decisionInputChecksum alone is unique and retries reuse decisionId."
     - "inputSnapshotChecksum and decisionInputChecksum have explicit domains, SHA-256 formula, RFC 8785 canonicalization, normalization rules, included inputs, and versioning requirements."
     - "Product economics HTTP Idempotency-Key contracts remain unchanged."
-commit: null
+commit:
+  hash: "20104929f60ecd1c03550c257557e46795578642"
+  message: "🚧 7XFVZX task: Define decision checksum idempotency"
 comments:
   -
     author: "DOCS"
@@ -63,6 +67,12 @@ comments:
   -
     author: "DOCS"
     body: "Blocked: Deterministic closeout requires the evaluator and recovery task artifacts to be committed first; specification scope is unchanged."
+  -
+    author: "DOCS"
+    body: "Start: continue direct-mode task in current checkout."
+  -
+    author: "DOCS"
+    body: "Verified: Deterministic snapshot and decision checksum contracts are defined; UUID identity, checksum uniqueness, repository checks, and evaluator review all pass."
 events:
   -
     type: "status"
@@ -124,8 +134,22 @@ events:
     from: "DOING"
     to: "BLOCKED"
     note: "Blocked: Deterministic closeout requires the evaluator and recovery task artifacts to be committed first; specification scope is unchanged."
+  -
+    type: "status"
+    at: "2026-07-28T09:25:56.044Z"
+    author: "DOCS"
+    from: "BLOCKED"
+    to: "DOING"
+    note: "Start: continue direct-mode task in current checkout."
+  -
+    type: "status"
+    at: "2026-07-28T09:26:12.233Z"
+    author: "DOCS"
+    from: "DOING"
+    to: "DONE"
+    note: "Verified: Deterministic snapshot and decision checksum contracts are defined; UUID identity, checksum uniqueness, repository checks, and evaluator review all pass."
 doc_version: 3
-doc_updated_at: "2026-07-28T09:25:38.519Z"
+doc_updated_at: "2026-07-28T09:26:12.234Z"
 doc_updated_by: "DOCS"
 description: "Specify deterministic decisionInputChecksum computation and replace the composite BidDecision idempotency key with UUID identity plus checksum-based uniqueness."
 sections:
