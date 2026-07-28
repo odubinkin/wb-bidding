@@ -70,6 +70,7 @@ describeWithDatabase('mock HTTP to durable verified write flow', () => {
       '202607281500_stage2_sync_evidence',
       '202607281600_stage3_decision_engine',
       '202607281700_stage4_write_pipeline',
+      '202607291000_stage5_production_runtime',
     ]) {
       await pool.query(
         await readFile(

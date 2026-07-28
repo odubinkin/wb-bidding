@@ -36,6 +36,33 @@ docker compose -f docker-compose.mock.yml up --build
 docker compose -f docker-compose.mock.yml down
 ```
 
+## Production-топология в безопасном read-only режиме
+
+Скопируйте `.env.example` во внешнее секретное хранилище/локальный `.env`, замените все
+`replace-*`/`missing-token` и оставьте `WB_API_WRITE_ENABLED=false`:
+
+```bash
+docker compose up --build -d
+docker compose ps
+curl --fail http://localhost:3000/health/live
+curl --fail http://localhost:3000/health/ready
+curl --fail -H "Authorization: Bearer ${ADMIN_API_SERVICE_TOKEN}" \
+  http://localhost:3000/docs-json
+```
+
+- bidder Swagger UI: <http://localhost:3000/docs>;
+- bidder OpenAPI JSON: <http://localhost:3000/docs-json>;
+- readiness: <http://localhost:3000/health/ready>;
+- metrics: <http://localhost:3000/metrics>.
+
+Production Compose не содержит mock. Включение writes требует всех gates из
+[документации безопасности](docs/security.md) и зафиксированного решения владельца продукта.
+Остановка без удаления PostgreSQL volume:
+
+```bash
+docker compose down
+```
+
 ## Только WB mock
 
 ```bash
@@ -66,12 +93,20 @@ docker compose -f docker-compose.mock-only.yml down
 [документации синхронизации](docs/data-synchronization.md).
 Алгоритм прибыли, exact arithmetic, bounds и exploration описаны в
 [документации Decision Engine](docs/decision-engine.md).
+Общая схема компонентов приведена в [архитектуре](docs/architecture.md), эксплуатация — в
+[runbook](docs/runbook.md), а текущий статус приёмки — в
+[матрице evidence](docs/acceptance-evidence.md).
 
 ## Локальная проверка
 
 ```bash
 corepack pnpm install --frozen-lockfile
 pnpm run quality
+DATABASE_URL=postgresql://... pnpm run test:integration
+DATABASE_URL=postgresql://... pnpm run test:load
+DATABASE_URL=postgresql://... pnpm run test:runbook
+pnpm run docs:check
+pnpm run security:secrets
 ```
 
 Настройки приведены в `.env.example` и подробно описаны в

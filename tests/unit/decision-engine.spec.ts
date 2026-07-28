@@ -125,6 +125,29 @@ describe('rules-v1 decisions', () => {
     expect(decision.decisionInputChecksum).toMatch(/^[a-f0-9]{64}$/);
   });
 
+  it('uses supported CPM recommendation hints without extrapolating or enabling CPC hints', () => {
+    const base = {
+      policy: decisionPolicy({ candidateBidStepPpm: 300_000 }),
+      recommendationBidHintsMinor: Object.freeze([110n, 500n]),
+      recommendationSnapshotChecksum: 'c'.repeat(64),
+      recommendationSnapshotFetchedAt: new Date('2026-07-28T11:58:00.000Z'),
+    };
+    const cpm = decideBid(decisionInput(base));
+    const cpc = decideBid(decisionInput({ ...base, paymentType: 'CPC' }));
+
+    expect(cpm.explanation.candidates.map((candidate) => candidate.bidMinor)).toContain(110n);
+    expect(cpm.explanation.candidates.map((candidate) => candidate.bidMinor)).not.toContain(500n);
+    expect(cpc.explanation.candidates.map((candidate) => candidate.bidMinor)).not.toContain(110n);
+    expect(cpm.decisionInputChecksum).not.toBe(
+      decideBid(
+        decisionInput({
+          policy: base.policy,
+          recommendationBidHintsMinor: Object.freeze([]),
+        }),
+      ).decisionInputChecksum,
+    );
+  });
+
   it('is canonical and deterministic across object insertion order', () => {
     expect(scopedChecksum('input-snapshot-v1', { b: 2n, a: 1n })).toBe(
       scopedChecksum('input-snapshot-v1', { a: 1n, b: 2n }),

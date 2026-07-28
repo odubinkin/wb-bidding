@@ -1,7 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import type { Server } from 'node:http';
 import request from 'supertest';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import type { INestApplication } from '@nestjs/common';
 
@@ -11,6 +11,7 @@ import {
   InMemoryRateLimitStore,
   WbApiClient,
   WbRateLimiter,
+  campaignStatisticsResponseSchema,
   campaignDetailsResponseSchema,
   selectRateLimitProfile,
 } from '@wb-bidder/wb-api';
@@ -145,6 +146,16 @@ describe('WB deterministic mock consumer contract', () => {
       .parse(advance.body as unknown);
     expect(advanceBody.sourceDates).toEqual(['2026-07-28', '2026-07-29']);
     expect(advanceBody.checksum).toMatch(/^[a-f0-9]{64}$/u);
+
+    const currentDay = await request(server)
+      .get('/adv/v3/fullstats?ids=10001&begin=2026-07-27&end=2026-07-30')
+      .set(auth)
+      .expect(200);
+    expect(
+      campaignStatisticsResponseSchema
+        .parse(currentDay.body as unknown)[0]
+        ?.days.some((day) => day.date.startsWith('2026-07-30')),
+    ).toBe(true);
 
     const after = await request(server)
       .get('/api/advert/v2/adverts?ids=10001')
@@ -362,6 +373,8 @@ describe('WB deterministic mock consumer contract', () => {
   it('uses a refillable token bucket and accepts only stricter deterministic quota faults', async () => {
     const server = application.getHttpServer() as unknown as Server;
     const auth = { Authorization: 'mock-test-token' };
+    const quotaNow = Date.now();
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(quotaNow);
     await request(server).post('/__mock/reset').expect(201);
     await request(server)
       .post('/__mock/faults')
@@ -387,6 +400,8 @@ describe('WB deterministic mock consumer contract', () => {
       .post('/__mock/time/advance')
       .send({ days: 0, finalizeStatistics: false, hours: 0, minutes: 1 })
       .expect(201);
+    await request(server).get('/adv/v1/promotion/count').set(auth).expect(429);
+    nowSpy.mockReturnValue(quotaNow + 10_001);
     await request(server).get('/adv/v1/promotion/count').set(auth).expect(200);
 
     await request(server)
@@ -401,6 +416,7 @@ describe('WB deterministic mock consumer contract', () => {
         ],
       })
       .expect(400);
+    nowSpy.mockRestore();
   });
 });
 

@@ -3,9 +3,11 @@ import type { Pool, PoolClient } from 'pg';
 
 import { accountSettingsChecksum, validateAccountBindingTransition } from './binding.js';
 import { evidenceChecksum } from './checksum.js';
+import { assessPerformanceDay } from './evidence.js';
 import type {
   AccountBindingCandidate,
   ExistingAccountBinding,
+  NormalizedStatisticDay,
   PerformanceDayAssessment,
   PerformanceDayCandidate,
   SyncDataKind,
@@ -91,12 +93,62 @@ export interface CampaignWorkItem {
     readonly minimumBidConfirmedAt: Date | null;
     readonly nmId: bigint;
     readonly placement: 'COMBINED' | 'RECOMMENDATIONS' | 'SEARCH';
+    /** Last recommendation observation for this campaign/article. */
+    readonly recommendationFetchedAt: Date | null;
     readonly targetId: string;
   }[];
   /** Payment type. */
   readonly paymentType: 'CPC' | 'CPM' | 'UNKNOWN';
   /** WB campaign identifier. */
   readonly wbCampaignId: bigint;
+}
+
+/**
+ * Optional bounded filters for an operator-requested synchronization.
+ */
+export interface CampaignWorkScope {
+  /** Campaign UUIDs selected by the operator. */
+  readonly campaignIds?: readonly string[];
+  /** Target UUIDs selected by the operator. */
+  readonly targetIds?: readonly string[];
+}
+
+/**
+ * One exact app/nm leaf belonging to a versioned WB campaign day.
+ */
+export interface CampaignStatisticLeafWrite {
+  /** WB application/platform dimension. */
+  readonly appType: number;
+  /** Local campaign UUID. */
+  readonly campaignId: string;
+  /** Read time. */
+  readonly fetchedAt: Date;
+  /** WB article identifier. */
+  readonly nmId: bigint;
+  /** Exact normalized counters. */
+  readonly statistic: NormalizedStatisticDay;
+  /** Checksum of the complete campaign/day content version. */
+  readonly sourceVersion: string;
+  /** Scheduler run UUID. */
+  readonly syncRunId: string;
+  /** WB campaign identifier. */
+  readonly wbCampaignId: bigint;
+}
+
+/**
+ * Fixed finalization policy selected from validated deployment configuration.
+ */
+export interface PerformanceFinalizationConfiguration {
+  /** Maximum continuous bid-state gap. */
+  readonly bidStateMaxObservationGapMinutes: number;
+  /** Full days to wait for conversion attribution. */
+  readonly conversionLagDays: number;
+  /** Stable equal reads required. */
+  readonly dayFinalizationStableReads: number;
+  /** Minimum minutes spanned by stable reads. */
+  readonly dayFinalizationStableMinutes: number;
+  /** External-write provenance guarantee. */
+  readonly externalWriteControlMode: 'EXCLUSIVE' | 'SHARED';
 }
 
 /**
@@ -476,15 +528,25 @@ export class DataSyncRepository {
    *
    * @param afterWbCampaignId - Exclusive cursor, or zero for the first page.
    * @param limit - Bounded page size.
+   * @param scope - Optional operator-bounded campaign/target filters.
+   * @param includeReadyCampaigns - Whether status 4 is eligible for current-state refresh.
    * @returns Work rows ordered by WB campaign ID.
    */
   public async loadCampaignWorkPage(
     afterWbCampaignId: bigint,
     limit: number,
+    scope: CampaignWorkScope = {},
+    includeReadyCampaigns = false,
   ): Promise<readonly CampaignWorkItem[]> {
     if (!Number.isInteger(limit) || limit < 1 || limit > 5_000) {
       throw new Error('Campaign work page limit is out of range');
     }
+    const campaignIds =
+      scope.campaignIds === undefined || scope.campaignIds.length === 0
+        ? null
+        : [...scope.campaignIds];
+    const targetIds =
+      scope.targetIds === undefined || scope.targetIds.length === 0 ? null : [...scope.targetIds];
     const result = await this.pool.query<CampaignWorkRow>(
       `SELECT c."id" AS "campaignId", c."wbCampaignId", c."bidType", c."paymentType",
               c."detailsChecksum", c."detailsFetchedAt",
@@ -497,21 +559,40 @@ export class DataSyncRepository {
                     'currentBidChecksum', t."currentBidChecksum",
                     'currentBidConfirmedAt', t."lastConfirmedAt",
                     'minimumBidChecksum', t."minimumBidChecksum",
-                    'minimumBidConfirmedAt', t."minimumBidConfirmedAt"
+                    'minimumBidConfirmedAt', t."minimumBidConfirmedAt",
+                    'recommendationFetchedAt', (
+                      SELECT MAX(recommendation."fetchedAt")
+                        FROM "SyncSourceSnapshot" recommendation
+                       WHERE recommendation."campaignId" = c."id"
+                         AND recommendation."dataKind" = 'BID_RECOMMENDATION'
+                         AND recommendation."valid" = true
+                         AND recommendation."normalizedData"->>'nmId' = t."nmId"::text
+                    )
                   ) ORDER BY t."nmId", t."placement"
                 ) FILTER (WHERE t."id" IS NOT NULL),
                 '[]'::jsonb
               ) AS targets
          FROM "Campaign" c
          LEFT JOIN "CampaignTarget" t
-           ON t."campaignId" = c."id" AND t."targetKind" = 'CARD'
+           ON t."campaignId" = c."id"
+          AND t."targetKind" = 'CARD'
+          AND ($4::uuid[] IS NULL OR t."id" = ANY($4::uuid[]))
         WHERE c."supported" = true
-          AND c."status" <> 4
+          AND ($5::boolean OR c."status" <> 4)
           AND c."wbCampaignId" > $1
+          AND ($3::uuid[] IS NULL OR c."id" = ANY($3::uuid[]))
+          AND (
+            $4::uuid[] IS NULL
+            OR EXISTS (
+              SELECT 1 FROM "CampaignTarget" scoped
+               WHERE scoped."campaignId" = c."id"
+                 AND scoped."id" = ANY($4::uuid[])
+            )
+          )
         GROUP BY c."id"
         ORDER BY c."wbCampaignId"
         LIMIT $2`,
-      [afterWbCampaignId.toString(), limit],
+      [afterWbCampaignId.toString(), limit, campaignIds, targetIds, includeReadyCampaigns],
     );
     return Object.freeze(
       result.rows.map((row) =>
@@ -536,6 +617,10 @@ export class DataSyncRepository {
                     : new Date(target.minimumBidConfirmedAt),
                 nmId: BigInt(target.nmId),
                 placement: target.placement,
+                recommendationFetchedAt:
+                  target.recommendationFetchedAt === null
+                    ? null
+                    : new Date(target.recommendationFetchedAt),
                 targetId: target.targetId,
               }),
             ),
@@ -700,13 +785,15 @@ export class DataSyncRepository {
           AND "campaignId" IS NOT DISTINCT FROM $2
           AND "targetId" IS NOT DISTINCT FROM $3
           AND "sourceDate" IS NOT DISTINCT FROM $4::date
-          AND "sourceChecksum" = $5`,
+          AND "sourceChecksum" = $5
+          AND "syncRunId" = $6`,
       [
         snapshot.dataKind,
         snapshot.campaignId ?? null,
         snapshot.targetId ?? null,
         snapshot.sourceDate ?? null,
         snapshot.sourceChecksum,
+        snapshot.syncRunId,
       ],
     );
     const existingId = existing.rows[0]?.id;
@@ -714,6 +801,137 @@ export class DataSyncRepository {
       throw new Error('Source snapshot idempotency lookup failed');
     }
     return existingId;
+  }
+
+  /**
+   * Loads the most recent observed campaign-statistics source state.
+   *
+   * @param campaignId - Local campaign UUID.
+   * @returns Exact source evidence or null when no response has been observed.
+   */
+  public async loadLatestCampaignStatisticsEvidence(campaignId: string): Promise<{
+    readonly fetchedAt: Date;
+    readonly sourceChecksum: string;
+    readonly valid: boolean;
+  } | null> {
+    const result = await this.pool.query<{
+      fetchedAt: Date;
+      sourceChecksum: string;
+      valid: boolean;
+    }>(
+      `SELECT "fetchedAt", "sourceChecksum", "valid"
+         FROM "SyncSourceSnapshot"
+        WHERE "campaignId" = $1 AND "dataKind" = 'CAMPAIGN_STATISTICS'
+        ORDER BY "fetchedAt" DESC, "createdAt" DESC
+        LIMIT 1`,
+      [campaignId],
+    );
+    const row = result.rows[0];
+    return row === undefined
+      ? null
+      : Object.freeze({
+          fetchedAt: new Date(row.fetchedAt),
+          sourceChecksum: row.sourceChecksum,
+          valid: row.valid,
+        });
+  }
+
+  /**
+   * Loads the latest verified target-level current-day spend source.
+   *
+   * @param targetId - Local target UUID.
+   * @returns Exact source evidence or null when none has been observed.
+   */
+  public async loadLatestSameDaySpendEvidence(targetId: string): Promise<{
+    readonly fetchedAt: Date;
+    readonly sourceChecksum: string;
+    readonly valid: boolean;
+  } | null> {
+    const result = await this.pool.query<{
+      fetchedAt: Date;
+      sourceChecksum: string;
+      valid: boolean;
+    }>(
+      `SELECT "fetchedAt", "sourceChecksum", "valid"
+         FROM "SyncSourceSnapshot"
+        WHERE "targetId" = $1 AND "dataKind" = 'SAME_DAY_SPEND'
+        ORDER BY "fetchedAt" DESC, "createdAt" DESC
+        LIMIT 1`,
+      [targetId],
+    );
+    const row = result.rows[0];
+    return row === undefined
+      ? null
+      : Object.freeze({
+          fetchedAt: new Date(row.fetchedAt),
+          sourceChecksum: row.sourceChecksum,
+          valid: row.valid,
+        });
+  }
+
+  /**
+   * Persists every lowest-level app/nm row for one content version without parent-total mixing.
+   *
+   * @param rows - Exact normalized leaf rows from a single WB response.
+   * @returns Inserted or idempotently refreshed row count.
+   */
+  public async upsertCampaignStatisticLeaves(
+    rows: readonly CampaignStatisticLeafWrite[],
+  ): Promise<number> {
+    if (rows.length === 0) return 0;
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      for (const row of rows) {
+        await client.query(
+          `INSERT INTO "CampaignStatDaily"
+             ("id", "campaignId", "wbCampaignId", "nmId", "date", "placement",
+              "normQueryWire", "normQueryCanonical", "appType", "dimensions", "views",
+              "clicks", "atbs", "orders", "orderedUnits", "canceled", "spendMinor",
+              "attributedRevenueMinor", "fetchedAt", "sourceVersion", "sourceChecksum",
+              "syncRunId", "normalizedAggregationKind")
+           VALUES ($1, $2, $3, $4, $5::date, NULL, NULL, NULL, $6,
+                   $7::jsonb, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
+                   $19, 'FULLSTATS_APP_NM_LEAF')
+           ON CONFLICT ("wbCampaignId", "nmId", "date", "sourceVersion", "appType")
+           DO UPDATE SET
+             "fetchedAt" = EXCLUDED."fetchedAt",
+             "syncRunId" = EXCLUDED."syncRunId"`,
+          [
+            randomUUID(),
+            row.campaignId,
+            row.wbCampaignId.toString(),
+            row.nmId.toString(),
+            row.statistic.date,
+            row.appType,
+            safeJson({ appType: row.appType }),
+            row.statistic.views?.toString() ?? null,
+            row.statistic.clicks.toString(),
+            row.statistic.atbs.toString(),
+            row.statistic.orders.toString(),
+            row.statistic.orderedUnits?.toString() ?? null,
+            row.statistic.canceled?.toString() ?? null,
+            row.statistic.spendMinor.toString(),
+            row.statistic.attributedRevenueMinor.toString(),
+            row.fetchedAt,
+            row.sourceVersion,
+            evidenceChecksum({
+              appType: row.appType,
+              nmId: row.nmId,
+              statistic: row.statistic,
+            }),
+            row.syncRunId,
+          ],
+        );
+      }
+      await client.query('COMMIT');
+      return rows.length;
+    } catch (error: unknown) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   /**
@@ -771,6 +989,235 @@ export class DataSyncRepository {
   }
 
   /**
+   * Materializes immutable performance-day versions from the newest exact leaf aggregation.
+   *
+   * The query selects one content version, appType leaves only, deterministic day-boundary bid
+   * observations, and the first stable read sequence. This keeps work bounded by the campaign page
+   * and prevents later probes with unchanged content from churning a finalized checksum.
+   *
+   * @param campaignId - Local campaign UUID.
+   * @param configuration - Validated finalization policy.
+   * @param assessedAt - Stable scheduler instant.
+   * @returns Lifecycle counters.
+   */
+  public async finalizePerformanceDaysForCampaign(
+    campaignId: string,
+    configuration: PerformanceFinalizationConfiguration,
+    assessedAt: Date,
+  ): Promise<{
+    readonly draft: number;
+    readonly finalized: number;
+    readonly invalid: number;
+    readonly superseded: number;
+  }> {
+    const result = await this.pool.query<PerformanceCandidateRow>(
+      `WITH latest_content AS (
+         SELECT DISTINCT ON ("campaignId", "nmId", "date")
+                "campaignId", "wbCampaignId", "nmId", "date", "sourceVersion"
+           FROM "CampaignStatDaily"
+          WHERE "campaignId" = $1
+          ORDER BY "campaignId", "nmId", "date", "fetchedAt" DESC, "sourceVersion" DESC
+       ),
+       aggregate_day AS (
+         SELECT s."campaignId", s."wbCampaignId", s."nmId", s."date",
+                s."sourceVersion",
+                CASE WHEN bool_and(s."views" IS NOT NULL) THEN SUM(s."views") END AS views,
+                SUM(s."clicks") AS clicks,
+                SUM(s."atbs") AS atbs,
+                SUM(s."orders") AS orders,
+                CASE WHEN bool_and(s."orderedUnits" IS NOT NULL)
+                     THEN SUM(s."orderedUnits") END AS "orderedUnits",
+                SUM(s."spendMinor") AS "spendMinor",
+                SUM(s."attributedRevenueMinor") AS "attributedRevenueMinor"
+           FROM "CampaignStatDaily" s
+           JOIN latest_content latest
+             ON latest."campaignId" = s."campaignId"
+            AND latest."nmId" = s."nmId"
+            AND latest."date" = s."date"
+            AND latest."sourceVersion" = s."sourceVersion"
+          WHERE s."normalizedAggregationKind" = 'FULLSTATS_APP_NM_LEAF'
+          GROUP BY s."campaignId", s."wbCampaignId", s."nmId", s."date",
+                   s."sourceVersion"
+       )
+       SELECT t."id" AS "targetId", aggregate_day."date"::text AS date,
+              aggregate_day."sourceVersion", aggregate_day.views::text,
+              aggregate_day.clicks::text, aggregate_day.atbs::text,
+              aggregate_day.orders::text, aggregate_day."orderedUnits"::text,
+              aggregate_day."spendMinor"::text,
+              aggregate_day."attributedRevenueMinor"::text,
+              c."bidType"::text AS "bidType",
+              (
+                SELECT COUNT(*)::integer
+                  FROM "CampaignTarget" siblings
+                 WHERE siblings."campaignId" = t."campaignId"
+                   AND siblings."nmId" = t."nmId"
+                   AND siblings."targetKind" = 'CARD'
+              ) AS "placementCount",
+              (
+                SELECT MIN(enrollment."observedAt")
+                  FROM "BidStateObservation" enrollment
+                 WHERE enrollment."targetId" = t."id"
+              ) AS "enrolledAt",
+              COALESCE(bid_evidence.items, '[]'::jsonb) AS "bidStates",
+              COALESCE(source_evidence.items, '[]'::jsonb) AS "sourceReads"
+         FROM aggregate_day
+         JOIN "CampaignTarget" t
+           ON t."campaignId" = aggregate_day."campaignId"
+          AND t."nmId" = aggregate_day."nmId"
+          AND t."targetKind" = 'CARD'
+         JOIN "Campaign" c ON c."id" = t."campaignId"
+         LEFT JOIN LATERAL (
+           SELECT jsonb_agg(
+                    jsonb_build_object(
+                      'observedAt', observations."observedAt",
+                      'currentBidMinor', observations."currentBidMinor"::text,
+                      'configurationChecksum', observations."configurationChecksum",
+                      'changeMarkerObserved', observations."changeMarkerObserved",
+                      'campaignStatus', observations."campaignStatus"
+                    )
+                    ORDER BY observations."observedAt"
+                  ) AS items
+             FROM (
+               (SELECT o.*
+                  FROM "BidStateObservation" o
+                 WHERE o."targetId" = t."id"
+                   AND o."observedAt" <=
+                       (aggregate_day."date"::timestamp AT TIME ZONE 'UTC')
+                 ORDER BY o."observedAt" DESC
+                 LIMIT 1)
+               UNION ALL
+               (SELECT o.*
+                  FROM "BidStateObservation" o
+                 WHERE o."targetId" = t."id"
+                   AND o."observedAt" >
+                       (aggregate_day."date"::timestamp AT TIME ZONE 'UTC')
+                   AND o."observedAt" <
+                       (aggregate_day."date"::timestamp AT TIME ZONE 'UTC') + INTERVAL '1 day'
+                 ORDER BY o."observedAt")
+               UNION ALL
+               (SELECT o.*
+                  FROM "BidStateObservation" o
+                 WHERE o."targetId" = t."id"
+                   AND o."observedAt" >=
+                       (aggregate_day."date"::timestamp AT TIME ZONE 'UTC') + INTERVAL '1 day'
+                 ORDER BY o."observedAt"
+                 LIMIT 1)
+             ) observations
+         ) bid_evidence ON true
+         LEFT JOIN LATERAL (
+           SELECT jsonb_agg(
+                    jsonb_build_object(
+                      'checksum', stable."sourceChecksum",
+                      'fetchedAt', stable."fetchedAt"
+                    )
+                    ORDER BY stable."fetchedAt"
+                  ) AS items
+             FROM (
+               SELECT ranked."sourceChecksum", ranked."fetchedAt"
+                 FROM (
+                   SELECT source."sourceChecksum", source."fetchedAt",
+                          row_number() OVER (ORDER BY source."fetchedAt") AS sequence,
+                          MIN(source."fetchedAt") OVER () AS first_read
+                     FROM "SyncSourceSnapshot" source
+                    WHERE source."campaignId" = aggregate_day."campaignId"
+                      AND source."dataKind" = 'CAMPAIGN_STATISTICS'
+                      AND source."sourceDate" = aggregate_day."date"
+                      AND source."sourceChecksum" = aggregate_day."sourceVersion"
+                      AND source."valid" = true
+                      AND source."fetchedAt" >=
+                          (aggregate_day."date"::timestamp AT TIME ZONE 'UTC')
+                            + INTERVAL '1 day'
+                            + ($2::integer * INTERVAL '1 day')
+                 ) ranked
+                WHERE ranked.sequence < $3
+                   OR ranked."fetchedAt" >=
+                      ranked.first_read + ($4::integer * INTERVAL '1 minute')
+                ORDER BY ranked."fetchedAt"
+                LIMIT $3
+             ) stable
+         ) source_evidence ON true
+        ORDER BY t."id", aggregate_day."date"`,
+      [
+        campaignId,
+        configuration.conversionLagDays,
+        configuration.dayFinalizationStableReads,
+        configuration.dayFinalizationStableMinutes,
+      ],
+    );
+    let draft = 0;
+    let finalized = 0;
+    let invalid = 0;
+    let superseded = 0;
+    for (const row of result.rows) {
+      const date = row.date;
+      const dayStartedAt = new Date(`${date}T00:00:00.000Z`);
+      const dayEndedAt = new Date(dayStartedAt.getTime() + 86_400_000);
+      const bidStates = Object.freeze(
+        row.bidStates.map((item) =>
+          Object.freeze({
+            changeMarkerObserved: item.changeMarkerObserved,
+            configurationChecksum: item.configurationChecksum,
+            currentBidMinor: item.currentBidMinor === null ? null : BigInt(item.currentBidMinor),
+            observedAt: new Date(item.observedAt),
+          }),
+        ),
+      );
+      const sourceReads = Object.freeze(
+        row.sourceReads.map((item) =>
+          Object.freeze({
+            checksum: item.checksum,
+            fetchedAt: new Date(item.fetchedAt),
+          }),
+        ),
+      );
+      const candidate: PerformanceDayCandidate = Object.freeze({
+        assessedAt,
+        attributionUnambiguous: row.bidType === 'UNIFIED' || row.placementCount === 1,
+        bidStates,
+        campaignTrafficEligible:
+          row.bidStates.length > 0 &&
+          row.bidStates.every((item) => item.campaignStatus === 9 || item.campaignStatus === 11),
+        conversionCutoff: new Date(
+          dayEndedAt.getTime() + configuration.conversionLagDays * 86_400_000,
+        ),
+        dayEndedAt,
+        dayStartedAt,
+        externalWriteControlMode: configuration.externalWriteControlMode,
+        moneyContractValid: true,
+        preEnrollment:
+          row.enrolledAt === null || new Date(row.enrolledAt).getTime() > dayStartedAt.getTime(),
+        sourceReads,
+        statistic: Object.freeze({
+          atbs: BigInt(row.atbs),
+          attributedRevenueMinor: BigInt(row.attributedRevenueMinor),
+          clicks: BigInt(row.clicks),
+          date,
+          orderedUnits: row.orderedUnits === null ? null : BigInt(row.orderedUnits),
+          orders: BigInt(row.orders),
+          spendMinor: BigInt(row.spendMinor),
+          views: row.views === null ? null : BigInt(row.views),
+        }),
+      });
+      const assessment = assessPerformanceDay(candidate, {
+        maxObservationGapMinutes: configuration.bidStateMaxObservationGapMinutes,
+        minimumStableMinutes: configuration.dayFinalizationStableMinutes,
+        minimumStableReads: configuration.dayFinalizationStableReads,
+      });
+      const persisted = await this.persistPerformanceDay(
+        row.targetId,
+        candidate,
+        assessment,
+        assessedAt,
+      );
+      if (persisted.superseded) superseded += 1;
+      if (assessment.status === 'FINALIZED') finalized += 1;
+      else if (assessment.status === 'DRAFT') draft += 1;
+      else invalid += 1;
+    }
+    return Object.freeze({ draft, finalized, invalid, superseded });
+  }
+
+  /**
    * Inserts a performance-day version and atomically supersedes a changed finalized version.
    *
    * @param targetId - Local target UUID.
@@ -791,28 +1238,54 @@ export class DataSyncRepository {
       await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
         `performance-day:${targetId}:${candidate.statistic.date}`,
       ]);
-      const existing = await client.query<{ id: string; inputChecksum: string }>(
-        `SELECT "id", "inputChecksum"
+      const existing = await client.query<{
+        id: string;
+        inputChecksum: string;
+        status: PerformanceDayAssessment['status'] | 'SUPERSEDED';
+      }>(
+        `SELECT "id", "inputChecksum", "status"::text
            FROM "BidPerformanceDay"
           WHERE "targetId" = $1
             AND "wbStatisticDate" = $2::date
-            AND "status" = 'FINALIZED'
           FOR UPDATE`,
         [targetId, candidate.statistic.date],
       );
-      const current = existing.rows[0];
-      if (current?.inputChecksum === assessment.inputChecksum) {
+      const current = existing.rows.find((row) => row.status === 'FINALIZED');
+      const matching = existing.rows.find((row) => row.inputChecksum === assessment.inputChecksum);
+      if (
+        current !== undefined &&
+        matching?.id === current.id &&
+        current.status === assessment.status
+      ) {
         await client.query('COMMIT');
         return Object.freeze({ id: current.id, superseded: false });
       }
-      const superseded = current !== undefined;
-      if (current !== undefined) {
+      const superseded = current !== undefined && current.id !== matching?.id;
+      if (current !== undefined && current.id !== matching?.id) {
         await client.query(
           `UPDATE "BidPerformanceDay"
               SET "status" = 'SUPERSEDED', "supersededAt" = $2
             WHERE "id" = $1`,
           [current.id, finalizedAt],
         );
+      }
+      if (matching !== undefined) {
+        await client.query(
+          `UPDATE "BidPerformanceDay"
+              SET "status" = $2::"PerformanceDayStatus",
+                  "statisticsFinalizedAt" = $3,
+                  "qualityFlags" = $4,
+                  "supersededAt" = NULL
+            WHERE "id" = $1`,
+          [
+            matching.id,
+            assessment.status,
+            assessment.status === 'FINALIZED' ? finalizedAt : null,
+            assessment.qualityFlags,
+          ],
+        );
+        await client.query('COMMIT');
+        return Object.freeze({ id: matching.id, superseded });
       }
       const id = randomUUID();
       const firstObservation = [...candidate.bidStates].sort(
@@ -955,9 +1428,40 @@ interface CampaignWorkRow {
     readonly minimumBidConfirmedAt: string | null;
     readonly nmId: string;
     readonly placement: 'COMBINED' | 'RECOMMENDATIONS' | 'SEARCH';
+    readonly recommendationFetchedAt: string | null;
     readonly targetId: string;
   }[];
   readonly wbCampaignId: string;
+}
+
+/**
+ * PostgreSQL row containing one aggregate target/day and its bounded evidence arrays.
+ */
+interface PerformanceCandidateRow {
+  readonly atbs: string;
+  readonly attributedRevenueMinor: string;
+  readonly bidStates: readonly {
+    readonly campaignStatus: number;
+    readonly changeMarkerObserved: boolean;
+    readonly configurationChecksum: string;
+    readonly currentBidMinor: string | null;
+    readonly observedAt: string | Date;
+  }[];
+  readonly bidType: 'MANUAL' | 'UNIFIED' | 'UNKNOWN';
+  readonly clicks: string;
+  readonly date: string;
+  readonly enrolledAt: string | Date | null;
+  readonly orderedUnits: string | null;
+  readonly orders: string;
+  readonly placementCount: number;
+  readonly sourceReads: readonly {
+    readonly checksum: string;
+    readonly fetchedAt: string | Date;
+  }[];
+  readonly sourceVersion: string;
+  readonly spendMinor: string;
+  readonly targetId: string;
+  readonly views: string | null;
 }
 
 /**

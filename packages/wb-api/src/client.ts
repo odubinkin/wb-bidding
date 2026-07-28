@@ -45,6 +45,22 @@ import { WbTransportError } from './transport.js';
 export type WbFetch = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
 /**
+ * Bounded telemetry emitted once for every admitted WB request.
+ */
+export interface WbRequestObservation {
+  /** Endpoint registry key. */
+  readonly endpointKey: EndpointKey;
+  /** Total transport/application latency in milliseconds. */
+  readonly latencyMs: number;
+  /** Time spent waiting for distributed quota admission. */
+  readonly limiterWaitMs: number;
+  /** Stable outcome class without payload or credential data. */
+  readonly outcome: 'error' | 'success';
+  /** HTTP status when a response was received. */
+  readonly status: number | null;
+}
+
+/**
  * Immutable WB client configuration.
  */
 export interface WbClientConfiguration {
@@ -58,6 +74,8 @@ export interface WbClientConfiguration {
   readonly fetch: WbFetch;
   /** Maximum simultaneous requests. */
   readonly maxInFlight: number;
+  /** Optional bounded telemetry sink. */
+  readonly observeRequest?: (observation: WbRequestObservation) => void;
   /** Read/verify retry policy. */
   readonly readRetryPolicy: RetryPolicy;
   /** Shared two-level account limiter. */
@@ -171,7 +189,7 @@ export class WbApiClient {
    */
   public async reserveCardBidWrite(): Promise<ReservedCardBidWrite> {
     this.assertOperationAllowed('cardWriteBids', true, false);
-    await this.configuration.rateLimiter.acquire('cardWriteBids');
+    const limiterWaitMs = await this.configuration.rateLimiter.acquire('cardWriteBids');
     const releaseSemaphore = await this.semaphore.acquire();
     let active = true;
     /** Releases an unused reservation. */
@@ -200,7 +218,7 @@ export class WbApiClient {
             cardWriteBidsSchema.parse(request),
             true,
             false,
-            true,
+            limiterWaitMs,
           );
         } finally {
           releaseSemaphore();
@@ -445,7 +463,7 @@ export class WbApiClient {
    * @param body - Optional validated body.
    * @param write - Whether dispatch can mutate remote state.
    * @param allowUnverifiedRead - Explicit observational access.
-   * @param admitted - Whether limiter and semaphore admission were reserved by the caller.
+   * @param admittedLimiterWaitMs - Limiter wait when admission was reserved by the caller.
    * @returns Validated response.
    */
   private async request<T>(
@@ -455,17 +473,20 @@ export class WbApiClient {
     body: unknown,
     write: boolean,
     allowUnverifiedRead: boolean,
-    admitted = false,
+    admittedLimiterWaitMs?: number,
   ): Promise<T> {
     const { breaker, definition } = this.assertOperationAllowed(
       endpointKey,
       write,
       allowUnverifiedRead,
     );
-    if (!admitted) {
-      await this.configuration.rateLimiter.acquire(endpointKey);
-    }
-    const release = admitted ? undefined : await this.semaphore.acquire();
+    const limiterWaitMs =
+      admittedLimiterWaitMs ?? (await this.configuration.rateLimiter.acquire(endpointKey));
+    const release =
+      admittedLimiterWaitMs === undefined ? await this.semaphore.acquire() : undefined;
+    const startedAt = performance.now();
+    let observedStatus: number | null = null;
+    let outcome: WbRequestObservation['outcome'] = 'error';
     try {
       const baseUrl =
         endpointKey === 'sellerInfo'
@@ -493,6 +514,7 @@ export class WbApiClient {
           redirect: 'manual',
           signal: controller.signal,
         });
+        observedStatus = response.status;
       } catch (cause: unknown) {
         const provenPreByte = cause instanceof WbTransportError && cause.beforeBytes;
         const error =
@@ -561,9 +583,19 @@ export class WbApiClient {
         throw error;
       }
       breaker.recordSuccess();
+      outcome = 'success';
       return parsed.data;
     } finally {
       release?.();
+      this.configuration.observeRequest?.(
+        Object.freeze({
+          endpointKey,
+          latencyMs: Math.max(0, performance.now() - startedAt),
+          limiterWaitMs,
+          outcome,
+          status: observedStatus,
+        }),
+      );
     }
   }
 

@@ -29,6 +29,8 @@ export interface DecisionPolicy {
   readonly maxDecreasePerCyclePpm: number;
   readonly maxExplorationSpendMinor: bigint | null;
   readonly maxIncreasePerCyclePpm: number;
+  readonly maxConcurrentExperimentsPerAccount: number;
+  readonly maxConcurrentExperimentsPerCampaign: number;
   readonly maxSpendPerMinuteMinor: bigint | null;
   readonly maxSpendReportingLagMinutes: number | null;
   readonly minAbsoluteChangeMinor: bigint;
@@ -38,6 +40,7 @@ export interface DecisionPolicy {
   readonly minBidSpendMinor: bigint | null;
   readonly minBidViews: bigint;
   readonly minExpectedProfitImprovementMinor: bigint;
+  readonly minExplorationFullDays: number;
   readonly minRelativeChangePpm: number;
   readonly orderedUnitsSafetyDiscountPpm: number;
   readonly policyMaxBidMinor: bigint | null;
@@ -69,6 +72,7 @@ export interface BudgetEvidence {
  * Complete normalized target input for one deterministic decision.
  */
 export interface DecisionInput {
+  readonly accountLocalDate: string;
   readonly algorithmVersion: 'rules-v1';
   readonly attributionUnambiguous: boolean;
   readonly budget: BudgetEvidence;
@@ -86,6 +90,9 @@ export interface DecisionInput {
   readonly paymentType: 'CPC' | 'CPM';
   readonly policy: DecisionPolicy;
   readonly productEconomicsVersion: bigint | null;
+  readonly recommendationBidHintsMinor: readonly bigint[];
+  readonly recommendationSnapshotChecksum: string | null;
+  readonly recommendationSnapshotFetchedAt: Date | null;
   readonly snapshotApplyEligible: boolean;
   readonly targetKey: {
     readonly nmId: bigint;

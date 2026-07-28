@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "owner": "product-owner@example.invalid",
+  "campaigns": [
+    {
+      "advertId": 10001,
+      "nmIds": [20001],
+      "paymentType": "cpm",
+      "placements": ["search"]
+    }
+  ],
+  "writeCanary": {
+    "advertId": 10001,
+    "nmId": 20001,
+    "placement": "search",
+    "originalBidKopecks": 1200,
+    "canaryBidKopecks": 1250,
+    "propagationWindowMs": 180000
+  }
+}

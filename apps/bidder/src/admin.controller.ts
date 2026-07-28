@@ -638,8 +638,8 @@ function positiveBigInt(value: string): bigint {
   return BigInt(value);
 }
 
-function dateOrNow(value: string | undefined): Date {
-  if (value === undefined) return new Date();
+function dateOrNow(value: string | undefined): Date | undefined {
+  if (value === undefined) return undefined;
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/u.test(value))
     throw new AdminApiError(422, 'INVALID_DATE', 'at must be RFC 3339 UTC.');
   const result = new Date(value);

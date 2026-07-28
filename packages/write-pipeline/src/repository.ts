@@ -11,6 +11,7 @@ import type {
   LiveBidState,
   PreparedWrite,
   ReconciliationObservation,
+  ReconciliationWorkItem,
 } from './types.js';
 
 export const DEPLOYMENT_CONTROL_ID = '00000000-0000-0000-0000-000000000002';
@@ -538,6 +539,150 @@ export class WritePipelineRepository {
     }
   }
 
+  /**
+   * Loads a bounded due verification/reconciliation page without taking a write lease.
+   *
+   * Individual state transitions remain serialized by `recordReconciliation` row locks.
+   *
+   * @param limit - Maximum rows, from 1 through 500.
+   * @returns Due work ordered by verification time and queue identity.
+   */
+  public async loadReconciliationBatch(limit: number): Promise<readonly ReconciliationWorkItem[]> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
+      throw new Error('INVALID_RECONCILIATION_BATCH_SIZE');
+    }
+    const result = await this.pool.query<ReconciliationWorkRow>(
+      `SELECT i."id" AS "attemptItemId", i."decisionId", i."sentBidMinor",
+              i."desiredBidState"::text AS "desiredBidState", i."preWriteState",
+              q."id" AS "queueItemId", q."priority", q."attemptCount",
+              d."targetId", d."action"::text, d."boundedBidMinor",
+              d."policyVersion", d."metricSnapshotId",
+              t."campaignId", t."nmId", t."placement"::text,
+              t."targetKind"::text, c."wbCampaignId",
+              c."bidType"::text AS "campaignBidType",
+              c."paymentType"::text AS "campaignPaymentType"
+         FROM "DecisionQueueItem" q
+         JOIN "BidDecision" d ON d."id" = q."decisionId"
+         JOIN "CampaignTarget" t ON t."id" = d."targetId"
+         JOIN "Campaign" c ON c."id" = t."campaignId"
+         JOIN LATERAL (
+           SELECT wi.*
+             FROM "WbWriteAttemptItem" wi
+            WHERE wi."decisionId" = d."id"
+              AND wi."reconciliationStatus" = 'PENDING'
+            ORDER BY wi."attemptNumber" DESC
+            LIMIT 1
+         ) i ON true
+        WHERE q."status" = 'VERIFY_WAIT'
+          AND (q."nextVerificationAt" IS NULL OR q."nextVerificationAt" <= NOW())
+        ORDER BY q."nextVerificationAt" NULLS FIRST, q."id"
+        LIMIT $1`,
+      [limit],
+    );
+    return Object.freeze(
+      result.rows.map((row) => {
+        const oldState = parseStoredLiveState(row.preWriteState);
+        return Object.freeze({
+          attemptItemId: row.attemptItemId,
+          decisionId: row.decisionId,
+          desired: Object.freeze({
+            bidMinor: row.sentBidMinor === null ? null : BigInt(row.sentBidMinor),
+            explicit: row.desiredBidState === 'EXPLICIT',
+          }),
+          item: toClaimed(row),
+          oldState,
+        });
+      }),
+    );
+  }
+
+  /**
+   * Releases queue leases owned by a stopping process.
+   *
+   * @param workerId - Exact lease owner.
+   * @returns Number of released queue rows.
+   */
+  public async releaseWorkerLeases(workerId: string): Promise<number> {
+    const result = await this.pool.query(
+      `UPDATE "DecisionQueueItem"
+          SET "status" = 'RETRY_WAIT', "availableAt" = NOW(),
+              "leaseOwner" = NULL, "leaseUntil" = NULL,
+              "failureClassification" = 'GRACEFUL_SHUTDOWN',
+              "version" = "version" + 1
+        WHERE "status" = 'LEASED' AND "leaseOwner" = $1`,
+      [workerId],
+    );
+    return result.rowCount ?? 0;
+  }
+
+  /**
+   * Deletes one bounded batch of terminal detailed write records after retention.
+   *
+   * PREPARED, DISPATCHING, UNKNOWN, and pending reconciliation are never selected.
+   * Business audit and decisions remain intact.
+   *
+   * @param retentionDays - Positive configured retention.
+   * @param limit - Maximum attempts deleted in one transaction.
+   * @returns Deleted attempt count.
+   */
+  public async cleanupTerminalAttempts(retentionDays: number, limit = 1_000): Promise<number> {
+    if (
+      !Number.isInteger(retentionDays) ||
+      retentionDays < 1 ||
+      !Number.isInteger(limit) ||
+      limit < 1 ||
+      limit > 10_000
+    ) {
+      throw new Error('INVALID_RETENTION_BOUNDS');
+    }
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const selected = await client.query<{ id: string }>(
+        `SELECT a."id"
+           FROM "WbWriteAttempt" a
+          WHERE a."status" IN ('ACCEPTED', 'REJECTED')
+            AND a."completedAt" <
+                NOW() - ($1 * INTERVAL '1 day')
+            AND NOT EXISTS (
+              SELECT 1 FROM "WbWriteAttemptItem" i
+               WHERE i."attemptId" = a."id"
+                 AND i."reconciliationStatus" = 'PENDING'
+            )
+          ORDER BY a."completedAt", a."id"
+          FOR UPDATE SKIP LOCKED
+          LIMIT $2`,
+        [retentionDays, limit],
+      );
+      const ids = selected.rows.map((row) => row.id);
+      if (ids.length === 0) {
+        await client.query('COMMIT');
+        return 0;
+      }
+      await client.query(
+        `DELETE FROM "ReconciliationRead" r
+          USING "WbWriteAttemptItem" i
+          WHERE r."attemptItemId" = i."id"
+            AND i."attemptId" = ANY($1::uuid[])`,
+        [ids],
+      );
+      await client.query(`DELETE FROM "WbWriteAttemptItem" WHERE "attemptId" = ANY($1::uuid[])`, [
+        ids,
+      ]);
+      const deleted = await client.query(
+        `DELETE FROM "WbWriteAttempt" WHERE "id" = ANY($1::uuid[])`,
+        [ids],
+      );
+      await client.query('COMMIT');
+      return deleted.rowCount ?? 0;
+    } catch (error: unknown) {
+      await rollback(client);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   public async recordReconciliation(input: {
     readonly attemptItemId: string;
     readonly decisionId: string;
@@ -779,6 +924,16 @@ interface ClaimRow {
   readonly metricSnapshotId: string;
 }
 
+/**
+ * Database row used by the reconciliation page mapper.
+ */
+interface ReconciliationWorkRow extends ClaimRow {
+  readonly attemptItemId: string;
+  readonly desiredBidState: 'ABSENT' | 'EXPLICIT';
+  readonly preWriteState: unknown;
+  readonly sentBidMinor: string | null;
+}
+
 interface ReconciliationQueueRow {
   readonly actualDispatchCount: number;
   readonly stableReadChecksum: string | null;
@@ -820,6 +975,47 @@ function toClaimed(row: ClaimRow): ClaimedQueueItem {
     targetId: row.targetId,
     targetKind: row.targetKind,
     wbCampaignId: BigInt(row.wbCampaignId),
+  });
+}
+
+/**
+ * Validates and restores one persisted pre-write live state.
+ *
+ * @param value - JSONB state.
+ * @returns Typed immutable live state.
+ */
+function parseStoredLiveState(value: unknown): LiveBidState {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error('INVALID_PREWRITE_STATE');
+  }
+  const record = value as Readonly<Record<string, unknown>>;
+  const bidValue = record.bidMinor;
+  const bidMinor =
+    bidValue === null
+      ? null
+      : typeof bidValue === 'string' && /^-?\d+$/.test(bidValue)
+        ? BigInt(bidValue)
+        : typeof bidValue === 'number' && Number.isSafeInteger(bidValue)
+          ? BigInt(bidValue)
+          : undefined;
+  const observedAt =
+    typeof record.observedAt === 'string' || record.observedAt instanceof Date
+      ? new Date(record.observedAt)
+      : null;
+  if (
+    bidMinor === undefined ||
+    typeof record.explicit !== 'boolean' ||
+    observedAt === null ||
+    Number.isNaN(observedAt.getTime()) ||
+    typeof record.sourceMarker !== 'string'
+  ) {
+    throw new Error('INVALID_PREWRITE_STATE');
+  }
+  return Object.freeze({
+    bidMinor,
+    explicit: record.explicit,
+    observedAt,
+    sourceMarker: record.sourceMarker,
   });
 }
 

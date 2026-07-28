@@ -10,6 +10,7 @@
     "@nestjs/swagger": "11.4.6",
     "@wb-bidder/config": "workspace:*",
     "@wb-bidder/contracts": "workspace:*",
+    "@wb-bidder/data-sync": "workspace:*",
     "@wb-bidder/decision-engine": "workspace:*",
     "@wb-bidder/write-pipeline": "workspace:*",
     "@wb-bidder/wb-api": "workspace:*",

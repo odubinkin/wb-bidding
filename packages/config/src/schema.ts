@@ -44,6 +44,8 @@ export interface AppConfiguration {
     readonly currentBidTargetSlaMinutes: number;
     /** Slow data-sync six-field cron. */
     readonly dataCron: string;
+    /** Maximum age of the latest successful daily-statistics read. */
+    readonly campaignStatisticsFreshnessMinutes: number;
     /** Full statistical days to wait for attribution. */
     readonly conversionLagDays: number;
     /** Stable source reads required before finalization. */
@@ -75,6 +77,7 @@ export interface AppConfiguration {
     readonly preByteMaximumRetries: number;
     readonly preWriteStateMaximumAgeMs: number;
     readonly maximumDecisionAgeMinutes: number;
+    readonly experimentRevertDeadlineMs: number;
     readonly attemptRetentionDays: number;
   };
   /** Validated WB integration settings. */
@@ -179,6 +182,7 @@ const rawSchema = z.object({
     .default(600_000),
   CURRENT_STATE_TARGET_SYNC_SLA_MINUTES: z.coerce.number().int().min(1).max(1_440).default(20),
   DATA_SYNC_CRON: z.string().trim().min(1).default('25 */30 * * * *'),
+  CAMPAIGN_STATISTICS_FRESHNESS_MINUTES: z.coerce.number().int().min(1).max(43_200).default(180),
   DECISION_CRON: z.string().trim().min(1).default('45 */30 * * * *'),
   DAY_FINALIZATION_MIN_STABLE_MINUTES: z.coerce.number().int().min(0).max(10_080).default(60),
   DAY_FINALIZATION_MIN_STABLE_READS: z.coerce.number().int().min(2).max(100).default(2),
@@ -204,6 +208,12 @@ const rawSchema = z.object({
   WB_WRITE_PRE_BYTE_MAX_RETRIES: z.coerce.number().int().min(0).max(1).default(1),
   PRE_WRITE_STATE_MAX_AGE_MS: z.coerce.number().int().min(1_000).max(60_000).default(10_000),
   MAX_DECISION_AGE_MINUTES: z.coerce.number().int().min(1).max(10_080).default(60),
+  EXPERIMENT_REVERT_DEADLINE_MS: z.coerce
+    .number()
+    .int()
+    .min(60_000)
+    .max(604_800_000)
+    .default(86_400_000),
   WB_WRITE_ATTEMPT_RETENTION_DAYS: z.coerce.number().int().min(1).max(3_650).default(30),
   MINIMUM_BID_FRESHNESS_MINUTES: z.coerce.number().int().min(1).max(43_200).default(720),
   MINIMUM_BID_TARGET_SYNC_SLA_MINUTES: z.coerce.number().int().min(1).max(43_200).default(720),
@@ -289,6 +299,7 @@ export function loadConfiguration(
       currentStateCron: value.CURRENT_STATE_SYNC_CRON,
       currentStateDeadlineMs: value.CURRENT_STATE_SYNC_RUN_DEADLINE_MS,
       dataCron: value.DATA_SYNC_CRON,
+      campaignStatisticsFreshnessMinutes: value.CAMPAIGN_STATISTICS_FRESHNESS_MINUTES,
       dayFinalizationStableMinutes: value.DAY_FINALIZATION_MIN_STABLE_MINUTES,
       dayFinalizationStableReads: value.DAY_FINALIZATION_MIN_STABLE_READS,
       externalWriteControlMode: value.EXTERNAL_WRITE_CONTROL_MODE,
@@ -300,6 +311,7 @@ export function loadConfiguration(
       attemptRetentionDays: value.WB_WRITE_ATTEMPT_RETENTION_DAYS,
       campaignApplyCron: value.CAMPAIGN_APPLY_CRON,
       decisionCron: value.DECISION_CRON,
+      experimentRevertDeadlineMs: value.EXPERIMENT_REVERT_DEADLINE_MS,
       maximumDecisionAgeMinutes: value.MAX_DECISION_AGE_MINUTES,
       maximumWriteAttempts: value.RECONCILIATION_MAX_WRITE_ATTEMPTS,
       preByteMaximumRetries: value.WB_WRITE_PRE_BYTE_MAX_RETRIES,

@@ -1,0 +1,98 @@
+import { access, readFile } from 'node:fs/promises';
+import path from 'node:path';
+
+const repositoryRoot = path.resolve(import.meta.dirname, '..');
+const requiredDocuments = [
+  'README.md',
+  'docs/architecture.md',
+  'docs/configuration.md',
+  'docs/wb-api-integration.md',
+  'docs/bidding-algorithm.md',
+  'docs/data-model.md',
+  'docs/mock-server.md',
+  'docs/testing.md',
+  'docs/observability.md',
+  'docs/security.md',
+  'docs/runbook.md',
+  'docs/implementation-deviations.md',
+  'docs/acceptance-evidence.md',
+  'docs/e2e-scenario-evidence.md',
+  'docs/adr/0001-fail-closed-wb-contracts.md',
+];
+const failures = [];
+
+for (const relativePath of requiredDocuments) {
+  const absolutePath = path.join(repositoryRoot, relativePath);
+  let source;
+  try {
+    source = await readFile(absolutePath, 'utf8');
+  } catch {
+    failures.push(`${relativePath}: файл отсутствует`);
+    continue;
+  }
+  if (!/[А-Яа-яЁё]/u.test(source)) {
+    failures.push(`${relativePath}: нет русскоязычного содержимого`);
+  }
+  if (!source.startsWith('# ')) {
+    failures.push(`${relativePath}: отсутствует заголовок первого уровня`);
+  }
+  for (const match of source.matchAll(/!?\[[^\n]*?\]\(([^)\n]+)\)/g)) {
+    const rawTarget = match[1]?.trim() ?? '';
+    const target =
+      rawTarget.startsWith('<') && rawTarget.endsWith('>')
+        ? rawTarget.slice(1, -1)
+        : (rawTarget.split(/\s+/u)[0] ?? '');
+    if (target === '' || target.startsWith('#') || /^(?:https?:|mailto:)/u.test(target)) {
+      continue;
+    }
+    const withoutFragment = decodeURIComponent(target.split('#')[0] ?? '');
+    const linkedPath = path.resolve(path.dirname(absolutePath), withoutFragment);
+    try {
+      await access(linkedPath);
+    } catch {
+      failures.push(`${relativePath}: битая локальная ссылка ${target}`);
+    }
+  }
+}
+
+const architecture = await readFile(path.join(repositoryRoot, 'docs/architecture.md'), 'utf8');
+const dataModel = await readFile(path.join(repositoryRoot, 'docs/data-model.md'), 'utf8');
+const mermaidCount = (architecture.match(/```mermaid/gu) ?? []).length;
+if (mermaidCount < 4) {
+  failures.push(
+    'docs/architecture.md: нужны component, sync, decision/execution и queue диаграммы',
+  );
+}
+if (!dataModel.includes('```mermaid')) {
+  failures.push('docs/data-model.md: отсутствует Mermaid ER-модель');
+}
+
+const evidence = await readFile(path.join(repositoryRoot, 'docs/acceptance-evidence.md'), 'utf8');
+for (let index = 1; index <= 30; index += 1) {
+  const ac = `AC-${String(index).padStart(2, '0')}`;
+  if (!evidence.includes(ac)) failures.push(`docs/acceptance-evidence.md: отсутствует ${ac}`);
+}
+for (let index = 1; index <= 11; index += 1) {
+  if (!evidence.includes(`DoD-31.${String(index)}`)) {
+    failures.push(`docs/acceptance-evidence.md: отсутствует DoD-31.${String(index)}`);
+  }
+}
+const scenarioEvidence = await readFile(
+  path.join(repositoryRoot, 'docs/e2e-scenario-evidence.md'),
+  'utf8',
+);
+for (let index = 1; index <= 51; index += 1) {
+  const scenario = `E2E-${String(index).padStart(2, '0')}`;
+  if (!scenarioEvidence.includes(scenario)) {
+    failures.push(`docs/e2e-scenario-evidence.md: отсутствует ${scenario}`);
+  }
+}
+
+if (failures.length > 0) {
+  process.stderr.write(`${failures.join('\n')}\n`);
+  process.exitCode = 1;
+} else {
+  process.stdout.write(
+    `Документация: ${String(requiredDocuments.length)} обязательных файлов, ссылки, Mermaid и трассировка проверены.\n`,
+  );
+}

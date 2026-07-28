@@ -123,3 +123,22 @@ export interface ReconciliationObservation {
   readonly fresh: boolean;
   readonly prevalidationPassed: boolean;
 }
+
+/**
+ * One bounded verification/reconciliation work item loaded from PostgreSQL.
+ */
+export interface ReconciliationWorkItem {
+  /** Latest write-attempt item. */
+  readonly attemptItemId: string;
+  /** Queue/decision identifier. */
+  readonly decisionId: string;
+  /** Desired post-write state. */
+  readonly desired: {
+    readonly bidMinor: bigint | null;
+    readonly explicit: boolean;
+  };
+  /** Claimed-shape identifiers required for a live WB read and prevalidation. */
+  readonly item: ClaimedQueueItem;
+  /** Durable state read immediately before dispatch. */
+  readonly oldState: LiveBidState;
+}

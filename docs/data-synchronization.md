@@ -1,81 +1,68 @@
-# Data synchronization and statistical evidence
+# Синхронизация данных и statistical evidence
 
-The synchronization subsystem keeps fast current-state observations independent from slower
-account-wide data collection. PostgreSQL is the source of truth for scheduler ownership,
-checkpoints, immutable source versions, target-level completeness, and finalized statistical
+Быстрые current-state observations отделены от медленного account-wide сбора. PostgreSQL хранит
+ownership jobs, checkpoints, immutable source versions, target completeness и финализированное
 evidence.
 
-## Jobs and non-overlap
+## Jobs и non-overlap
 
-`CURRENT_STATE_SYNC` runs every 15 minutes by default with a 10-minute deadline. It discovers
-campaigns, refreshes campaign details, and records current card bids. `DATA_SYNC` runs every
-30 minutes and advances bounded checkpoints for minimum bids, statistics, cluster discovery,
-recommendations, and diagnostic budget reads.
+`CURRENT_STATE_SYNC` по умолчанию запускается каждые 15 минут с deadline 10 минут: обнаруживает
+кампании, обновляет details и текущие card bids. `DATA_SYNC` каждые 30 минут продвигает отдельные
+cursor для minimum bids, statistics, cluster discovery, recommendations и diagnostic budgets.
 
-Each job takes a PostgreSQL session advisory lock before creating a `SchedulerRun`. Another
-replica skips the same job while that lock is held. Runs persist their deadline and terminal
-status; cursors advance only after a bounded page has been processed. A restarted replica
-therefore resumes from durable state instead of beginning every account-wide pass again.
+Перед `SchedulerRun` берётся session advisory lock. Другая реплика пропускает тот же job.
+Cursor сдвигается после bounded page, поэтому restart продолжает обход. Manual resync сохраняет
+те же locks и строго применяет campaign/target/data-kind scope.
 
-## Deployment account binding
+## Account binding
 
-The first authorized WB identity check creates the singleton `DeploymentAccountBinding`.
-Subsequent starts must validate the same seller, environment, token category, currency, timezone,
-and settings checksum. Only these transitions are accepted:
+Первый authorized WB identity check создаёт singleton `DeploymentAccountBinding`. Следующие
+старты обязаны подтвердить seller, environment, token category/type, currency, timezone и
+settings checksum. Разрешены validation/rotation того же token profile и односторонний
+`BASE → PERSONAL` upgrade. Identity/settings drift и создание binding поверх business history
+fail closed; успешные переходы добавляются в `AuditEvent`.
 
-- validation of the current token;
-- token rotation for the same identity and category;
-- `BASE` to `PERSONAL` upgrade for the same seller;
-- initial creation when no business history exists.
-
-Identity replacement, environment/category drift, settings drift, and initialization over
-existing business data fail closed. Every accepted transition is appended to `AuditEvent`.
-
-## Evidence chain
+## Цепочка evidence
 
 ```mermaid
 flowchart LR
-  WB[Runtime-validated WB response] --> S[Immutable SyncSourceSnapshot]
-  D[Campaign details/current bid] --> O[BidStateObservation]
+  WB[Validated WB response] --> S[SyncSourceSnapshot]
+  D[Details и current bid] --> O[BidStateObservation]
   M[Minimum bid] --> T[TargetDataSnapshot]
   S --> T
   O --> T
-  T --> G{Complete, fresh,<br/>coherent, verified?}
-  G -- yes --> A[Decision/APPLY eligible]
-  G -- no --> B[Fail closed with reason flags]
+  T --> G{Полно, свежо,<br/>coherent, verified?}
+  G -- да --> A[Decision и APPLY eligible]
+  G -- нет --> B[Fail closed reason flags]
   S --> P[BidPerformanceDay assessment]
   O --> P
-  P --> F[Finalized immutable version]
-  F --> X[Late data creates a superseding version]
+  P --> F[FINALIZED version]
+  F --> X[Late data supersedes version]
 ```
 
-A `TargetDataSnapshot` references exact checksums for campaign details, current bid, minimum bid,
-and statistics. Missing, stale, invalid, or traffic-regime-incoherent evidence prevents APPLY.
-Bid increases additionally require valid same-day spend evidence.
+`TargetDataSnapshot` ссылается на точные checksums details/current/minimum/statistics.
+Missing, stale, invalid или regime-incoherent evidence запрещает `APPLY`.
 
-## Statistical days
+## Статистические дни
 
-Daily statistics can be normalized only under a `VERIFIED` endpoint contract. Money is converted
-to integer minor units without floating-point arithmetic, and ordered units are taken from
-`shks`. A day is finalized only after the conversion lag, stable repeated source reads, complete
-bid/configuration coverage, bounded observation gaps, unambiguous placement attribution, and
-known external-write provenance. Late attribution never mutates a finalized version: it creates
-a new version linked through `supersedesId`.
+`fullstats` нормализуется только по leaf `appType → nm`; parent и child не суммируются дважды.
+`sum`/`sum_price` сохраняются по profile semantics, `shks` — ordered units, `orders` остаётся
+диагностикой, `canceled` сохраняет wire-значение технически недоставленных товаров.
 
-Normalized search queries use Unicode NFC only. Whitespace and case are preserved. Distinct wire
-values that collide after NFC are retained as invalid evidence and do not create controllable
-cluster targets.
+День финализируется после conversion lag, заданного числа одинаковых reads с минимальным
+временным интервалом, полного day boundary и непрерывных bid/config observations без недопустимого
+gap. В `SHARED` mode требуется change-marker provenance. Late attribution создаёт новую source
+version, supersedes прежний performance day и меняет downstream checksum.
 
-## Capacity and production gates
+## Capacity и fairness
 
-Work pages are bounded and reserve round-robin capacity so permanently urgent work cannot starve
-the rest of the account. The load gate covers 10,000 campaigns and 100,000 targets. For the
-Personal token profile, the minimum-bid endpoint has a theoretical 500-minute full-pass lower
-bound; the default 720-minute SLA includes retry and jitter reserve. Current-state capacity also
-checks the schedule, deadline, maximum observation gap, and freshness inequalities.
+Все запросы и DB reads bounded: campaign details/fullstats до 50 IDs, minimum bids до 100 nm,
+DB page `SYNC_PAGE_SIZE`. Checkpoint хранит cursor и wrap state, priority targets добавляются без
+starvation обычного round-robin.
 
-The embedded production profile currently marks fullstats money/aggregation, cluster-bid
-semantics, same-day spend, and budget semantics as `UNVERIFIED`. Those responses are persisted for
-diagnostics but cannot produce APPLY-eligible snapshots or finalized performance days. This is
-the required fail-closed behavior until official wire evidence is recorded in a new endpoint
-profile version.
+Для 10 000 campaigns minimum-bid endpoint 20 запросов/мин и page 100 дают теоретическую нижнюю
+границу 500 минут; default SLA 720 минут. Startup capacity check закрывает writes, если
+настроенный SLA математически недостижим. Метрики публикуют lag, ETA и SLA violations.
+
+Текущий production profile оставляет fullstats money/aggregation, cluster и same-day spend в
+`UNVERIFIED`; read сохраняется с profile/evidence, но эти contracts не открывают write.

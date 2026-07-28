@@ -36,12 +36,15 @@ export function decideBid(input: DecisionInput): DecisionResult {
       )
       .map((day) => ({ ...day })),
     productEconomicsVersion: input.productEconomicsVersion,
+    recommendationBidHintsMinor: input.recommendationBidHintsMinor,
+    recommendationSnapshotChecksum: input.recommendationSnapshotChecksum,
+    recommendationSnapshotFetchedAt: input.recommendationSnapshotFetchedAt,
     targetKey: input.targetKey,
     wbMinimumBidMinor: input.wbMinimumBidMinor,
   };
   const inputSnapshotChecksum = scopedChecksum('input-snapshot-v1', inputSnapshotPayload);
   const decisionContext = {
-    accountLocalDate: input.decisionAt.toISOString().slice(0, 10),
+    accountLocalDate: input.accountLocalDate,
     algorithmVersion: input.algorithmVersion,
     budgetPhase: budgetPhase(input),
     cooldownDeadline:
@@ -294,6 +297,11 @@ function buildCandidateSet(
   if (cap !== null) {
     candidates.add(cap.toString());
   }
+  if (input.paymentType === 'CPM') {
+    for (const recommendation of input.recommendationBidHintsMinor) {
+      if (recommendation > 0n) candidates.add(recommendation.toString());
+    }
+  }
   return Object.freeze(
     [...candidates]
       .map(BigInt)
@@ -517,6 +525,9 @@ function validateInput(input: DecisionInput): void {
   }
   if (input.decisionAt.toString() === 'Invalid Date') {
     throw new Error('Decision time is invalid');
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.accountLocalDate)) {
+    throw new Error('Account-local date is invalid');
   }
 }
 

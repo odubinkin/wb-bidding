@@ -4,6 +4,11 @@ const repositoryRoot = new URL('../', import.meta.url);
 const bidderPort = 31_90;
 const mockPort = 31_91;
 const adminServiceToken = 'test-admin-token-with-32-characters';
+const databaseUrl = process.env.DATABASE_URL;
+
+if (databaseUrl === undefined || databaseUrl.length === 0) {
+  throw new Error('DATABASE_URL is required for the built bidder smoke');
+}
 
 const mock = spawn('node', ['apps/wb-mock/dist/main.js'], {
   cwd: repositoryRoot,
@@ -17,29 +22,15 @@ const mock = spawn('node', ['apps/wb-mock/dist/main.js'], {
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 
-const bidder = spawn('node', ['apps/bidder/dist/main.js'], {
-  cwd: repositoryRoot,
-  env: {
-    ...process.env,
-    ACCOUNT_CURRENCY: 'RUB',
-    ACCOUNT_TIMEZONE: 'Europe/Moscow',
-    ADMIN_API_SERVICE_TOKEN: adminServiceToken,
-    DATABASE_URL: 'postgresql://user:password@localhost:5432/database',
-    METRICS_ENABLED: 'true',
-    PORT: String(bidderPort),
-    SCHEDULER_ENABLED: 'false',
-    WB_API_MOCK_BASE_URL: `http://127.0.0.1:${mockPort}`,
-    WB_API_MODE: 'mock',
-    WB_API_TOKEN: 'mock-test-token',
-    WB_API_WRITE_ENABLED: 'false',
-    WB_ENDPOINT_PROFILE_VERSION: 'wb-promotion-2026-07-28-v1',
-    WB_EXPECTED_TOKEN_TYPE: 'TEST',
-  },
-  stdio: ['ignore', 'pipe', 'pipe'],
-});
-
 let output = '';
-for (const child of [mock, bidder]) {
+let bidder;
+
+/**
+ * Captures bounded child output for failure diagnostics.
+ *
+ * @param {import('node:child_process').ChildProcess} child - Local smoke process.
+ */
+function capture(child) {
   child.stdout?.on('data', (chunk) => {
     output += String(chunk);
   });
@@ -47,6 +38,7 @@ for (const child of [mock, bidder]) {
     output += String(chunk);
   });
 }
+capture(mock);
 
 /**
  * Polls one local endpoint until it succeeds or its bounded deadline expires.
@@ -74,6 +66,28 @@ async function waitForResponse(url, init) {
 }
 
 try {
+  await waitForResponse(`http://127.0.0.1:${mockPort}/health/live`);
+  bidder = spawn('node', ['apps/bidder/dist/main.js'], {
+    cwd: repositoryRoot,
+    env: {
+      ...process.env,
+      ACCOUNT_CURRENCY: 'RUB',
+      ACCOUNT_TIMEZONE: 'Europe/Moscow',
+      ADMIN_API_SERVICE_TOKEN: adminServiceToken,
+      DATABASE_URL: databaseUrl,
+      METRICS_ENABLED: 'true',
+      PORT: String(bidderPort),
+      SCHEDULER_ENABLED: 'true',
+      WB_API_MOCK_BASE_URL: `http://127.0.0.1:${mockPort}`,
+      WB_API_MODE: 'mock',
+      WB_API_TOKEN: 'mock-test-token',
+      WB_API_WRITE_ENABLED: 'false',
+      WB_ENDPOINT_PROFILE_VERSION: 'wb-promotion-2026-07-28-v1',
+      WB_EXPECTED_TOKEN_TYPE: 'TEST',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  capture(bidder);
   const [bidderReady, bidderInfo, bidderDocs, mockLive, mockState, mockDocs] = await Promise.all([
     waitForResponse(`http://127.0.0.1:${bidderPort}/health/ready`),
     waitForResponse(`http://127.0.0.1:${bidderPort}/api/v1/service-info`),
@@ -108,6 +122,6 @@ try {
   process.stderr.write(`${String(error)}\n${output.slice(-4_000)}\n`);
   process.exitCode = 1;
 } finally {
-  bidder.kill('SIGTERM');
+  bidder?.kill('SIGTERM');
   mock.kill('SIGTERM');
 }

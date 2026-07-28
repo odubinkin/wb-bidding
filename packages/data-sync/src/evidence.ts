@@ -17,6 +17,8 @@ export interface RawCampaignStatisticDay {
   readonly atbs: number;
   /** Click count. */
   readonly clicks: number;
+  /** Technically undelivered ordered items. */
+  readonly canceled?: number;
   /** WB statistical date. */
   readonly date: string;
   /** Order count. */
@@ -51,6 +53,7 @@ export function normalizeCampaignStatisticDay(
   }
   for (const [field, value] of Object.entries({
     atbs: source.atbs,
+    ...(source.canceled === undefined ? {} : { canceled: source.canceled }),
     clicks: source.clicks,
     orders: source.orders,
     shks: source.shks,
@@ -63,6 +66,7 @@ export function normalizeCampaignStatisticDay(
   return Object.freeze({
     atbs: BigInt(source.atbs),
     attributedRevenueMinor: decimalMajorToMinor(source.sum_price, 'fullstats.sum_price'),
+    canceled: source.canceled === undefined ? null : BigInt(source.canceled),
     clicks: BigInt(source.clicks),
     date: source.date,
     orderedUnits: BigInt(source.shks),
@@ -140,7 +144,15 @@ export function assessTargetSnapshot(
   }
   const hasInvalid = [...flags].some((flag) => flag.startsWith('INVALID_'));
   const hasStale = [...flags].some((flag) => flag.startsWith('STALE_'));
-  const hasSameDaySpend = evidence.some((item) => item.dataKind === 'SAME_DAY_SPEND' && item.valid);
+  const hasSameDaySpend = evidence.some((item) => {
+    const ageMinutes = (now.getTime() - item.fetchedAt.getTime()) / 60_000;
+    return (
+      item.dataKind === 'SAME_DAY_SPEND' &&
+      item.valid &&
+      ageMinutes >= 0 &&
+      ageMinutes <= item.freshnessMinutes
+    );
+  });
   const status =
     required.length === 0
       ? 'INCOMPLETE'
@@ -176,7 +188,7 @@ export function assessPerformanceDay(
 ): PerformanceDayAssessment {
   const flags = new Set<string>();
   const statistic = candidate.statistic;
-  if (candidate.dayEndedAt > candidate.conversionCutoff) {
+  if (candidate.assessedAt !== undefined && candidate.assessedAt < candidate.conversionCutoff) {
     flags.add('CONVERSION_LAG_NOT_ELAPSED');
   }
   if (candidate.preEnrollment) {

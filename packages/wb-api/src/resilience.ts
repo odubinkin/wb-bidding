@@ -188,6 +188,21 @@ export class CircuitBreakerRegistry {
     }
     return breaker;
   }
+
+  /**
+   * Returns bounded snapshots for every fixed endpoint group.
+   *
+   * @returns Immutable map suitable for readiness and low-cardinality metrics.
+   */
+  public snapshots(): Readonly<Record<EndpointGroup, CircuitSnapshot>> {
+    return Object.freeze({
+      auth: this.forGroup('auth').snapshot(),
+      campaigns: this.forGroup('campaigns').snapshot(),
+      finance: this.forGroup('finance').snapshot(),
+      statistics: this.forGroup('statistics').snapshot(),
+      writes: this.forGroup('writes').snapshot(),
+    });
+  }
 }
 
 /**

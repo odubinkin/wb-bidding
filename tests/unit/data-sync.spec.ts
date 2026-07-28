@@ -103,6 +103,16 @@ describe('target and statistical evidence', () => {
       now,
     );
     expect(increase.increaseEligible).toBe(true);
+    const staleSameDay = assessTargetSnapshot(
+      [
+        source('CAMPAIGN_DETAILS', now, true, 'regime-1'),
+        source('CURRENT_BID', now, true, 'regime-1'),
+        source('MINIMUM_BID', now, true, null),
+        source('SAME_DAY_SPEND', new Date('2026-07-30T11:00:00.000Z'), false, null),
+      ],
+      now,
+    );
+    expect(staleSameDay).toMatchObject({ applyEligible: true, increaseEligible: false });
     const inconsistent = assessTargetSnapshot(
       [
         source('CAMPAIGN_DETAILS', now, true, 'regime-1'),
@@ -183,6 +193,7 @@ describe('target and statistical evidence', () => {
     ).toEqual({
       atbs: 3n,
       attributedRevenueMinor: 20_000n,
+      canceled: null,
       clicks: 10n,
       date: '2026-07-27',
       orderedUnits: 2n,

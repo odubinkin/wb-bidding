@@ -63,6 +63,7 @@ export function bucketDays(
 export function decisionInput(overrides: Partial<DecisionInput> = {}): DecisionInput {
   const decisionAt = new Date('2026-07-28T12:00:00.000Z');
   return Object.freeze({
+    accountLocalDate: '2026-07-28',
     algorithmVersion: 'rules-v1',
     attributionUnambiguous: true,
     budget: Object.freeze({
@@ -92,6 +93,9 @@ export function decisionInput(overrides: Partial<DecisionInput> = {}): DecisionI
     ]),
     policy: decisionPolicy(),
     productEconomicsVersion: 1n,
+    recommendationBidHintsMinor: Object.freeze([]),
+    recommendationSnapshotChecksum: null,
+    recommendationSnapshotFetchedAt: null,
     snapshotApplyEligible: true,
     targetKey: Object.freeze({
       nmId: 123n,

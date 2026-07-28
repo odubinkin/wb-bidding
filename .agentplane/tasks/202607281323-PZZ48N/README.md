@@ -1,10 +1,10 @@
 ---
 id: "202607281323-PZZ48N"
 title: "Stage 5: production readiness and complete DoD audit"
-status: "TODO"
+status: "DOING"
 priority: "high"
 owner: "CODER"
-revision: 3
+revision: 5
 origin:
   system: "manual"
 depends_on:
@@ -34,9 +34,9 @@ verify:
   - "pnpm run test:runbook"
   - "pnpm run verify:deprecated-endpoints"
 plan_approval:
-  state: "pending"
-  updated_at: null
-  updated_by: null
+  state: "approved"
+  updated_at: "2026-07-28T17:12:25.088Z"
+  updated_by: "ORCHESTRATOR"
   note: null
 verification:
   state: "pending"
@@ -45,11 +45,21 @@ verification:
   note: null
   attempts: 0
 commit: null
-comments: []
-events: []
+comments:
+  -
+    author: "CODER"
+    body: "Start: continue direct-mode task in current checkout."
+events:
+  -
+    type: "status"
+    at: "2026-07-28T17:12:36.841Z"
+    author: "CODER"
+    from: "TODO"
+    to: "DOING"
+    note: "Start: continue direct-mode task in current checkout."
 doc_version: 3
-doc_updated_at: "2026-07-28T13:24:55.937Z"
-doc_updated_by: "PLANNER"
+doc_updated_at: "2026-07-28T17:12:36.841Z"
+doc_updated_by: "CODER"
 description: "Complete security hardening, observability, retention, non-root Docker images, all Compose scenarios, full CI gates, load, graceful-shutdown, outage, rollback and kill-switch validation, Russian documentation and Mermaid diagrams, endpoint-profile evidence, AC-01 through AC-30 traceability, section 31 evidence, sandbox smoke harness and explicit deviations register. Production remains write-disabled until separately approved."
 sections:
   Summary: |-

@@ -6,8 +6,10 @@ import {
   assessTargetSnapshot,
   canonicalizeNormQuery,
   findNormQueryNfcCollisions,
+  normalizeCampaignStatisticDay,
 } from './evidence.js';
-import type { CampaignWorkItem, DataSyncRepository } from './repository.js';
+import type { CampaignWorkItem, CampaignWorkScope, DataSyncRepository } from './repository.js';
+import type { SyncDataKind } from './types.js';
 
 /**
  * Data-sync runtime configuration.
@@ -19,14 +21,36 @@ export interface DataSyncWorkerConfiguration {
   readonly currentStateFreshnessMinutes: number;
   /** Operator external-write guarantee. */
   readonly externalWriteControlMode: 'EXCLUSIVE' | 'SHARED';
+  /** Whether fullstats exact leaf/money semantics are verified for this runtime. */
+  readonly fullstatsContractVerified?: boolean;
   /** Maximum campaigns loaded from PostgreSQL at once. */
   readonly pageSize: number;
   /** Card minimum-bid maximum age. */
   readonly minimumBidFreshnessMinutes: number;
   /** Statistical overlap first date provider. */
   readonly statisticsBeginDate: () => string;
+  /** Latest campaign-statistics read maximum age. */
+  readonly campaignStatisticsFreshnessMinutes: number;
   /** Statistical overlap last date provider. */
   readonly statisticsEndDate: () => string;
+  /** Whether current-day spend/coverage semantics are verified for this runtime. */
+  readonly sameDaySpendContractVerified?: boolean;
+  /** Full statistical days to wait before finalization. */
+  readonly conversionLagDays: number;
+  /** Stable identical source reads required after conversion cutoff. */
+  readonly dayFinalizationStableReads: number;
+  /** Minimum duration spanned by stable reads. */
+  readonly dayFinalizationStableMinutes: number;
+  /** Maximum gap between continuous bid-state observations. */
+  readonly bidStateMaxObservationGapMinutes: number;
+}
+
+/**
+ * Operator-bounded synchronization request.
+ */
+export interface ManualDataSyncScope extends CampaignWorkScope {
+  /** Empty or omitted means every supported data kind. */
+  readonly dataKinds?: readonly SyncDataKind[];
 }
 
 /**
@@ -170,31 +194,12 @@ export class WbDataSyncWorker {
         page = await this.repository.loadCampaignWorkPage(cursor, this.configuration.pageSize);
         for (const campaignBatch of chunks(page, 50)) {
           assertNotAborted(signal);
-          const statistics = await this.api.getCampaignStatistics(
-            campaignBatch.map((campaign) => Number(campaign.wbCampaignId)),
-            this.configuration.statisticsBeginDate(),
-            this.configuration.statisticsEndDate(),
-          );
-          for (const campaign of campaignBatch) {
-            await this.repository.recordSourceSnapshot({
-              campaignId: campaign.campaignId,
-              dataKind: 'CAMPAIGN_STATISTICS',
-              endpointProfile: this.profile.profileId,
-              fetchedAt: this.now(),
-              invalidReason: 'FULLSTATS_MONEY_AND_AGGREGATION_UNVERIFIED',
-              normalizedData: statistics.filter(
-                (item) => BigInt(item.advertId) === campaign.wbCampaignId,
-              ),
-              sourceChecksum: evidenceChecksum(statistics),
-              syncRunId: runId,
-              valid: false,
-            });
-            invalidSources += 1;
-          }
+          invalidSources += await this.synchronizeStatistics(campaignBatch, runId);
         }
         for (const campaign of page) {
           assertNotAborted(signal);
           invalidSources += await this.synchronizeOptionalSources(campaign, runId);
+          await this.finalizePerformanceEvidence(campaign);
           await this.finalizeTargetSnapshots(campaign, runId);
         }
         const nextCursor = page.at(-1)?.wbCampaignId ?? 0n;
@@ -221,6 +226,312 @@ export class WbDataSyncWorker {
       ...(run.result === undefined ? {} : { counters: run.result }),
       started: run.started,
     });
+  }
+
+  /**
+   * Runs an operator-requested bounded resync without widening it to the whole account.
+   *
+   * @param scope - Campaign/target filters and selected data kinds.
+   * @returns Non-overlap result and exact counters.
+   */
+  public async synchronizeScope(scope: ManualDataSyncScope): Promise<{
+    readonly started: boolean;
+    readonly counters?: DataSyncCounters;
+  }> {
+    const selectedKinds = selectedDataKinds(scope.dataKinds);
+    const run = await this.repository.withSchedulerRun(
+      'MANUAL_RESYNC',
+      Math.max(this.configuration.currentStateDeadlineMs * 6, 60_000),
+      async ({ runId, signal }) => {
+        let page = await this.repository.loadCampaignWorkPage(
+          0n,
+          this.configuration.pageSize,
+          scope,
+          true,
+        );
+        let targets = 0;
+        let invalidSources = 0;
+        if (
+          selectedKinds.has('CAMPAIGN_DISCOVERY') ||
+          selectedKinds.has('CAMPAIGN_DETAILS') ||
+          selectedKinds.has('CURRENT_BID')
+        ) {
+          for (const batch of chunks(page, 50)) {
+            assertNotAborted(signal);
+            const details = await this.api.getCampaignDetails(
+              batch.map((campaign) => Number(campaign.wbCampaignId)),
+            );
+            const result = await this.repository.upsertCampaignDetails(
+              details,
+              this.now(),
+              runId,
+              this.configuration.externalWriteControlMode,
+            );
+            targets += result.targets;
+          }
+          page = await this.repository.loadCampaignWorkPage(0n, this.configuration.pageSize, scope);
+        }
+        if (selectedKinds.has('MINIMUM_BID')) {
+          for (const campaign of page) {
+            assertNotAborted(signal);
+            targets += await this.synchronizeMinimumBids(campaign, runId);
+          }
+        }
+        if (selectedKinds.has('CAMPAIGN_STATISTICS')) {
+          for (const batch of chunks(page, 50)) {
+            assertNotAborted(signal);
+            invalidSources += await this.synchronizeStatistics(batch, runId);
+          }
+        }
+        for (const campaign of page) {
+          assertNotAborted(signal);
+          invalidSources += await this.synchronizeOptionalSources(campaign, runId, selectedKinds);
+          if (selectedKinds.has('CAMPAIGN_STATISTICS')) {
+            await this.finalizePerformanceEvidence(campaign);
+          }
+          await this.finalizeTargetSnapshots(campaign, runId);
+        }
+        return Object.freeze({ campaigns: page.length, invalidSources, targets });
+      },
+    );
+    return Object.freeze({
+      ...(run.result === undefined ? {} : { counters: run.result }),
+      started: run.started,
+    });
+  }
+
+  /**
+   * Stores one fullstats read per campaign/day and normalizes only its app/nm leaves.
+   *
+   * @param campaigns - At most 50 campaign work rows.
+   * @param runId - Scheduler run UUID.
+   * @returns Invalid source-day count.
+   */
+  private async synchronizeStatistics(
+    campaigns: readonly CampaignWorkItem[],
+    runId: string,
+  ): Promise<number> {
+    if (campaigns.length === 0) return 0;
+    const response = await this.api.getCampaignStatistics(
+      campaigns.map((campaign) => Number(campaign.wbCampaignId)),
+      this.configuration.statisticsBeginDate(),
+      this.configuration.statisticsEndDate(),
+    );
+    const fetchedAt = this.now();
+    const contractVerified = this.fullstatsContractVerified();
+    let invalidSources = 0;
+    for (const campaign of campaigns) {
+      const source = response.find((item) => BigInt(item.advertId) === campaign.wbCampaignId);
+      if (source === undefined) {
+        invalidSources += 1;
+        await this.repository.recordSourceSnapshot({
+          campaignId: campaign.campaignId,
+          dataKind: 'CAMPAIGN_STATISTICS',
+          endpointProfile: this.profile.profileId,
+          fetchedAt,
+          invalidReason: 'CAMPAIGN_STATISTICS_MISSING',
+          normalizedData: [],
+          sourceChecksum: evidenceChecksum([]),
+          syncRunId: runId,
+          valid: false,
+        });
+        continue;
+      }
+      if (source.days.length === 0) {
+        invalidSources += 1;
+        await this.repository.recordSourceSnapshot({
+          campaignId: campaign.campaignId,
+          dataKind: 'CAMPAIGN_STATISTICS',
+          endpointProfile: this.profile.profileId,
+          fetchedAt,
+          invalidReason: contractVerified
+            ? 'CAMPAIGN_STATISTICS_EMPTY'
+            : 'FULLSTATS_MONEY_AND_AGGREGATION_UNVERIFIED',
+          normalizedData: source,
+          sourceChecksum: evidenceChecksum(source),
+          syncRunId: runId,
+          valid: false,
+        });
+        continue;
+      }
+      for (const day of source.days) {
+        const date = day.date.slice(0, 10);
+        const sourceVersion = evidenceChecksum(day);
+        const hasLeafRows = day.apps.some((app) => app.nms.length > 0);
+        const valid = contractVerified && hasLeafRows;
+        await this.repository.recordSourceSnapshot({
+          campaignId: campaign.campaignId,
+          dataKind: 'CAMPAIGN_STATISTICS',
+          endpointProfile: this.profile.profileId,
+          fetchedAt,
+          ...(valid
+            ? {}
+            : {
+                invalidReason: contractVerified
+                  ? 'FULLSTATS_LEAF_AGGREGATION_MISSING'
+                  : 'FULLSTATS_MONEY_AND_AGGREGATION_UNVERIFIED',
+              }),
+          normalizedData: day,
+          sourceChecksum: sourceVersion,
+          sourceDate: date,
+          syncRunId: runId,
+          valid,
+        });
+        if (!valid) {
+          invalidSources += 1;
+          continue;
+        }
+        await this.repository.upsertCampaignStatisticLeaves(
+          day.apps.flatMap((app) =>
+            app.nms.map((nm) => ({
+              appType: app.appType,
+              campaignId: campaign.campaignId,
+              fetchedAt,
+              nmId: BigInt(nm.nmId),
+              sourceVersion,
+              statistic: normalizeCampaignStatisticDay(
+                {
+                  atbs: nm.atbs,
+                  ...(nm.canceled === undefined ? {} : { canceled: nm.canceled }),
+                  clicks: nm.clicks,
+                  date,
+                  orders: nm.orders,
+                  ...(nm.shks === undefined ? {} : { shks: nm.shks }),
+                  sum: nm.sum,
+                  sum_price: nm.sum_price,
+                  views: nm.views,
+                },
+                'VERIFIED',
+              ),
+              syncRunId: runId,
+              wbCampaignId: campaign.wbCampaignId,
+            })),
+          ),
+        );
+        if (
+          this.sameDaySpendContractVerified() &&
+          date === this.configuration.statisticsEndDate()
+        ) {
+          await this.recordSameDaySpend(campaign, day, fetchedAt, runId);
+        }
+      }
+    }
+    return invalidSources;
+  }
+
+  /**
+   * Finalizes eligible historical response days only for a verified statistics profile.
+   *
+   * @param campaign - Bounded campaign page item.
+   * @returns Nothing after draft/final/superseded versions are persisted.
+   */
+  private async finalizePerformanceEvidence(campaign: CampaignWorkItem): Promise<void> {
+    if (!this.fullstatsContractVerified()) return;
+    await this.repository.finalizePerformanceDaysForCampaign(
+      campaign.campaignId,
+      {
+        bidStateMaxObservationGapMinutes: this.configuration.bidStateMaxObservationGapMinutes,
+        conversionLagDays: this.configuration.conversionLagDays,
+        dayFinalizationStableMinutes: this.configuration.dayFinalizationStableMinutes,
+        dayFinalizationStableReads: this.configuration.dayFinalizationStableReads,
+        externalWriteControlMode: this.configuration.externalWriteControlMode,
+      },
+      this.now(),
+    );
+  }
+
+  /**
+   * Stores deterministic target-level current-day spend and explicit coverage for a verified
+   * runtime contract.
+   *
+   * @param campaign - Campaign work item with article targets.
+   * @param day - Validated fullstats day.
+   * @param day.apps - Application-level leaves.
+   * @param day.date - WB statistical date.
+   * @param fetchedAt - Model-time source read.
+   * @param runId - Owning synchronization run.
+   * @returns Nothing after immutable source snapshots are recorded.
+   */
+  private async recordSameDaySpend(
+    campaign: CampaignWorkItem,
+    day: {
+      readonly apps: readonly {
+        readonly nms: readonly {
+          readonly nmId: number;
+          readonly sum: number | string;
+        }[];
+      }[];
+      readonly date: string;
+    },
+    fetchedAt: Date,
+    runId: string,
+  ): Promise<void> {
+    const spendByArticle = new Map<string, bigint>();
+    for (const app of day.apps) {
+      for (const nm of app.nms) {
+        const spend = normalizeCampaignStatisticDay(
+          {
+            atbs: 0,
+            canceled: 0,
+            clicks: 0,
+            date: day.date.slice(0, 10),
+            orders: 0,
+            shks: 0,
+            sum: nm.sum,
+            sum_price: 0,
+            views: 0,
+          },
+          'VERIFIED',
+        ).spendMinor;
+        const key = String(nm.nmId);
+        spendByArticle.set(key, (spendByArticle.get(key) ?? 0n) + spend);
+      }
+    }
+    for (const target of campaign.targets) {
+      const observedSameDaySpendMinor = spendByArticle.get(target.nmId.toString());
+      if (observedSameDaySpendMinor === undefined) continue;
+      const normalizedData = {
+        coverageEndedAt: fetchedAt.toISOString(),
+        observedSameDaySpendMinor: observedSameDaySpendMinor.toString(),
+        statisticalDate: day.date.slice(0, 10),
+      };
+      await this.repository.recordSourceSnapshot({
+        campaignId: campaign.campaignId,
+        dataKind: 'SAME_DAY_SPEND',
+        endpointProfile: this.profile.profileId,
+        fetchedAt,
+        normalizedData,
+        sourceChecksum: evidenceChecksum(normalizedData),
+        sourceDate: normalizedData.statisticalDate,
+        syncRunId: runId,
+        targetId: target.targetId,
+        valid: true,
+      });
+    }
+  }
+
+  /**
+   * Resolves the environment-specific fullstats contract gate.
+   *
+   * @returns Whether normalized fullstats evidence may be finalized.
+   */
+  private fullstatsContractVerified(): boolean {
+    return (
+      this.configuration.fullstatsContractVerified ??
+      this.profile.wireContracts.fullstatsMoneyAndAggregation.status === 'VERIFIED'
+    );
+  }
+
+  /**
+   * Resolves the environment-specific current-day coverage contract gate.
+   *
+   * @returns Whether current-day spend snapshots may be produced.
+   */
+  private sameDaySpendContractVerified(): boolean {
+    return (
+      this.configuration.sameDaySpendContractVerified ??
+      this.profile.wireContracts.sameDaySpend.status === 'VERIFIED'
+    );
   }
 
   /**
@@ -270,18 +581,20 @@ export class WbDataSyncWorker {
    *
    * @param campaign - Bounded work row.
    * @param runId - Scheduler run UUID.
+   * @param selectedKinds - Closed data-kind selection.
    * @returns Number of invalid diagnostic sources retained.
    */
   private async synchronizeOptionalSources(
     campaign: CampaignWorkItem,
     runId: string,
+    selectedKinds: ReadonlySet<SyncDataKind> = selectedDataKinds(),
   ): Promise<number> {
     let invalidSources = 0;
     const pairs = campaign.targets.slice(0, 100).map((target) => ({
       advert_id: Number(campaign.wbCampaignId),
       nm_id: Number(target.nmId),
     }));
-    if (pairs.length > 0 && campaign.bidType === 'MANUAL') {
+    if (pairs.length > 0 && campaign.bidType === 'MANUAL' && selectedKinds.has('CLUSTER_LIST')) {
       const clusters = await this.api.listClusters({ items: pairs });
       for (const item of clusters.items) {
         const collisions = findNormQueryNfcCollisions(item.norm_queries);
@@ -316,8 +629,9 @@ export class WbDataSyncWorker {
         }
       }
     }
-    const recommendationTarget = campaign.paymentType === 'CPM' ? campaign.targets[0] : undefined;
-    if (recommendationTarget !== undefined) {
+    const recommendationTarget =
+      campaign.paymentType === 'CPM' ? oldestRecommendationTarget(campaign.targets) : undefined;
+    if (recommendationTarget !== undefined && selectedKinds.has('BID_RECOMMENDATION')) {
       const recommendation = await this.api.getBidRecommendations(
         Number(campaign.wbCampaignId),
         Number(recommendationTarget.nmId),
@@ -334,19 +648,41 @@ export class WbDataSyncWorker {
         valid: true,
       });
     }
-    const budget = await this.api.getCampaignBudget(Number(campaign.wbCampaignId));
-    await this.repository.recordSourceSnapshot({
-      campaignId: campaign.campaignId,
-      dataKind: 'BUDGET_DIAGNOSTIC',
-      endpointProfile: this.profile.profileId,
-      fetchedAt: this.now(),
-      invalidReason: 'BUDGET_SEMANTICS_UNVERIFIED',
-      normalizedData: budget,
-      sourceChecksum: evidenceChecksum(budget),
-      syncRunId: runId,
-      valid: false,
-    });
-    return invalidSources + 1;
+    if (selectedKinds.has('CLUSTER_STATISTICS') && pairs.length > 0) {
+      const clusterStatistics = await this.api.getClusterStatistics({
+        from: this.configuration.statisticsBeginDate(),
+        items: pairs,
+        to: this.configuration.statisticsEndDate(),
+      });
+      await this.repository.recordSourceSnapshot({
+        campaignId: campaign.campaignId,
+        dataKind: 'CLUSTER_STATISTICS',
+        endpointProfile: this.profile.profileId,
+        fetchedAt: this.now(),
+        invalidReason: 'CLUSTER_STATISTICS_SEMANTICS_UNVERIFIED',
+        normalizedData: clusterStatistics,
+        sourceChecksum: evidenceChecksum(clusterStatistics),
+        syncRunId: runId,
+        valid: false,
+      });
+      invalidSources += 1;
+    }
+    if (selectedKinds.has('BUDGET_DIAGNOSTIC')) {
+      const budget = await this.api.getCampaignBudget(Number(campaign.wbCampaignId));
+      await this.repository.recordSourceSnapshot({
+        campaignId: campaign.campaignId,
+        dataKind: 'BUDGET_DIAGNOSTIC',
+        endpointProfile: this.profile.profileId,
+        fetchedAt: this.now(),
+        invalidReason: 'BUDGET_SEMANTICS_UNVERIFIED',
+        normalizedData: budget,
+        sourceChecksum: evidenceChecksum(budget),
+        syncRunId: runId,
+        valid: false,
+      });
+      invalidSources += 1;
+    }
+    return invalidSources;
   }
 
   /**
@@ -358,7 +694,11 @@ export class WbDataSyncWorker {
    */
   private async finalizeTargetSnapshots(campaign: CampaignWorkItem, runId: string): Promise<void> {
     const createdAt = this.now();
+    const statistics = await this.repository.loadLatestCampaignStatisticsEvidence(
+      campaign.campaignId,
+    );
     for (const target of campaign.targets) {
+      const sameDaySpend = await this.repository.loadLatestSameDaySpendEvidence(target.targetId);
       const evidence = [
         {
           dataKind: 'CAMPAIGN_DETAILS' as const,
@@ -389,12 +729,21 @@ export class WbDataSyncWorker {
         },
         {
           dataKind: 'CAMPAIGN_STATISTICS' as const,
-          fetchedAt: createdAt,
-          freshnessMinutes: this.configuration.minimumBidFreshnessMinutes,
+          fetchedAt: statistics?.fetchedAt ?? new Date(0),
+          freshnessMinutes: this.configuration.campaignStatisticsFreshnessMinutes,
           regimeChecksum: campaign.detailsChecksum,
           required: true,
-          sourceChecksum: this.profile.wireContracts.fullstatsMoneyAndAggregation.version,
-          valid: this.profile.wireContracts.fullstatsMoneyAndAggregation.status === 'VERIFIED',
+          sourceChecksum: statistics?.sourceChecksum ?? 'missing',
+          valid: statistics?.valid === true && this.fullstatsContractVerified(),
+        },
+        {
+          dataKind: 'SAME_DAY_SPEND' as const,
+          fetchedAt: sameDaySpend?.fetchedAt ?? new Date(0),
+          freshnessMinutes: this.configuration.campaignStatisticsFreshnessMinutes,
+          regimeChecksum: null,
+          required: false,
+          sourceChecksum: sameDaySpend?.sourceChecksum ?? 'missing',
+          valid: sameDaySpend?.valid === true && this.sameDaySpendContractVerified(),
         },
       ];
       const assessment = assessTargetSnapshot(evidence, createdAt);
@@ -407,6 +756,79 @@ export class WbDataSyncWorker {
       );
     }
   }
+}
+
+/**
+ * Selects one oldest article-level recommendation target without starving large campaigns.
+ *
+ * @param targets - Stable campaign target page.
+ * @returns One representative target for the least recently synchronized article.
+ */
+function oldestRecommendationTarget(
+  targets: CampaignWorkItem['targets'],
+): CampaignWorkItem['targets'][number] | undefined {
+  const byArticle = new Map<string, CampaignWorkItem['targets'][number]>();
+  for (const target of targets) {
+    const key = target.nmId.toString();
+    const current = byArticle.get(key);
+    if (
+      current === undefined ||
+      recommendationOrder(target.recommendationFetchedAt) <
+        recommendationOrder(current.recommendationFetchedAt)
+    ) {
+      byArticle.set(key, target);
+    }
+  }
+  return [...byArticle.values()].sort((left, right) => {
+    const freshness =
+      recommendationOrder(left.recommendationFetchedAt) -
+      recommendationOrder(right.recommendationFetchedAt);
+    return freshness !== 0
+      ? freshness
+      : left.nmId < right.nmId
+        ? -1
+        : left.nmId > right.nmId
+          ? 1
+          : 0;
+  })[0];
+}
+
+/**
+ * Converts missing recommendation evidence into highest oldest-first priority.
+ *
+ * @param value - Last successful fetch time.
+ * @returns Comparable epoch value.
+ */
+function recommendationOrder(value: Date | null): number {
+  return value?.getTime() ?? Number.NEGATIVE_INFINITY;
+}
+
+const ALL_SYNC_DATA_KINDS: readonly SyncDataKind[] = Object.freeze([
+  'CAMPAIGN_DISCOVERY',
+  'CAMPAIGN_DETAILS',
+  'CURRENT_BID',
+  'MINIMUM_BID',
+  'CAMPAIGN_STATISTICS',
+  'CLUSTER_LIST',
+  'CLUSTER_STATISTICS',
+  'BID_RECOMMENDATION',
+  'BUDGET_DIAGNOSTIC',
+  'SAME_DAY_SPEND',
+]);
+
+/**
+ * Validates an operator-selected data-kind list against the closed enum.
+ *
+ * @param values - Optional selection; empty means every supported kind.
+ * @returns Immutable membership set.
+ */
+function selectedDataKinds(values: readonly SyncDataKind[] = []): ReadonlySet<SyncDataKind> {
+  const selected = values.length === 0 ? ALL_SYNC_DATA_KINDS : values;
+  const allowed = new Set<SyncDataKind>(ALL_SYNC_DATA_KINDS);
+  if (selected.some((value) => !allowed.has(value))) {
+    throw new Error('INVALID_MANUAL_JOB_DATA_KIND');
+  }
+  return new Set(selected);
 }
 
 /**

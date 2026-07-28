@@ -1,5 +1,9 @@
 import { z } from 'zod';
 
+const nonBlankWireStringSchema = z
+  .string()
+  .refine((value) => value.trim().length > 0, 'Wire string must contain a non-whitespace value');
+
 /** Positive WB int64 represented within JavaScript's safe integer range. */
 export const wbIdSchema = z.number().int().positive();
 
@@ -162,7 +166,7 @@ export const clusterPairsRequestSchema = z
 /** One cluster bid wire item whose unit remains unverified. */
 export const clusterBidItemSchema = clusterPairSchema.extend({
   bid: z.number().int().nonnegative(),
-  norm_query: z.string().trim().min(1),
+  norm_query: nonBlankWireStringSchema,
 });
 
 /** Cluster-current-bids response schema. */
@@ -181,7 +185,7 @@ export const clusterWriteRequestSchema = z
 export const clusterListResponseSchema = z.object({
   items: z.array(
     clusterPairSchema.extend({
-      norm_queries: z.array(z.string().trim().min(1)),
+      norm_queries: z.array(nonBlankWireStringSchema),
     }),
   ),
 });
@@ -223,6 +227,9 @@ export const campaignStatisticsResponseSchema = z.array(
   }),
 );
 
+/** Runtime-validated full-statistics response. */
+export type CampaignStatisticsResponse = z.infer<typeof campaignStatisticsResponseSchema>;
+
 /** Cluster-statistics request schema. */
 export const clusterStatisticsRequestSchema = z
   .object({
@@ -241,7 +248,7 @@ const clusterStatisticSchema = z
     cpc: wireDecimalSchema,
     cpm: wireDecimalSchema.optional(),
     ctr: z.number().nonnegative().optional(),
-    normQuery: z.string().trim().min(1),
+    normQuery: nonBlankWireStringSchema,
     orders: z.number().int().nonnegative(),
     shks: z.number().int().nonnegative().optional(),
     spend: wireDecimalSchema,
@@ -291,7 +298,7 @@ export const bidRecommendationsResponseSchema = z
     normQueries: z.array(
       z
         .object({
-          normQuery: z.string().trim().min(1),
+          normQuery: nonBlankWireStringSchema,
           reachMax: recommendationValueSchema,
           reachMedium: recommendationValueSchema,
           reachMin: recommendationValueSchema,

@@ -199,6 +199,12 @@ describe('Decision Engine boundary coverage', () => {
     expect(() => decideBid(decisionInput({ decisionAt: new Date('invalid') }))).toThrow(
       'Decision time',
     );
+    expect(() => decideBid(decisionInput({ accountLocalDate: '28-07-2026' }))).toThrow(
+      'Account-local date',
+    );
+    expect(
+      decideBid(decisionInput({ accountLocalDate: '2026-07-29' })).decisionInputChecksum,
+    ).not.toBe(decideBid(decisionInput()).decisionInputChecksum);
   });
 
   it('covers all policy validation classes', () => {

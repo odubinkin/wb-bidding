@@ -299,7 +299,7 @@ model CampaignStatDaily {
   syncRunId                 String             @db.Uuid
   normalizedAggregationKind String
 
-  @@unique([wbCampaignId, nmId, date, sourceChecksum])
+  @@unique([wbCampaignId, nmId, date, sourceVersion, appType])
   @@index([campaignId, date])
   @@index([syncRunId])
 }
@@ -435,24 +435,24 @@ model BiddingPolicy {
 }
 
 model MetricSnapshot {
-  id                                 String           @id @default(uuid()) @db.Uuid
-  targetId                           String           @db.Uuid
-  target                             CampaignTarget   @relation(fields: [targetId], references: [id], onDelete: Restrict)
-  productEconomicsId                 String           @db.Uuid
-  productEconomics                   ProductEconomics @relation(fields: [productEconomicsId], references: [id], onDelete: Restrict)
-  productEconomicsVersion            BigInt
-  expectedContributionBeforeAdsMinor BigInt
-  policyId                           String           @db.Uuid
-  policy                             BiddingPolicy    @relation(fields: [policyId], references: [id], onDelete: Restrict)
-  periodStart                        DateTime         @db.Date
-  periodEnd                          DateTime         @db.Date
+  id                                 String            @id @default(uuid()) @db.Uuid
+  targetId                           String            @db.Uuid
+  target                             CampaignTarget    @relation(fields: [targetId], references: [id], onDelete: Restrict)
+  productEconomicsId                 String?           @db.Uuid
+  productEconomics                   ProductEconomics? @relation(fields: [productEconomicsId], references: [id], onDelete: Restrict)
+  productEconomicsVersion            BigInt?
+  expectedContributionBeforeAdsMinor BigInt?
+  policyId                           String            @db.Uuid
+  policy                             BiddingPolicy     @relation(fields: [policyId], references: [id], onDelete: Restrict)
+  periodStart                        DateTime          @db.Date
+  periodEnd                          DateTime          @db.Date
   metrics                            Json
   candidateEstimates                 Json
   completenessFlags                  String[]
-  inputSnapshotChecksum              String           @db.Char(64)
+  inputSnapshotChecksum              String            @db.Char(64)
   inputSnapshotSchema                String
   algorithmVersion                   String
-  calculatedAt                       DateTime         @db.Timestamptz(3)
+  calculatedAt                       DateTime          @db.Timestamptz(3)
   decisions                          BidDecision[]
 
   @@unique([targetId, inputSnapshotChecksum])
@@ -507,6 +507,10 @@ model BidExperiment {
   experimentReasonCode         String
   terminalReasonCode           String?
   resultDecisionId             String?          @db.Uuid
+  startDecisionId              String?          @db.Uuid
+  revertDecisionId             String?          @db.Uuid
+  revertStartedAt              DateTime?        @db.Timestamptz(3)
+  revertDeadlineAt             DateTime?        @db.Timestamptz(3)
   leaseOwner                   String?
   leaseUntil                   DateTime?        @db.Timestamptz(3)
   createdAt                    DateTime         @default(now()) @db.Timestamptz(3)

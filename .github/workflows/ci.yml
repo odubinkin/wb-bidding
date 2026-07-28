@@ -12,7 +12,7 @@ permissions:
 jobs:
   quality:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     services:
       postgres:
         image: postgres:18-alpine
@@ -42,10 +42,49 @@ jobs:
       - run: pnpm run quality
       - run: pnpm prisma migrate deploy
       - run: pnpm run test:integration
+      - run: pnpm run test:e2e
+      - run: pnpm run test:load
+      - run: pnpm run test:runbook
       - run: pnpm run build
       - run: pnpm run smoke:built
+      - run: pnpm run docs:check
+      - run: pnpm run security:secrets
+      - run: pnpm run security:container
       - run: docker compose config
       - run: docker compose -f docker-compose.mock.yml config
       - run: docker compose -f docker-compose.mock-only.yml config
-      - run: docker build --file Dockerfile .
-      - run: docker build --file Dockerfile.mock .
+      - run: docker build --file Dockerfile --tag wb-bidder:${{ github.sha }} .
+      - run: docker build --file Dockerfile.mock --tag wb-mock:${{ github.sha }} .
+      - run: pnpm run smoke:compose
+      - name: Scan bidder image
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          image-ref: wb-bidder:${{ github.sha }}
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+      - name: Scan mock image
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          image-ref: wb-mock:${{ github.sha }}
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+
+  dependency-security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm audit --audit-level=high --prod
+      - run: pnpm run security:secrets

@@ -10,8 +10,18 @@ import { APP_CONFIGURATION } from './application-config.js';
 import { ApplicationConfigurationModule } from './application-config.module.js';
 import { databasePoolProvider, DatabaseLifecycle } from './database.js';
 import { HealthController } from './health.controller.js';
+import { DecisionJobService } from './decision-job.service.js';
+import { ExperimentRuntimeService } from './experiment-runtime.service.js';
+import { ObservabilityService } from './observability.service.js';
+import { DatabasePreDispatchValidator } from './pre-dispatch-validator.js';
 import { ProblemDetailsFilter } from './problem-details.js';
+import { RuntimeCoordinatorService } from './runtime-coordinator.service.js';
+import { RuntimeClockService } from './runtime-clock.service.js';
+import { runtimeProviders } from './runtime.providers.js';
+import { RuntimeSafetyState } from './runtime-state.js';
+import { SchedulerService } from './scheduler.service.js';
 import { ServiceInfoController } from './service-info.controller.js';
+import { WriteRuntimeService } from './write-runtime.service.js';
 import { createWbTokenProfile, WB_TOKEN_PROFILE } from './wb-integration.js';
 
 /**
@@ -37,6 +47,16 @@ import { createWbTokenProfile, WB_TOKEN_PROFILE } from './wb-integration.js';
     },
     databasePoolProvider,
     DatabaseLifecycle,
+    ObservabilityService,
+    RuntimeSafetyState,
+    RuntimeClockService,
+    ...runtimeProviders,
+    DatabasePreDispatchValidator,
+    WriteRuntimeService,
+    DecisionJobService,
+    ExperimentRuntimeService,
+    SchedulerService,
+    RuntimeCoordinatorService,
     AdminAuthGuard,
     AdminService,
     {

@@ -223,6 +223,13 @@ describeWithDatabase('data synchronization persistence', () => {
       new Date('2026-07-29T03:00:00.000Z'),
     );
     expect(changed.superseded).toBe(true);
+    const restored = await repository.persistPerformanceDay(
+      target.targetId,
+      candidate,
+      firstAssessment,
+      new Date('2026-07-29T04:00:00.000Z'),
+    );
+    expect(restored).toEqual({ id: first.id, superseded: true });
     const versions = await pool.query<{ status: string }>(
       `SELECT "status" FROM "BidPerformanceDay"
         WHERE "targetId" = $1 AND "wbStatisticDate" = '2026-07-27'
@@ -230,6 +237,122 @@ describeWithDatabase('data synchronization persistence', () => {
       [target.targetId],
     );
     expect(versions.rows.map((row) => row.status).sort()).toEqual(['FINALIZED', 'SUPERSEDED']);
+  });
+
+  it('materializes a stable fullstats day and supersedes it after late attribution', async () => {
+    const suffix = Date.now() % 100_000;
+    const campaignId = randomUUID();
+    const targetId = randomUUID();
+    const wbCampaignId = BigInt(7_000_000 + suffix);
+    const nmId = BigInt(8_000_000 + suffix);
+    const observationRunId = randomUUID();
+    await pool.query(
+      `INSERT INTO "Campaign"
+         ("id", "wbCampaignId", "type", "status", "bidType", "paymentType", "name",
+          "supported", "lastSyncedAt")
+       VALUES ($1, $2, 9, 9, 'MANUAL', 'CPM', 'automatic-finalization', true,
+               '2026-07-21T00:00:00.000Z')`,
+      [campaignId, wbCampaignId.toString()],
+    );
+    await pool.query(
+      `INSERT INTO "CampaignTarget"
+         ("id", "campaignId", "nmId", "targetKind", "placement", "currentBidMinor",
+          "capability")
+       VALUES ($1, $2, $3, 'CARD', 'SEARCH', 1200, 'CARD_WRITE_READY')`,
+      [targetId, campaignId, nmId.toString()],
+    );
+    await pool.query(
+      `INSERT INTO "BidStateObservation"
+         ("id", "targetId", "observedAt", "currentBidMinor", "campaignStatus", "bidType",
+          "paymentType", "activePlacementConfig", "configurationChecksum", "syncRunId",
+          "externalWriteControlMode", "changeMarkerObserved")
+       SELECT md5($1 || ':' || observation)::uuid,
+              $2,
+              observation,
+              1200,
+              9,
+              'MANUAL'::"CampaignBidType",
+              'CPM'::"CampaignPaymentType",
+              '{"search":true,"recommendations":false}'::jsonb,
+              $3,
+              $4,
+              'EXCLUSIVE'::"ExternalWriteControlMode",
+              false
+         FROM generate_series(
+           '2026-07-20T00:00:00.000Z'::timestamptz,
+           '2026-07-21T00:00:00.000Z'::timestamptz,
+           INTERVAL '15 minutes'
+         ) observation`,
+      [targetId, targetId, 'c'.repeat(64), observationRunId],
+    );
+
+    const initialVersion = 'a'.repeat(64);
+    await repository.upsertCampaignStatisticLeaves([
+      statisticLeaf(
+        campaignId,
+        wbCampaignId,
+        nmId,
+        initialVersion,
+        new Date('2026-07-22T01:00:00.000Z'),
+        2n,
+      ),
+    ]);
+    await recordStableStatisticsReads(repository, campaignId, initialVersion, '2026-07-20', [
+      '2026-07-22T01:00:00.000Z',
+      '2026-07-22T02:00:00.000Z',
+    ]);
+    const finalizationConfiguration = {
+      bidStateMaxObservationGapMinutes: 20,
+      conversionLagDays: 1,
+      dayFinalizationStableMinutes: 60,
+      dayFinalizationStableReads: 2,
+      externalWriteControlMode: 'EXCLUSIVE' as const,
+    };
+    await expect(
+      repository.finalizePerformanceDaysForCampaign(
+        campaignId,
+        finalizationConfiguration,
+        new Date('2026-07-22T03:00:00.000Z'),
+      ),
+    ).resolves.toMatchObject({ finalized: 1, superseded: 0 });
+
+    const lateVersion = 'b'.repeat(64);
+    await repository.upsertCampaignStatisticLeaves([
+      statisticLeaf(
+        campaignId,
+        wbCampaignId,
+        nmId,
+        lateVersion,
+        new Date('2026-07-23T01:00:00.000Z'),
+        3n,
+      ),
+    ]);
+    await recordStableStatisticsReads(repository, campaignId, lateVersion, '2026-07-20', [
+      '2026-07-23T01:00:00.000Z',
+      '2026-07-23T02:00:00.000Z',
+    ]);
+    await expect(
+      repository.finalizePerformanceDaysForCampaign(
+        campaignId,
+        finalizationConfiguration,
+        new Date('2026-07-23T03:00:00.000Z'),
+      ),
+    ).resolves.toMatchObject({ finalized: 1, superseded: 1 });
+
+    const versions = await pool.query<{
+      inputChecksum: string;
+      orderedUnitsDelta: string;
+      status: string;
+    }>(
+      `SELECT "status"::text, "orderedUnitsDelta", "inputChecksum"
+         FROM "BidPerformanceDay"
+        WHERE "targetId" = $1
+        ORDER BY "createdAt"`,
+      [targetId],
+    );
+    expect(versions.rows.map((row) => row.status)).toEqual(['SUPERSEDED', 'FINALIZED']);
+    expect(versions.rows[0]?.inputChecksum).not.toBe(versions.rows[1]?.inputChecksum);
+    expect(versions.rows[1]?.orderedUnitsDelta).toBe('3');
   });
 
   it('applies the exact Stage 2 migration SQL over a populated pre-Stage-2 database', async () => {
@@ -284,6 +407,79 @@ describeWithDatabase('data synchronization persistence', () => {
     }
   });
 });
+
+/**
+ * Builds one exact app/nm fullstats leaf for an immutable content version.
+ *
+ * @param campaignId - Local campaign UUID.
+ * @param wbCampaignId - WB campaign identifier.
+ * @param nmId - WB article identifier.
+ * @param sourceVersion - Complete day content checksum.
+ * @param fetchedAt - Read instant.
+ * @param orderedUnits - Synthetic `shks` value.
+ * @returns One persistence row.
+ */
+function statisticLeaf(
+  campaignId: string,
+  wbCampaignId: bigint,
+  nmId: bigint,
+  sourceVersion: string,
+  fetchedAt: Date,
+  orderedUnits: bigint,
+) {
+  return {
+    appType: 1,
+    campaignId,
+    fetchedAt,
+    nmId,
+    sourceVersion,
+    statistic: {
+      atbs: orderedUnits + 2n,
+      attributedRevenueMinor: orderedUnits * 4_000n,
+      canceled: 0n,
+      clicks: orderedUnits * 4n,
+      date: '2026-07-20',
+      orderedUnits,
+      orders: orderedUnits,
+      spendMinor: orderedUnits * 400n,
+      views: orderedUnits * 50n,
+    },
+    syncRunId: randomUUID(),
+    wbCampaignId,
+  };
+}
+
+/**
+ * Persists independent stable reads for one unchanged day content version.
+ *
+ * @param repository - Data synchronization repository.
+ * @param campaignId - Local campaign UUID.
+ * @param sourceVersion - Day content checksum.
+ * @param sourceDate - WB statistical date.
+ * @param fetchedAtValues - Separated read instants.
+ * @returns Nothing after every observation is persisted.
+ */
+async function recordStableStatisticsReads(
+  repository: DataSyncRepository,
+  campaignId: string,
+  sourceVersion: string,
+  sourceDate: string,
+  fetchedAtValues: readonly string[],
+): Promise<void> {
+  for (const fetchedAt of fetchedAtValues) {
+    await repository.recordSourceSnapshot({
+      campaignId,
+      dataKind: 'CAMPAIGN_STATISTICS',
+      endpointProfile: 'verified-test-profile',
+      fetchedAt: new Date(fetchedAt),
+      normalizedData: { sourceDate },
+      sourceChecksum: sourceVersion,
+      sourceDate,
+      syncRunId: randomUUID(),
+      valid: true,
+    });
+  }
+}
 
 function performanceCandidate(nmId: number): PerformanceDayCandidate {
   const dayStartedAt = new Date('2026-07-27T00:00:00.000Z');

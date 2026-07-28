@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { DecisionRepository, decideBid } from '@wb-bidder/decision-engine';
+import { DecisionRepository, decideBid, type DecisionResult } from '@wb-bidder/decision-engine';
 import { DataSyncRepository } from '@wb-bidder/data-sync';
 
 import { decisionInput, decisionPolicy } from '../helpers/decision-fixtures.js';
@@ -317,6 +317,108 @@ describeWithDatabase('Decision Engine PostgreSQL invariants', () => {
         first.decisionId,
       ]),
     ).rejects.toThrow('immutable');
+  });
+
+  it('creates an experiment atomically with its start decision and enforces capacity', async () => {
+    const target = await pool.query<{ id: string }>(
+      `SELECT t."id" FROM "CampaignTarget" t
+        JOIN "Campaign" c ON c."id" = t."campaignId"
+       WHERE c."wbCampaignId" = 31001 AND t."nmId" = 123 AND t."targetKind" = 'CARD'`,
+    );
+    const persistedTargetId = target.rows[0]?.id;
+    if (persistedTargetId === undefined) {
+      throw new Error('Experiment target is missing');
+    }
+    const policy = await pool.query<{ id: string; version: string }>(
+      `SELECT "id", "version" FROM "BiddingPolicy"
+        WHERE "scope" = 'TARGET' AND "targetId" = $1
+        ORDER BY "version" DESC LIMIT 1`,
+      [persistedTargetId],
+    );
+    const economics = await pool.query<{ id: string; version: string }>(
+      `SELECT "id", "version" FROM "ProductEconomics"
+        WHERE "nmId" = 123 AND "effectiveTo" IS NULL`,
+    );
+    const policyRow = policy.rows[0];
+    const economicsRow = economics.rows[0];
+    if (policyRow === undefined || economicsRow === undefined) {
+      throw new Error('Experiment prerequisites are missing');
+    }
+    const experimentResult: DecisionResult = {
+      action: 'DECREASE',
+      boundedBidMinor: 90n,
+      decisionInputChecksum: 'd'.repeat(64),
+      explanation: {
+        actionBlockers: [],
+        buckets: [],
+        candidates: [],
+        inputSnapshotChecksum: 'e'.repeat(64),
+        reservedUnobservedSpendMinor: 10n,
+        unconditionalBlockers: [],
+      },
+      guardrailCodes: ['EXPLORATION_LOWER_ONLY'],
+      outcomeReasonCode: 'EXPLORATION_PLANNED',
+      proposedBidMinor: 90n,
+      queueEligible: true,
+      strategyReasonCode: 'EXPLORATION_PLANNED',
+    };
+    const request = {
+      calculatedAt: new Date('2026-07-30T12:00:00.000Z'),
+      currentBidMinor: 100n,
+      economicsId: economicsRow.id,
+      economicsVersion: BigInt(economicsRow.version),
+      expectedContributionMinor: 500n,
+      experiment: {
+        experimentBidMinor: 90n,
+        maxConcurrentPerAccount: 10,
+        maxConcurrentPerCampaign: 2,
+        plannedFullDays: 2,
+        sourceBidMinor: 100n,
+        spendLimitMinor: 1_000n,
+        spendSafetyBufferMinor: 100n,
+      },
+      periodEnd: '2026-07-30',
+      periodStart: '2026-07-01',
+      policyId: policyRow.id,
+      policyVersion: BigInt(policyRow.version),
+      result: experimentResult,
+      targetId: persistedTargetId,
+    };
+
+    const created = await repository.persistDecision(request);
+    const persisted = await pool.query<{
+      experimentBidMinor: string;
+      startDecisionId: string;
+      status: string;
+    }>(
+      `SELECT "status"::text, "experimentBidMinor", "startDecisionId"
+         FROM "BidExperiment" WHERE "targetId" = $1`,
+      [persistedTargetId],
+    );
+    expect(persisted.rows[0]).toEqual({
+      experimentBidMinor: '90',
+      startDecisionId: created.decisionId,
+      status: 'PLANNED',
+    });
+    await expect(repository.persistDecision(request)).resolves.toEqual({
+      created: false,
+      decisionId: created.decisionId,
+    });
+
+    await expect(
+      repository.persistDecision({
+        ...request,
+        calculatedAt: new Date('2026-07-30T12:01:00.000Z'),
+        result: {
+          ...experimentResult,
+          decisionInputChecksum: 'f'.repeat(64),
+          explanation: {
+            ...experimentResult.explanation,
+            inputSnapshotChecksum: 'a'.repeat(64),
+          },
+        },
+      }),
+    ).rejects.toThrow('EXPERIMENT_ALREADY_ACTIVE');
   });
 
   it('applies the exact Stage 3 migration over valid populated Stage 2 data', async () => {

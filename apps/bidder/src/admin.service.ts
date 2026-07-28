@@ -6,6 +6,7 @@ import type { Pool, PoolClient } from 'pg';
 
 import { DATABASE_POOL } from './database.js';
 import { AdminApiError } from './problem-details.js';
+import { RuntimeClockService } from './runtime-clock.service.js';
 import type {
   AutomationDto,
   EconomicsImportDto,
@@ -22,12 +23,16 @@ export class AdminService {
   private readonly decisions: DecisionRepository;
   private readonly writes: WritePipelineRepository;
 
-  public constructor(@Inject(DATABASE_POOL) private readonly pool: Pool) {
+  public constructor(
+    @Inject(DATABASE_POOL) private readonly pool: Pool,
+    private readonly clock: RuntimeClockService,
+  ) {
     this.decisions = new DecisionRepository(pool);
     this.writes = new WritePipelineRepository(pool);
   }
 
-  public async getEconomics(nmId: bigint, at: Date) {
+  public async getEconomics(nmId: bigint, at?: Date) {
+    const effectiveAt = at ?? this.clock.now();
     const result = await this.pool.query(
       `SELECT "id", "nmId", "expectedContributionBeforeAdsMinor", "effectiveFrom",
               "effectiveTo", "source"::text, "sourceUpdatedAt", "sourceReference", "version",
@@ -36,7 +41,7 @@ export class AdminService {
         WHERE "nmId" = $1 AND "effectiveFrom" <= $2
           AND ("effectiveTo" IS NULL OR "effectiveTo" > $2)
         ORDER BY "version" DESC LIMIT 1`,
-      [nmId.toString(), at],
+      [nmId.toString(), effectiveAt],
     );
     const row = result.rows[0] as Record<string, unknown> | undefined;
     if (row === undefined)
@@ -288,7 +293,7 @@ export class AdminService {
       scope: scope as 'CAMPAIGN' | 'TARGET',
       supersedeQueued: true,
       targetId: scope === 'TARGET' ? input.scopeId : null,
-      validFrom: new Date(),
+      validFrom: this.clock.now(),
       ...((input.dto as { changeReason?: string }).changeReason === undefined
         ? {}
         : { changeReason: (input.dto as { changeReason: string }).changeReason }),

@@ -183,7 +183,21 @@ export class ManualJobDto {
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(20)
-  @IsString({ each: true })
+  @IsIn(
+    [
+      'CAMPAIGN_DISCOVERY',
+      'CAMPAIGN_DETAILS',
+      'CURRENT_BID',
+      'MINIMUM_BID',
+      'CAMPAIGN_STATISTICS',
+      'CLUSTER_LIST',
+      'CLUSTER_STATISTICS',
+      'BID_RECOMMENDATION',
+      'BUDGET_DIAGNOSTIC',
+      'SAME_DAY_SPEND',
+    ],
+    { each: true },
+  )
   public dataKinds?: string[];
 
   @ApiProperty()

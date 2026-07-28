@@ -61,6 +61,8 @@ export interface NormalizedStatisticDay {
   readonly attributedRevenueMinor: bigint;
   /** Click count. */
   readonly clicks: bigint;
+  /** Technically undelivered ordered items when WB supplies the field. */
+  readonly canceled?: bigint | null;
   /** WB statistical date. */
   readonly date: string;
   /** Order count. */
@@ -91,6 +93,8 @@ export interface BidStateEvidence {
  * Complete evidence candidate for one BidPerformanceDay.
  */
 export interface PerformanceDayCandidate {
+  /** Deterministic finalization evaluation instant. */
+  readonly assessedAt?: Date;
   /** Whether placement attribution is unambiguous. */
   readonly attributionUnambiguous: boolean;
   /** Bid/configuration observations spanning the source day. */

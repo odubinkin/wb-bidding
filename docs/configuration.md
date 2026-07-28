@@ -46,19 +46,20 @@
 
 ## Verification, reconciliation и retention
 
-| Переменная                               | Тип; default; диапазон                  | Секрет | Влияние изменения                                                             |
-| ---------------------------------------- | --------------------------------------- | -----: | ----------------------------------------------------------------------------- |
-| `VERIFICATION_POLL_INTERVAL_MS`          | integer ms; `30000`; `1000..3600000`    |    нет | Интервал проверки принятого WB write.                                         |
-| `RECONCILIATION_CRON`                    | cron; `15 * * * * *`                    |    нет | Восстановление lease/crash windows и UNKNOWN.                                 |
-| `BID_VERIFICATION_INITIAL_DELAY_MS`      | integer ms; `30000`; `30000..3600000`   |    нет | Запрещает read до propagation window.                                         |
-| `BID_VERIFICATION_TIMEOUT_MS`            | integer ms; `600000`; `60000..86400000` |    нет | Общий deadline verification/reconciliation.                                   |
-| `RECONCILIATION_STABLE_OLD_STATE_READS`  | integer; `2`; `2..10`                   |    нет | Требуемые разделённые reads старого состояния до повторного write.            |
-| `RECONCILIATION_STABLE_READ_INTERVAL_MS` | integer ms; `30000`; `1000..3600000`    |    нет | Минимальный интервал между stable reads.                                      |
-| `RECONCILIATION_MAX_WRITE_ATTEMPTS`      | integer; `2`; `1..10`                   |    нет | Верхняя граница фактических dispatch одного решения.                          |
-| `WB_WRITE_PRE_BYTE_MAX_RETRIES`          | integer; `1`; `0..1`                    |    нет | Повторы только при доказанной непередаче ни одного byte и в том же attempt.   |
-| `PRE_WRITE_STATE_MAX_AGE_MS`             | integer ms; `10000`; `1000..60000`      |    нет | DB отклоняет `DISPATCHING`, если live-read старше этого окна.                 |
-| `MAX_DECISION_AGE_MINUTES`               | integer min; `60`; `1..10080`           |    нет | Более старое решение не отправляется после восстановления.                    |
-| `WB_WRITE_ATTEMPT_RETENTION_DAYS`        | integer days; `30`; `1..3650`           |    нет | Retention завершённых detail records; обязан превышать reconciliation window. |
+| Переменная                               | Тип; default; диапазон                     | Секрет | Влияние изменения                                                             |
+| ---------------------------------------- | ------------------------------------------ | -----: | ----------------------------------------------------------------------------- |
+| `VERIFICATION_POLL_INTERVAL_MS`          | integer ms; `30000`; `1000..3600000`       |    нет | Интервал проверки принятого WB write.                                         |
+| `RECONCILIATION_CRON`                    | cron; `15 * * * * *`                       |    нет | Восстановление lease/crash windows и UNKNOWN.                                 |
+| `BID_VERIFICATION_INITIAL_DELAY_MS`      | integer ms; `30000`; `30000..3600000`      |    нет | Запрещает read до propagation window.                                         |
+| `BID_VERIFICATION_TIMEOUT_MS`            | integer ms; `600000`; `60000..86400000`    |    нет | Общий deadline verification/reconciliation.                                   |
+| `RECONCILIATION_STABLE_OLD_STATE_READS`  | integer; `2`; `2..10`                      |    нет | Требуемые разделённые reads старого состояния до повторного write.            |
+| `RECONCILIATION_STABLE_READ_INTERVAL_MS` | integer ms; `30000`; `1000..3600000`       |    нет | Минимальный интервал между stable reads.                                      |
+| `RECONCILIATION_MAX_WRITE_ATTEMPTS`      | integer; `2`; `1..10`                      |    нет | Верхняя граница фактических dispatch одного решения.                          |
+| `WB_WRITE_PRE_BYTE_MAX_RETRIES`          | integer; `1`; `0..1`                       |    нет | Повторы только при доказанной непередаче ни одного byte и в том же attempt.   |
+| `PRE_WRITE_STATE_MAX_AGE_MS`             | integer ms; `10000`; `1000..60000`         |    нет | DB отклоняет `DISPATCHING`, если live-read старше этого окна.                 |
+| `MAX_DECISION_AGE_MINUTES`               | integer min; `60`; `1..10080`              |    нет | Более старое решение не отправляется после восстановления.                    |
+| `EXPERIMENT_REVERT_DEADLINE_MS`          | integer ms; `86400000`; `60000..604800000` |    нет | Deadline безопасного возврата lower-only experiment.                          |
+| `WB_WRITE_ATTEMPT_RETENTION_DAYS`        | integer days; `30`; `1..3650`              |    нет | Retention завершённых detail records; обязан превышать reconciliation window. |
 
 ## WB API
 

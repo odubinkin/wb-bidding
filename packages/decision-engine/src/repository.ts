@@ -8,6 +8,19 @@ import { validateDecisionPolicy } from './policy.js';
 import type { DecisionPolicy, DecisionResult } from './types.js';
 
 /**
+ * Atomic lower-only experiment creation accompanying its starting decision.
+ */
+export interface ExperimentPlanWrite {
+  readonly experimentBidMinor: bigint;
+  readonly maxConcurrentPerAccount: number;
+  readonly maxConcurrentPerCampaign: number;
+  readonly plannedFullDays: number;
+  readonly sourceBidMinor: bigint;
+  readonly spendLimitMinor: bigint;
+  readonly spendSafetyBufferMinor: bigint;
+}
+
+/**
  * Conditional immutable product-economics mutation.
  */
 export interface EconomicsMutation {
@@ -556,10 +569,11 @@ export class DecisionRepository {
    */
   public async persistDecision(request: {
     readonly calculatedAt: Date;
-    readonly currentBidMinor: bigint;
-    readonly economicsId: string;
-    readonly economicsVersion: bigint;
-    readonly expectedContributionMinor: bigint;
+    readonly currentBidMinor: bigint | null;
+    readonly economicsId: string | null;
+    readonly economicsVersion: bigint | null;
+    readonly experiment?: ExperimentPlanWrite;
+    readonly expectedContributionMinor: bigint | null;
     readonly periodEnd: string;
     readonly periodStart: string;
     readonly policyId: string;
@@ -593,8 +607,8 @@ export class DecisionRepository {
             metricId,
             request.targetId,
             request.economicsId,
-            request.economicsVersion.toString(),
-            request.expectedContributionMinor.toString(),
+            request.economicsVersion?.toString() ?? null,
+            request.expectedContributionMinor?.toString() ?? null,
             request.policyId,
             request.periodStart,
             request.periodEnd,
@@ -617,6 +631,9 @@ export class DecisionRepository {
         await client.query('COMMIT');
         return Object.freeze({ created: false, decisionId: replay.id });
       }
+      if (request.experiment !== undefined) {
+        await this.assertExperimentCapacity(client, request.targetId, request.experiment);
+      }
       await client.query(
         `UPDATE "DecisionQueueItem" q SET "status" = 'SUPERSEDED'
            FROM "BidDecision" d
@@ -637,7 +654,7 @@ export class DecisionRepository {
           decisionId,
           request.targetId,
           request.result.action,
-          request.currentBidMinor.toString(),
+          request.currentBidMinor?.toString() ?? null,
           request.result.proposedBidMinor?.toString() ?? null,
           request.result.boundedBidMinor?.toString() ?? null,
           request.result.strategyReasonCode,
@@ -654,8 +671,30 @@ export class DecisionRepository {
         await client.query(
           `INSERT INTO "DecisionQueueItem"
              ("id", "decisionId", "status", "priority", "availableAt")
-           VALUES ($1, $2, 'QUEUED', $3, $4)`,
-          [randomUUID(), decisionId, decisionPriority(request.result), request.calculatedAt],
+           VALUES ($1, $2, 'QUEUED', $3, clock_timestamp())`,
+          [randomUUID(), decisionId, decisionPriority(request.result)],
+        );
+      }
+      if (request.experiment !== undefined) {
+        await client.query(
+          `INSERT INTO "BidExperiment"
+             ("id", "targetId", "status", "sourceBidMinor", "experimentBidMinor",
+              "desiredRevertBidMinor", "plannedFullDays", "spendLimitMinor",
+              "spendSafetyBufferMinor", "policyVersion", "algorithmVersion",
+              "experimentReasonCode", "startDecisionId")
+           VALUES ($1, $2, 'PLANNED', $3, $4, $3, $5, $6, $7, $8,
+                   'rules-v1', 'EXPLORATION_PLANNED', $9)`,
+          [
+            randomUUID(),
+            request.targetId,
+            request.experiment.sourceBidMinor.toString(),
+            request.experiment.experimentBidMinor.toString(),
+            request.experiment.plannedFullDays,
+            request.experiment.spendLimitMinor.toString(),
+            request.experiment.spendSafetyBufferMinor.toString(),
+            request.policyVersion.toString(),
+            decisionId,
+          ],
         );
       }
       await client.query('COMMIT');
@@ -665,6 +704,53 @@ export class DecisionRepository {
       throw error;
     } finally {
       client.release();
+    }
+  }
+
+  /**
+   * Enforces target, campaign, and account experiment limits under transaction locks.
+   *
+   * @param client - Active decision transaction.
+   * @param targetId - Planned experiment target.
+   * @param plan - Versioned concurrency limits.
+   * @returns Nothing.
+   */
+  private async assertExperimentCapacity(
+    client: PoolClient,
+    targetId: string,
+    plan: ExperimentPlanWrite,
+  ): Promise<void> {
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended('experiment-account', 0))");
+    const counts = await client.query<{
+      accountCount: string;
+      campaignCount: string;
+      targetCount: string;
+    }>(
+      `SELECT
+         COUNT(experiment."id")::text AS "accountCount",
+         (COUNT(experiment."id") FILTER (
+           WHERE experiment_target."campaignId" = selected."campaignId"
+         ))::text AS "campaignCount",
+         (COUNT(experiment."id") FILTER (
+           WHERE experiment."targetId" = $1
+         ))::text AS "targetCount"
+       FROM "CampaignTarget" selected
+       LEFT JOIN "BidExperiment" experiment
+         ON experiment."status" IN ('PLANNED','ACTIVE','COLLECTING','EVALUATING','REVERTING')
+       LEFT JOIN "CampaignTarget" experiment_target
+         ON experiment_target."id" = experiment."targetId"
+      WHERE selected."id" = $1
+      GROUP BY selected."campaignId"`,
+      [targetId],
+    );
+    const row = counts.rows[0];
+    if (row === undefined) throw new Error('EXPERIMENT_TARGET_NOT_FOUND');
+    if (BigInt(row.targetCount) > 0n) throw new Error('EXPERIMENT_ALREADY_ACTIVE');
+    if (BigInt(row.campaignCount) >= BigInt(plan.maxConcurrentPerCampaign)) {
+      throw new Error('EXPERIMENT_CAMPAIGN_CONCURRENCY_LIMIT');
+    }
+    if (BigInt(row.accountCount) >= BigInt(plan.maxConcurrentPerAccount)) {
+      throw new Error('EXPERIMENT_ACCOUNT_CONCURRENCY_LIMIT');
     }
   }
 

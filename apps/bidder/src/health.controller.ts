@@ -1,9 +1,8 @@
-import { Controller, Get, Header, Inject } from '@nestjs/common';
-import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Controller, Get, Header, ServiceUnavailableException } from '@nestjs/common';
+import { ApiOkResponse, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Registry } from 'prom-client';
 
-import { APP_CONFIGURATION } from './application-config.js';
-import type { AppConfiguration } from '@wb-bidder/config';
+import { ObservabilityService, type ReadinessCheck } from './observability.service.js';
 
 /**
  * Stable health response shared by liveness and readiness endpoints.
@@ -13,7 +12,15 @@ export interface HealthResponse {
   readonly status: 'ok';
 }
 
-const METRICS_REGISTRY = new Registry();
+/**
+ * Readiness response containing only bounded, non-secret diagnostics.
+ */
+export interface ReadyResponse {
+  /** Individual readiness checks. */
+  readonly checks: readonly ReadinessCheck[];
+  /** Machine-readable state. */
+  readonly status: 'ok';
+}
 
 /**
  * Exposes cheap liveness, startup readiness, and Prometheus endpoints.
@@ -24,9 +31,9 @@ export class HealthController {
   /**
    * Creates the observability controller.
    *
-   * @param configuration - Validated startup configuration used for readiness.
+   * @param observability - Cached health and metrics service.
    */
-  public constructor(@Inject(APP_CONFIGURATION) private readonly configuration: AppConfiguration) {}
+  public constructor(private readonly observability: ObservabilityService) {}
 
   /**
    * Confirms that the process and event loop can serve a request.
@@ -41,18 +48,24 @@ export class HealthController {
   }
 
   /**
-   * Confirms Stage 0 startup configuration validity.
-   *
-   * Database, migrations, account binding, and cached integration state are added by later tasks.
+   * Confirms database, migrations, account binding, configuration, and cached WB integration.
    *
    * @returns Readiness state without issuing a WB request.
+   * @throws {ServiceUnavailableException} When any required readiness invariant is false.
    */
   @ApiOperation({ summary: 'Service readiness' })
   @ApiOkResponse({ description: 'Required startup invariants are valid.' })
+  @ApiResponse({ description: 'One or more required invariants failed.', status: 503 })
   @Get('/health/ready')
-  public ready(): HealthResponse {
-    void this.configuration.accountCurrency;
-    return { status: 'ok' };
+  public async ready(): Promise<ReadyResponse> {
+    const snapshot = await this.observability.readiness();
+    if (!snapshot.ready) {
+      throw new ServiceUnavailableException({
+        checks: snapshot.checks,
+        status: 'error',
+      });
+    }
+    return { checks: snapshot.checks, status: 'ok' };
   }
 
   /**
@@ -65,6 +78,6 @@ export class HealthController {
   @Header('Content-Type', Registry.PROMETHEUS_CONTENT_TYPE)
   @Get('/metrics')
   public metrics(): Promise<string> {
-    return METRICS_REGISTRY.metrics();
+    return this.observability.metricsText();
   }
 }

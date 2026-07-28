@@ -12,6 +12,7 @@ import {
   WbRateLimiter,
   WbTransportError,
   applyStricterOverrides,
+  bidRecommendationsResponseSchema,
   campaignDetailsResponseSchema,
   cardWriteBidsSchema,
   classifyHttpFailure,
@@ -19,6 +20,8 @@ import {
   decimalMajorToMinor,
   endpointDefinition,
   kopecksToMinor,
+  clusterListResponseSchema,
+  clusterWriteRequestSchema,
   minimumBidsRequestSchema,
   parseRateLimitHeaders,
   selectRateLimitProfile,
@@ -64,6 +67,39 @@ describe('WB runtime schemas and exact units', () => {
     expect(() => kopecksToMinor(-1, 'card.bid_kopecks')).toThrow('cannot be normalized exactly');
   });
 
+  it('preserves cluster query case and whitespace on every wire schema', () => {
+    const wire = '  Dress\u00A0';
+    expect(
+      clusterListResponseSchema.parse({
+        items: [{ advert_id: 1, nm_id: 2, norm_queries: [wire] }],
+      }).items[0]?.norm_queries[0],
+    ).toBe(wire);
+    expect(
+      clusterWriteRequestSchema.parse({
+        bids: [{ advert_id: 1, bid: 100, nm_id: 2, norm_query: wire }],
+      }).bids[0]?.norm_query,
+    ).toBe(wire);
+    expect(
+      bidRecommendationsResponseSchema.parse({
+        advertId: 1,
+        base: {
+          competitiveBid: { bidKopecks: 100 },
+          leadersBid: { bidKopecks: 110 },
+          top2: { bidKopecks: 0 },
+        },
+        nmId: 2,
+        normQueries: [
+          {
+            normQuery: wire,
+            reachMax: { bidKopecks: 130 },
+            reachMedium: { bidKopecks: 120 },
+            reachMin: { bidKopecks: 110 },
+          },
+        ],
+      }).normQueries[0]?.normQuery,
+    ).toBe(wire);
+  });
+
   it('keeps unverified writes and deprecated pairs fail-closed', () => {
     expect(endpointDefinition('cardWriteBids').status).toBe('VERIFIED');
     expect(endpointDefinition('clusterWriteBids').status).toBe('UNVERIFIED');
@@ -103,7 +139,9 @@ describe('WB token profiles', () => {
       sid: '00000000-0000-4000-8000-000000000001',
       t: true,
     };
-    expect(validateWbToken(jwt(claims), 'sandbox', 1_900_000_000).tokenType).toBe('TEST');
+    const testProfile = validateWbToken(jwt(claims), 'sandbox', 1_900_000_000);
+    expect(testProfile.tokenType).toBe('TEST');
+    expect(testProfile.writeCapable).toBe(true);
     expect(() => validateWbToken(jwt(claims), 'prod', 1_900_000_000)).toThrow(
       'production requires',
     );

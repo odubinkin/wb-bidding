@@ -3,6 +3,8 @@
 Текущий immutable profile: `wb-promotion-2026-07-28-v1`. Его JSON и checksum встраиваются в
 artifact, а redacted synthetic fixtures хранятся в
 `fixtures/wb-contracts/wb-promotion-runtime-v1.json`.
+Результат последней технической сверки и незакрытая подпись release owner находятся в
+[evidence report](wb-api-evidence/wb-promotion-2026-07-28-v1.md).
 
 Официальные источники:
 
@@ -72,3 +74,21 @@ Production transport использует отдельные границы:
 
 CI поднимает PostgreSQL, применяет полный migration chain и проверяет, что два экземпляра
 limiter с одним account key атомарно делят bucket и server-directed freeze.
+
+## Sandbox smoke
+
+Bidder не создаёт token, campaign или budget. Внешний владелец готовит manifest по
+`fixtures/sandbox/manifest.example.json` (без credential), затем отдельно инжектирует Test token:
+
+```bash
+pnpm run build
+SANDBOX_FIXTURE_MANIFEST=/secure/manifest.json \
+WB_API_TOKEN='injected-by-secret-manager' \
+pnpm run smoke:sandbox
+```
+
+Read-only smoke проверяет scope, details, minimum bids и fullstats schemas. Обратимый canary
+выполняется только при наличии `writeCanary` и отдельного
+`SANDBOX_WRITE_CONFIRMATION=I_UNDERSTAND_SANDBOX_WRITES`; baseline обязан совпасть с manifest,
+а `finally` выполняет rollback и bounded read-after-write. Redacted evidence по умолчанию
+записывается в `artifacts/sandbox-smoke-evidence.json`; token и response payload туда не входят.

@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { ConfigurationError, loadConfiguration, loadMockConfiguration } from '@wb-bidder/config';
+import {
+  addIsoCalendarDays,
+  ConfigurationError,
+  formatAccountLocalDate,
+  loadConfiguration,
+  loadMockConfiguration,
+} from '@wb-bidder/config';
 
 const BASE_ENVIRONMENT = {
   ACCOUNT_CURRENCY: 'RUB',
@@ -18,6 +24,44 @@ const BASE_ENVIRONMENT = {
   WB_EXPECTED_TOKEN_TYPE: 'PERSONAL',
   WB_PRODUCTION_WRITE_CONFIRMATION: '',
 } as const;
+
+describe('formatAccountLocalDate', () => {
+  it('uses the account calendar across leap-day and DST boundaries', () => {
+    expect(formatAccountLocalDate('Pacific/Kiritimati', new Date('2024-02-28T10:30:00.000Z'))).toBe(
+      '2024-02-29',
+    );
+    expect(formatAccountLocalDate('America/New_York', new Date('2024-03-10T04:59:00.000Z'))).toBe(
+      '2024-03-09',
+    );
+    expect(formatAccountLocalDate('America/New_York', new Date('2024-03-10T05:00:00.000Z'))).toBe(
+      '2024-03-10',
+    );
+    expect(formatAccountLocalDate('America/New_York', new Date('2024-03-10T07:01:00.000Z'))).toBe(
+      '2024-03-10',
+    );
+  });
+
+  it('rejects invalid instants and timezones', () => {
+    expect(() => formatAccountLocalDate('UTC', new Date('invalid'))).toThrow(RangeError);
+    expect(() =>
+      formatAccountLocalDate('Not/A_Timezone', new Date('2026-07-28T00:00:00.000Z')),
+    ).toThrow(RangeError);
+  });
+});
+
+describe('addIsoCalendarDays', () => {
+  it('crosses month, leap-year, and year boundaries as calendar days', () => {
+    expect(addIsoCalendarDays('2024-02-28', 1)).toBe('2024-02-29');
+    expect(addIsoCalendarDays('2024-02-29', 1)).toBe('2024-03-01');
+    expect(addIsoCalendarDays('2026-12-31', 1)).toBe('2027-01-01');
+    expect(addIsoCalendarDays('2026-01-01', -1)).toBe('2025-12-31');
+  });
+
+  it('rejects impossible dates and non-integer offsets', () => {
+    expect(() => addIsoCalendarDays('2026-02-29', 1)).toThrow(RangeError);
+    expect(() => addIsoCalendarDays('2026-01-01', 0.5)).toThrow(RangeError);
+  });
+});
 
 describe('loadConfiguration', () => {
   it('keeps production writes disabled by default', () => {

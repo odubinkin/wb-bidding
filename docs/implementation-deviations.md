@@ -1,27 +1,66 @@
-# Implementation deviations and verification constraints
+# Расхождения реализации и внешние ограничения проверки
 
-## Functional deviations
+## Функциональные расхождения
 
-There are no intentional functional deviations from the technical specification in completed
-stages.
+### Verified mock cluster profile
 
-The official WB endpoint profile currently marks cluster bid unit, minimum, absence, write, and
-delete semantics as `UNVERIFIED`. In accordance with the specification's fail-closed rule, cluster
-automation is observation-only and cluster mutation methods reject dispatch. This is a required
-safety state, not an alternative contract. Enabling it requires a new pinned profile supported by
-official WB documentation and contract fixtures.
+ТЗ требует положительные mock-only сценарии для manual CPM cluster и `DELETE`/`ABSENT`
+(E2E-24 и E2E-49). HTTP mock реализует соответствующие synthetic endpoints, но общий WB adapter,
+Data Sync capability и write executor используют production endpoint profile, где cluster
+unit/minimum/absence/delete contract обоснованно `UNVERIFIED`. Отдельный immutable verified
+mock profile и cluster executor не реализованы.
 
-The corporate identity provider remains intentionally replaceable. The production boundary uses
-the specification's interim service-token mode, explicit per-operation permissions, private-network
-deployment assumptions, constant-time comparison, protected documentation routes, and secret
-redaction. Replacing the service token with the selected corporate provider must preserve the same
-permission names and audit actor contract.
+Текущее отличие: cluster targets всегда `OBSERVE_ONLY`; POST/DELETE не исходят. Причина
+production-ограничения — отсутствие воспроизводимого официального/sandbox evidence. Эта причина
+не отменяет требования отдельного synthetic mock profile, поэтому расхождение является
+функциональным release blocker, а не waiver.
 
-## Local verification constraint
+### Топология функциональных E2E
 
-The local Docker daemon was unavailable during development. Docker Compose definitions and
-multi-stage non-root images are validated statically, all packages build, built Node entrypoints
-pass smoke tests, and the complete write flow was executed against a temporary local PostgreSQL
-server plus the real deterministic WB mock HTTP application. CI/release environments must still run
-the Docker image build and Compose smoke gates; this is a verification-environment constraint, not
-a difference in implemented behavior.
+ТЗ формулирует все 51 сценарий как проходящие через `docker-compose.mock.yml`. Реализация
+запускает Compose build/health/readiness/HTTP smoke отдельно, а функциональные suites используют
+те же приложения с in-process HTTP mock и временными PostgreSQL databases. Причина — изоляция,
+точная fault injection и быстрый deterministic teardown; локальная среда также не имела Docker
+daemon. Поведение card full-cycle доказано, но буквальная топология требования отличается.
+
+### Неподтверждённые production-контракты
+
+Неподтверждённые контракты не заменены предположениями:
+
+- cluster unit/minimum/absence/write/delete остаются `UNVERIFIED`, поэтому cluster automation
+  работает только observation-only;
+- fullstats money/aggregation и same-day reporting lag остаются `UNVERIFIED`; данные сохраняются,
+  но production increase закрыт;
+- budget fields сохраняются диагностически и не называются остатком.
+
+Это требуемое fail-closed поведение ТЗ. Для production-включения нужен новый pinned profile, официальный
+source, воспроизводимые fixtures и подписанный release-owner evidence report.
+
+Corporate identity provider не выбран владельцем продукта. Реализован предусмотренный ТЗ
+промежуточный service-token boundary: permissions, constant-time comparison, private-network
+deployment assumptions, audit actor и redaction. Замена provider должна сохранить permissions и
+audit contract.
+
+## Внешние незакрытые gates
+
+На дату документа отсутствуют предоставленные пользователем:
+
+1. внешний sandbox fixture manifest и Test credential для обязательного smoke;
+2. зафиксированное владельцем продукта решение о production writes и пунктах раздела 30;
+3. подписанный release-owner evidence report для переходов `UNVERIFIED → VERIFIED`.
+
+Код harness и команды готовы, но эти результаты нельзя изготовить синтетически или считать
+пройденными без внешнего evidence.
+
+## Ограничение локальной среды
+
+Локальный Docker CLI доступен, но daemon во время разработки был недоступен. Compose-файлы и
+non-root images проверяются статически, workspace собирается, built entrypoints проходят smoke
+с реальным локальным PostgreSQL и HTTP mock. Docker build/Compose runtime и container scan
+остаются обязательными CI/release gates; отличие относится к среде верификации, а не к поведению.
+
+## Вывод о готовности
+
+Система не может быть объявлена полностью production-ready до устранения verified mock cluster
+расхождения, зелёного Compose runtime/CI evidence, sandbox smoke и решений product/API release
+owners. Все остальные известные расхождения перечислены выше; скрытых waivers документ не вводит.

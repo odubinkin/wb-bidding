@@ -198,19 +198,18 @@ export class MockStateService {
     const embeddedProfile = CURRENT_ENDPOINT_PROFILE.personalProductionLimits[context.endpointKey];
     const profile = fault?.rateLimit ?? embeddedProfile;
     const refillRate = profile.requests / profile.intervalMs;
+    const quotaNowMs = Date.now();
     const state = this.rateBuckets.get(context.endpointKey) ?? {
-      lastRefillAtMs: this.virtualTimeMs,
+      lastRefillAtMs: quotaNowMs,
       tokens: profile.burst,
     };
     state.tokens = Math.min(
       profile.burst,
-      state.tokens + Math.max(0, this.virtualTimeMs - state.lastRefillAtMs) * refillRate,
+      state.tokens + Math.max(0, quotaNowMs - state.lastRefillAtMs) * refillRate,
     );
-    state.lastRefillAtMs = this.virtualTimeMs;
+    state.lastRefillAtMs = quotaNowMs;
     const retryAtMs =
-      state.tokens >= 1
-        ? this.virtualTimeMs
-        : this.virtualTimeMs + Math.ceil((1 - state.tokens) / refillRate);
+      state.tokens >= 1 ? quotaNowMs : quotaNowMs + Math.ceil((1 - state.tokens) / refillRate);
     const headers: Readonly<Record<string, string>> = Object.freeze({
       'x-ratelimit-limit': String(profile.requests),
       'x-ratelimit-remaining': String(Math.max(0, Math.floor(state.tokens - 1))),
@@ -222,10 +221,8 @@ export class MockStateService {
       record.responseStatus = 429;
       record.responseBody = quotaResponse;
       throw createMockHttpException(quotaResponse, 429, {
-        'retry-after': String(Math.max(1, Math.ceil((retryAtMs - this.virtualTimeMs) / 1_000))),
-        'x-ratelimit-retry': String(
-          Math.max(1, Math.ceil((retryAtMs - this.virtualTimeMs) / 1_000)),
-        ),
+        'retry-after': String(Math.max(1, Math.ceil((retryAtMs - quotaNowMs) / 1_000))),
+        'x-ratelimit-retry': String(Math.max(1, Math.ceil((retryAtMs - quotaNowMs) / 1_000))),
         ...headers,
       });
     }
@@ -603,7 +600,8 @@ export class MockStateService {
    */
   public campaignStatistics(ids: readonly number[]): unknown {
     return ids.map((advertId) => {
-      const days = [...this.dailyDates]
+      const currentStatisticalDate = this.nowIso().slice(0, 10);
+      const days = [...new Set([...this.dailyDates, currentStatisticalDate])]
         .sort()
         .map((date, index) => this.statisticDay(date, 20001, index));
       const sum = days.reduce((total, day) => total + day.sum, 0);

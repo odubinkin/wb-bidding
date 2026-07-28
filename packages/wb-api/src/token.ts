@@ -133,7 +133,7 @@ export function validateWbToken(
     readOnly,
     sellerSid: claims.sid,
     tokenType,
-    writeCapable: tokenType === 'PERSONAL' && !readOnly,
+    writeCapable: (tokenType === 'PERSONAL' || tokenType === 'TEST') && !readOnly,
   });
 }
 

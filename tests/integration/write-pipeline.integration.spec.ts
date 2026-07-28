@@ -4,6 +4,7 @@ import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { AdminService } from '../../apps/bidder/src/admin.service.js';
+import type { RuntimeClockService } from '../../apps/bidder/src/runtime-clock.service.js';
 import {
   WritePipelineRepository,
   stateChecksum,
@@ -38,6 +39,7 @@ describeWithDatabase('write pipeline PostgreSQL invariants', () => {
       '202607281500_stage2_sync_evidence',
       '202607281600_stage3_decision_engine',
       '202607281700_stage4_write_pipeline',
+      '202607291000_stage5_production_runtime',
     ]) {
       await pool.query(
         await readFile(
@@ -543,7 +545,9 @@ describeWithDatabase('write pipeline PostgreSQL invariants', () => {
 
   it('creates an inactive immutable policy idempotently and activates it with ETag semantics', async () => {
     const fixture = await createFixture(pool, 'policy-activation');
-    const service = new AdminService(pool);
+    const service = new AdminService(pool, {
+      now: () => new Date(),
+    } as RuntimeClockService);
     const dto = {
       campaignId: fixture.campaignId,
       changeReason: 'new campaign policy',
@@ -624,6 +628,32 @@ describeWithDatabase('write pipeline PostgreSQL invariants', () => {
            WHERE "idempotencyKey" = 'policy-activation-idempotency') AS "idempotencyCount"`,
     );
     expect(evidence.rows[0]).toEqual({ auditCount: '1', idempotencyCount: '1' });
+  });
+
+  it('claims a queue burst across executor replicas without duplicate ownership', async () => {
+    const first = await createFixture(pool, 'replica-a');
+    const second = await createFixture(pool, 'replica-b');
+    const expected = [first.decisionId, second.decisionId];
+    await pool.query(
+      `UPDATE "DecisionQueueItem"
+          SET "availableAt" = CASE
+            WHEN "decisionId" = ANY($1::uuid[]) THEN NOW()
+            ELSE NOW() + INTERVAL '1 hour'
+          END
+        WHERE "status" IN ('QUEUED','RETRY_WAIT')`,
+      [expected],
+    );
+
+    const [replicaA, replicaB] = await Promise.all([
+      repository.claim('replica-a', 1, 30),
+      repository.claim('replica-b', 1, 30),
+    ]);
+    const claimed = [...replicaA, ...replicaB].map((item) => item.decisionId);
+
+    expect(replicaA).toHaveLength(1);
+    expect(replicaB).toHaveLength(1);
+    expect(new Set(claimed).size).toBe(2);
+    expect(claimed.sort()).toEqual(expected.sort());
   });
 
   it('applies the Stage 4 migration over a clean Stage 3 database', async () => {
