@@ -1,0 +1,26 @@
+name: wb-promotion-mock
+
+services:
+  wb-mock:
+    build:
+      context: .
+      dockerfile: Dockerfile.mock
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      MOCK_CLOCK_MODE: virtual
+      MOCK_INITIAL_TIME: ${MOCK_INITIAL_TIME:-2026-07-28T00:00:00.000Z}
+      MOCK_SEED: ${MOCK_SEED:-foundation}
+      PORT: 3001
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3001/health/live').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    ports:
+      - '${WB_MOCK_PORT:-3001}:3001'

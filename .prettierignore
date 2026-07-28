@@ -1,0 +1,10 @@
+.agentplane/
+.git/
+AGENTS.md
+coverage/
+dist/
+**/dist/
+docs/technical-specification.md
+generated/
+node_modules/
+pnpm-lock.yaml

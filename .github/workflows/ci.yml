@@ -1,0 +1,49 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: wb_bidder_test
+          POSTGRES_PASSWORD: test-only-password
+          POSTGRES_USER: wb_bidder
+        options: >-
+          --health-cmd "pg_isready -U wb_bidder -d wb_bidder_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+        ports:
+          - 5432:5432
+    env:
+      DATABASE_URL: postgresql://wb_bidder:test-only-password@localhost:5432/wb_bidder_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run quality
+      - run: pnpm run build
+      - run: pnpm run smoke:built
+      - run: docker compose config
+      - run: docker compose -f docker-compose.mock.yml config
+      - run: docker compose -f docker-compose.mock-only.yml config
+      - run: docker build --file Dockerfile .
+      - run: docker build --file Dockerfile.mock .

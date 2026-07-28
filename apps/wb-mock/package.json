@@ -1,0 +1,24 @@
+{
+  "name": "@wb-bidder/wb-mock",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@nestjs/common": "11.1.28",
+    "@nestjs/core": "11.1.28",
+    "@nestjs/platform-express": "11.1.28",
+    "@nestjs/swagger": "11.4.6",
+    "@wb-bidder/config": "workspace:*",
+    "@wb-bidder/contracts": "workspace:*",
+    "nestjs-pino": "4.6.0",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2"
+  },
+  "scripts": {
+    "build": "tsup src/main.ts --format esm --sourcemap --clean",
+    "clean": "rimraf dist",
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js",
+    "typecheck": "tsc --noEmit"
+  }
+}

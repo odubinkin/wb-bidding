@@ -1,0 +1,32 @@
+# syntax=docker/dockerfile:1.7
+FROM node:24-bookworm-slim AS base
+ENV PNPM_HOME=/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+RUN corepack enable
+WORKDIR /app
+
+FROM base AS dependencies
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/bidder/package.json apps/bidder/package.json
+COPY apps/wb-mock/package.json apps/wb-mock/package.json
+COPY packages/config/package.json packages/config/package.json
+COPY packages/contracts/package.json packages/contracts/package.json
+RUN pnpm install --frozen-lockfile
+
+FROM dependencies AS build
+COPY . .
+RUN pnpm run prisma:generate
+RUN pnpm --filter @wb-bidder/config build \
+    && pnpm --filter @wb-bidder/contracts build \
+    && pnpm --filter @wb-bidder/bidder build
+RUN pnpm deploy --filter @wb-bidder/bidder --prod /runtime
+
+FROM node:24-bookworm-slim AS runtime
+ENV NODE_ENV=production
+WORKDIR /app
+COPY --from=build --chown=node:node /runtime/node_modules ./node_modules
+COPY --from=build --chown=node:node /app/apps/bidder/dist ./dist
+COPY --from=build --chown=node:node /app/package.json ./package.json
+USER node
+EXPOSE 3000
+CMD ["node", "dist/main.js"]

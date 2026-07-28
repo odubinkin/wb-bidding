@@ -1,0 +1,72 @@
+name: wb-bidder
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: wb_bidder
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-development-only}
+      POSTGRES_USER: wb_bidder
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U wb_bidder -d wb_bidder']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: build
+    command: ['pnpm', 'run', 'prisma:migrate:deploy']
+    environment:
+      DATABASE_URL: postgresql://wb_bidder:${POSTGRES_PASSWORD:-local-development-only}@postgres:5432/wb_bidder
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+
+  bidder:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      ACCOUNT_CURRENCY: ${ACCOUNT_CURRENCY:-RUB}
+      ACCOUNT_TIMEZONE: ${ACCOUNT_TIMEZONE:-Europe/Moscow}
+      ADMIN_API_SERVICE_TOKEN: ${ADMIN_API_SERVICE_TOKEN:-replace-with-at-least-32-characters}
+      DATABASE_URL: postgresql://wb_bidder:${POSTGRES_PASSWORD:-local-development-only}@postgres:5432/wb_bidder
+      LOG_FORMAT: json
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}
+      PORT: 3000
+      SCHEDULER_ENABLED: ${SCHEDULER_ENABLED:-true}
+      WB_API_MODE: ${WB_API_MODE:-prod}
+      WB_API_PROD_BASE_URL: https://advert-api.wildberries.ru
+      WB_API_TOKEN: ${WB_API_TOKEN:-missing-token}
+      WB_API_WRITE_ENABLED: ${WB_API_WRITE_ENABLED:-false}
+      WB_ENDPOINT_PROFILE_VERSION: wb-promotion-2026-07-28-v1
+      WB_EXPECTED_TOKEN_TYPE: ${WB_EXPECTED_TOKEN_TYPE:-PERSONAL}
+      WB_PRODUCTION_WRITE_CONFIRMATION: ${WB_PRODUCTION_WRITE_CONFIRMATION:-}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3000/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    ports:
+      - '${BIDDER_PORT:-3000}:3000'
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

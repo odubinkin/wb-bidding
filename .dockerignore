@@ -1,0 +1,8 @@
+.agentplane/
+.env
+.git/
+coverage/
+dist/
+generated/
+node_modules/
+*.log

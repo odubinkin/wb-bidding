@@ -1,0 +1,19 @@
+{
+  "checkedAt": "2026-07-28T00:00:00.000Z",
+  "profileId": "wb-promotion-2026-07-28-v1",
+  "sources": [
+    "https://dev.wildberries.ru/ru/openapi/promotion",
+    "https://dev.wildberries.ru/ru/openapi/api-information",
+    "https://dev.wildberries.ru/knowledge-base/articles/019d49a1-28ca-7735-bf2f-98210695abc7/limity-zaprosov-wb-api",
+    "https://dev.wildberries.ru/knowledge-base/articles/019d49a0-f60a-7b42-bcbb-15b1cfee9023/sposoby-podkliucheniia-k-wb-api-token-i-oauth-2-0",
+    "https://dev.wildberries.ru/sandbox",
+    "https://dev.wildberries.ru/release-notes"
+  ],
+  "wireContracts": {
+    "budgetSemantics": "UNVERIFIED",
+    "cardBidMinorUnits": "VERIFIED",
+    "clusterBid": "UNVERIFIED",
+    "fullstatsMoneyAndAggregation": "UNVERIFIED",
+    "sameDaySpend": "UNVERIFIED"
+  }
+}

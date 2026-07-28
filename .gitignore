@@ -1,4 +1,3 @@
-
 # agentplane: ignore runtime/transient workspace artifacts
 .env
 .agentplane/worktrees
@@ -21,3 +20,15 @@ CLAUDE.md.bak-*
 .agentplane/cache.sqlite
 .agentplane/cache.sqlite-wal
 .agentplane/cache.sqlite-shm
+
+# project runtime and build artifacts
+.DS_Store
+.env.*
+!.env.example
+.tmp/
+coverage/
+dist/
+generated/
+node_modules/
+*.log
+*.tsbuildinfo
