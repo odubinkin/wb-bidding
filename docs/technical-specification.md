@@ -209,22 +209,24 @@ Observability ──────> logs, /health/live, /health/ready, /metrics
 
 ### 6.1. NestJS-модули bidder
 
-- `ConfigModule`;
-- `DatabaseModule`;
-- `WbApiModule`;
-- `RateLimitModule`;
-- `SchedulerModule`;
-- `DataSyncModule`;
-- `MetricsCalculationModule`;
-- `DecisionModule`;
-- `DecisionQueueModule`;
-- `ExecutorModule`;
-- `ReconciliationModule`;
-- `PolicyModule`;
-- `ProductEconomicsModule`;
-- `AuditModule`;
-- `ObservabilityModule`;
-- `AdminApiModule`.
+| Модуль | Зона ответственности |
+|---|---|
+| `ConfigModule` | Загружает и типизирует конфигурацию, валидирует переменные окружения и инварианты запуска, включая `ACCOUNT_CURRENCY` и safety-флаги режимов WB API. Предоставляет остальным модулям неизменяемую конфигурацию и не содержит бизнес-правил. |
+| `DatabaseModule` | Управляет жизненным циклом Prisma Client, подключением к PostgreSQL, транзакциями и общими примитивами доступа к данным. Не реализует доменные расчёты и не скрывает сетевые вызовы к WB API. |
+| `WbApiModule` | Реализует адаптер WB API для режимов `mock`, `sandbox` и `prod`: endpoint profiles, сериализацию запросов, runtime-валидацию и нормализацию ответов, классификацию ошибок, retries и circuit breaker. Не принимает решений об изменении ставок. |
+| `RateLimitModule` | Обеспечивает общий для всех реплик распределённый rate limiter, применяет лимиты по группам методов и адаптирует паузы по rate-limit headers WB. Не знает бизнес-семантику запросов и не определяет порядок обработки решений. |
+| `SchedulerModule` | Регистрирует независимые расписания jobs, предотвращает параллельный запуск одного job через lock/lease и контролирует run metadata, deadline и завершение. Делегирует полезную работу профильным модулям и не содержит логику синхронизации, расчёта или применения ставок. |
+| `DataSyncModule` | Выбирает поддерживаемые кампании, читает кампании, ставки, minimum bids и статистику через `WbApiModule`, валидирует данные и сохраняет snapshots, freshness и checkpoints. Не рассчитывает целевые ставки и не выполняет write-запросы к WB. |
+| `MetricsCalculationModule` | Детерминированно рассчитывает метрики из валидных данных PostgreSQL и формирует неизменяемый `MetricSnapshot` со всеми входами и checksum. Не обращается к WB API, не выбирает новую ставку и не ставит решения в очередь. |
+| `DecisionModule` | Применяет версионированные политики и guardrails к `MetricSnapshot`, перебирает допустимые ставки и формирует детерминированный `BidDecision` с reason code и explanation. Не обращается к WB API и не применяет решение. |
+| `DecisionQueueModule` | Хранит state machine очереди решений, обеспечивает semantic deduplication, приоритет, lease/claim, переходы состояний и retry metadata. Не рассчитывает решения и не выполняет WB-запросы. |
+| `ExecutorModule` | Получает решения из очереди, повторно проверяет их актуальность, пакетирует операции, выполняет write через `WbApiModule` и фиксирует `WbWriteAttempt`. Не пересчитывает решение и не считает HTTP success окончательным подтверждением изменения. |
+| `ReconciliationModule` | Выполняет verification read, сопоставляет фактическое состояние WB с отправленным решением, разрешает `UNKNOWN_RESULT`, восстанавливает зависшие leases и завершает либо отменяет queue item. Не повторяет write с неизвестным результатом без предварительной проверки. |
+| `PolicyModule` | Валидирует, версионирует и хранит политики автоматизации, назначения политик кампаниям и режимы `enabled`, `disabled` и `observe-only`. Не рассчитывает метрики или решения и не изменяет ставки напрямую. |
+| `ProductEconomicsModule` | Управляет неизменяемыми версиями product economics, conditional update, идемпотентностью и асинхронным batch-импортом, включая dry-run и построчные результаты. Не реализует формулу прибыли и не обращается к WB API. |
+| `AuditModule` | Создаёт неизменяемые бизнес-события аудита для изменений конфигурации, политик, product economics, решений и попыток применения; обеспечивает correlation IDs и безопасное представление значений. Не заменяет технические логи и Prometheus-метрики. |
+| `ObservabilityModule` | Предоставляет структурированные логи, Prometheus-метрики, tracing context и endpoints `/health/live`, `/health/ready`, `/metrics`. Не является источником бизнес-аудита и не использует высококардинальные идентификаторы как metric labels. |
+| `AdminApiModule` | Предоставляет внутренний REST API `/api/v1`, DTO, runtime-валидацию, аутентификацию, авторизацию, `application/problem+json` и генерируемый OpenAPI-контракт. Делегирует операции профильным application services и не обращается напрямую к Prisma или WB API. |
 
 Запрещены циклические зависимости модулей. Интеграция с WB должна зависеть от интерфейсов доменного слоя, а не наоборот.
 
