@@ -5,9 +5,9 @@
 | Поле | Значение |
 |---|---|
 | Назначение | Техническое задание на разработку сервиса автоматического управления ставками в кампаниях WB Продвижение |
-| Версия | 1.2 |
+| Версия | 1.3 |
 | Статус | Готово к декомпозиции и оценке разработки |
-| Дата актуализации сведений WB API | 27 июля 2026 года |
+| Дата актуализации сведений WB API | 28 июля 2026 года |
 | Язык продукта и документации | Русский |
 | Основной стек | TypeScript, NestJS, Prisma, PostgreSQL |
 
@@ -74,8 +74,8 @@ expectedProfit =
 - кампании WB Продвижение типа `9`;
 - модели оплаты `cpm` и `cpc`, если конкретная операция поддерживается текущим WB API;
 - кампании с типом ставки `manual` и `unified`;
-- ставки карточек товаров по месту размещения;
-- ставки поисковых кластеров для поддерживаемых WB API кампаний;
+- ставки карточек товаров для сочетаний campaign/payment/bid/placement type, у которых доступная статистика позволяет однозначно связать результат с управляемой ставкой;
+- ставки поисковых кластеров только для поддерживаемых WB API кампаний с ручной ставкой и моделью оплаты `cpm`;
 - синхронизация кампаний, ставок, минимальных ставок и статистики;
 - расчёт метрик и правил без машинного обучения;
 - очередь решений в PostgreSQL;
@@ -87,6 +87,8 @@ expectedProfit =
 - отдельный NestJS mock-сервер;
 - Docker Compose, логирование, аудит, health/readiness и Prometheus-метрики;
 - автоматизированные unit, integration, contract и end-to-end тесты.
+
+В режиме `mock` календарные дни, conversion lag, задержка видимости ставки и длительность exploration моделируются виртуальными часами. Автоматизированные тесты НЕ ДОЛЖНЫ ждать реальные минуты или сутки: они переводят mock-time вперёд через служебный API и завершают многодневный сценарий за секунды.
 
 ### 3.2. Не входит в первую версию
 
@@ -100,7 +102,10 @@ expectedProfit =
 - изменение цен и скидок товара;
 - попытка обойти или увеличить лимиты WB API;
 - несколько WB seller accounts в одном deployment;
-- выбор валюты через API, хранение валюты в бизнес-записях и конвертация валют.
+- выбор валюты через API, хранение валюты в бизнес-записях и конвертация валют;
+- независимая оптимизация двух manual placement-ставок одной карточки, если WB не предоставляет непересекающуюся статистику отдельно для каждого placement;
+- изменение ставки поискового кластера в `cpc`: статистика такого кластера может использоваться диагностически, но актуальный WB write-метод для cluster bid поддерживает только manual `cpm`;
+- глобальное портфельное распределение общего бюджета между targets и моделирование cross-target cannibalization.
 
 Эти функции могут быть добавлены позднее отдельным изменением ТЗ.
 
@@ -139,9 +144,11 @@ expectedProfit =
 | Минимальные ставки | `POST /api/advert/v1/bids/min` | 1–100 `nmId`, вид оплаты и размещения | 20 запросов/мин, интервал 3 с, burst 5 |
 | Изменение ставки карточки | `PATCH /api/advert/v1/bids` | до 50 элементов; сумма в копейках | 5 запросов/с, интервал 200 мс, burst 5 |
 | Текущие ставки кластеров | `POST /adv/v0/normquery/get-bids` | до 100 пар `advert_id` + `nm_id` | 5 запросов/с, интервал 200 мс, burst 10 |
+| Активные и неактивные кластеры | `POST /adv/v0/normquery/list` | до 100 пар; возвращаются кластеры, по которым было не меньше 100 показов | 5 запросов/с, интервал 200 мс, burst 10 |
 | Изменение ставок кластеров | `POST /adv/v0/normquery/bids` | до 100 ставок; только поддерживаемые кампании | 2 запроса/с, интервал 500 мс, burst 4 |
 | Статистика кампаний | `GET /adv/v3/fullstats` | до 50 ID, период до 31 дня, статусы `7`, `9`, `11` | 3 запроса/мин, интервал 20 с, burst 1 |
 | Дневная статистика кластеров | `POST /adv/v1/normquery/stats` | до 100 пар, период дат | 10 запросов/мин, интервал 6 с, burst 20 |
+| Рекомендуемые ставки | `GET /api/advert/v0/bids/recommendations` | один `advertId` + `nmId`; только `cpm` | 5 запросов/мин, интервал 12 с, burst 5 |
 | Бюджет кампании | `GET /adv/v1/budget` | один ID кампании | 4 запроса/с, интервал 250 мс, burst 4 |
 | Проверка доступности | `GET /ping` | base URL выбранного режима | согласно общей документации |
 
@@ -158,11 +165,31 @@ expectedProfit =
 
 Статистика кластеров может возвращаться и для `cpc`, но набор полей отличается: показатели, основанные на показах (`views`, `ctr`, `cpm`), могут отсутствовать. Runtime schema и Decision Engine ДОЛЖНЫ считать такие поля опциональными. Метод установки ставки конкретного поискового кластера используется только для ручной ставки и `cpm`, как указано в документации метода.
 
+WB позволяет передавать отдельные card bids для `search` и `recommendations`, однако опубликованный контракт `GET /adv/v3/fullstats` не предоставляет нормативный placement dimension, позволяющий разделить `spend`, `orders` и `shks` одной карточки между этими ставками. Поэтому применяется следующая capability matrix:
+
+| Управляемый target | Источник эффективности | Режим v1 |
+|---|---|---|
+| Карточка в кампании `unified`, placement `combined`, `cpm` или `cpc` | дневной `fullstats` по campaign + `nmId` | `APPLY` |
+| Карточка в кампании `manual` с ровно одним активным placement, `cpm` или `cpc` | дневной `fullstats` по campaign + `nmId`; единственный placement делает атрибуцию однозначной | `APPLY` |
+| Карточка в кампании `manual` с одновременно активными `search` и `recommendations` | `fullstats` не разделяет результат по placement | `OBSERVE_ONLY` либо `BLOCKED` с `INSUFFICIENT_ATTRIBUTION_GRANULARITY`; два независимых write-решения запрещены |
+| Поисковый кластер `manual cpm` | `POST /adv/v1/normquery/stats` по campaign + `nmId` + `normQuery` | `APPLY` |
+| Поисковый кластер `manual cpc` | статистика доступна без `views`, `ctr`, `cpm`, но cluster bid write не поддерживается | только диагностика, `UNSUPPORTED_CAMPAIGN` для write |
+
+«Активный placement» определяется по подтверждённой конфигурации campaign/placement API, а не только по ненулевому bid: нулевое либо отсутствующее значение ставки не считается достаточным доказательством выключенного placement.
+
+Система НЕ ДОЛЖНА получать placement-статистику вычитанием cluster statistics из card/campaign statistics: WB не гарантирует совпадение их атрибуции, полноты и времени стабилизации. Если WB добавит нормативный placement dimension, его поддержка требует новой версии adapter schema и algorithm version.
+
+`POST /adv/v0/normquery/list` используется для discovery кластеров, но его результат ограничен кластерами, по которым было не меньше 100 показов. `get-bids` и statistics могут дополнять discovery управляемыми или наблюдавшимися кластерами. Bidder не создаёт и не оптимизирует кластер, которого нет ни в одном актуальном WB-источнике.
+
+`GET /api/advert/v0/bids/recommendations` возвращает для `cpm` аукционные ориентиры карточки (`competitiveBid`, `leadersBid`, `top2`) и уровни охвата кластеров (`reachMin`, `reachMedium`, `reachMax`). Эти значения МОГУТ добавляться в множество candidate bids, но не являются доказательством прибыльности и не заменяют profit estimator.
+
 ### 4.4. Денежные единицы и поля статистики
 
-Ставки актуальных bid endpoints передаются в копейках. Это не означает, что все денежные поля всех ответов WB также выражены в копейках: статистические суммы и бюджеты могут иметь другую документированную единицу и десятичный формат.
+Ставки актуальных bid endpoints передаются в полях, которые WB называет копейками (`bid_kopecks`, `bids_kopecks`, `bidKopecks`). Во внутренней модели используется нейтральный термин `minor unit`: одна сотая `ACCOUNT_CURRENCY`. Суффикс `Kopecks` допустим только в wire DTO WB adapter; доменные поля имеют суффикс `Minor`.
 
-Адаптер ДОЛЖЕН иметь явную таблицу единиц на уровне `endpoint + field` и конвертировать значение во внутренние minor units через точную decimal-арифметику. Запрещено применять единое слепое умножение ко всем денежным полям.
+Это не означает, что все денежные поля всех ответов WB также выражены в сотых долях: статистические суммы и бюджеты могут иметь другую документированную единицу и десятичный формат.
+
+Адаптер ДОЛЖЕН иметь явную таблицу единиц на уровне `endpoint + field` и конвертировать значение во внутренние minor units через точную decimal-арифметику. `ACCOUNT_CURRENCY` в v1 должен обозначать валюту с двумя десятичными знаками; несовместимая scale вызывает startup failure. Запрещено применять единое слепое умножение ко всем денежным полям.
 
 Минимальная нормализация статистики:
 
@@ -188,7 +215,7 @@ expectedProfit =
 5. **Детерминированность.** Одинаковые входные данные, версия политики и конфигурация дают одинаковое решение.
 6. **Fail closed.** При устаревших, неполных или противоречивых данных ставка не изменяется.
 7. **Объяснимость.** Каждое решение содержит формулы, значения входов, сработавшие ограничения и причину.
-8. **Деньги — целые числа.** Ставки и денежные суммы хранятся как `BigInt` в minor units константы `ACCOUNT_CURRENCY`; для ставок WB — копейки. `float` для денег запрещён.
+8. **Деньги — целые числа.** Ставки и денежные суммы хранятся как `BigInt` в minor units — сотых долях константы `ACCOUNT_CURRENCY`; wire-поля ставок WB называются копейками только внутри адаптера. `float` для денег запрещён.
 9. **UTC внутри системы.** В БД и API сервиса используется UTC; локальная зона применяется только для календарных политик продавца.
 
 ## 6. Компоненты
@@ -251,6 +278,7 @@ Data Sync Worker ДОЛЖЕН:
 - карточки и текущие ставки по размещениям;
 - минимальные ставки;
 - текущие ставки кластеров, если применимо;
+- список доступных кластеров и CPM-рекомендации ставок, если применимо;
 - статистика кампаний;
 - статистика кластеров, если применимо;
 - бюджет кампании, если включён бюджетный guardrail.
@@ -266,7 +294,9 @@ Data Sync Worker ДОЛЖЕН:
 
 Повторная загрузка одного периода должна быть идемпотентной: используется `upsert` по естественному составному ключу.
 
-Между последовательными статистическими snapshots система формирует interval deltas и связывает их с подтверждённой ставкой target. Интервал, внутри которого ставка изменялась либо была неизвестна, не используется для оценки bid response.
+Между последовательными statistical snapshots система МОЖЕТ формировать intraday deltas для budget guardrail и мониторинга аномального расхода. Такие deltas не используются как самостоятельные observations profit estimator: WB возвращает статистику по календарным датам и может поздно доатрибутировать заказы и расходы к уже прочитанному дню.
+
+Основная единица bid-response evidence — завершённый `BidPerformanceDay`. Он связывает финализированную дневную статистику с bid state, который был подтверждён и неизменен весь соответствующий WB statistical day. Частичный день, день изменения ставки, placement configuration, campaign status или payment type, а также день с неизвестным состоянием исключается из profit estimator.
 
 ### 7.3. Шаг 3. Расчёт метрик
 
@@ -288,7 +318,7 @@ Data Sync Worker ДОЛЖЕН:
 - ROAS;
 - ожидаемый вклад до рекламы;
 - ожидаемая прибыль после рекламы для текущей ставки;
-- оценки заказанных единиц, расхода и прибыли candidate bids;
+- консервативные дневные оценки заказанных единиц, расхода и прибыли candidate bids;
 - полнота и свежесть данных.
 
 ### 7.4. Шаг 4. Решение
@@ -298,8 +328,8 @@ Decision Engine ДОЛЖЕН:
 1. получить согласованный snapshot данных и активную версию политики;
 2. разрешить действующую версию `ProductEconomics` для `nmId`;
 3. проверить полноту, допуски и свежесть;
-4. построить допустимые candidate bids и оценить ожидаемую прибыль каждого;
-5. выбрать ставку с максимальной ожидаемой прибылью;
+4. построить допустимые candidate bids и оценить консервативную дневную прибыль каждого обеспеченного данными кандидата;
+5. выбрать ставку с максимальным `conservativeProfitScore`;
 6. применить floor, cap, hysteresis, cooldown и ограничение скорости изменения;
 7. сформировать `NO_CHANGE`, `INCREASE`, `DECREASE` или `BLOCKED`;
 8. сохранить объяснение независимо от наличия изменения.
@@ -368,8 +398,8 @@ Executor ДОЛЖЕН:
 - `nmId BIGINT`;
 - `placement COMBINED | SEARCH | RECOMMENDATIONS`;
 - `normQuery TEXT NULL`;
-- `currentBidKopecks BIGINT`;
-- `minimumBidKopecks BIGINT`;
+- `currentBidMinor BIGINT`;
+- `minimumBidMinor BIGINT`;
 - `lastConfirmedAt`;
 - unique `(campaignId, nmId, placement, normQueryNormalized)`.
 
@@ -385,21 +415,30 @@ Executor ДОЛЖЕН:
 - составной unique по измерениям дня;
 - партиционирование по `date` СЛЕДУЕТ применять при подтверждённом объёме.
 
-#### `BidPerformanceObservation`
+#### `BidPerformanceDay`
 
-Один нормализованный интервал, в течение которого target имел одну подтверждённую ставку:
+Один финализированный WB statistical day, в течение которого target имел один неизменный подтверждённый bid state:
 
 - `targetId`;
-- `confirmedBidKopecks`;
-- `periodStart`, `periodEnd`;
-- `orderedUnitsDelta`, `ordersDelta`, `spendDeltaMinor`, `attributedRevenueDeltaMinor`;
-- `exposureMinutes`;
-- ссылки на начальный и конечный statistical snapshot;
+- `wbStatisticDate`;
+- `confirmedBidMinor`;
+- для связанного manual-card target — полный `placementBidState`, чтобы доказать, что второй placement не влиял на общую статистику;
+- `campaignStatus`, `paymentType`, `bidType`, active placement configuration;
+- `viewsDelta NULL`, `clicksDelta`, `atbsDelta`, `ordersDelta`, `orderedUnitsDelta`, `spendDeltaMinor`, `attributedRevenueDeltaMinor`;
+- `orderedUnitsSource SHKS | ORDER_COUNT_FALLBACK`;
+- ссылки на исходные daily statistical snapshots и bid/configuration snapshots;
+- `statisticsFinalizedAt`, `conversionLagDaysApplied`;
+- `status DRAFT | FINALIZED | SUPERSEDED | INVALID`, `supersededAt NULL`;
 - `qualityFlags`;
 - `inputChecksum`, `createdAt`;
-- unique `(targetId, periodStart, periodEnd, confirmedBidKopecks)`.
+- unique `(targetId, wbStatisticDate, inputChecksum)`;
+- partial unique: не более одной текущей записи со статусом `FINALIZED` для `(targetId, wbStatisticDate)`.
 
-Observation создаётся только из неотрицательных согласованных deltas. Интервал с изменением ставки, разрывом статистики, reset счётчика или неподтверждённым bid получает quality flag и исключается из profit estimator. Эти наблюдения являются источником `minBidObservations` из раздела 9.
+День допускается в profit estimator, только если ставка и конфигурация были подтверждены и неизменны весь день, кампания могла получать трафик, все deltas неотрицательны, source day старше conversion cutoff, а не менее `dayFinalizationMinStableReads` последовательных чтений на протяжении не менее `dayFinalizationMinStableMinutes` после lag дали одинаковый source checksum. Частичный день, день изменения ставки, разрыв, reset, manual write, неизвестный bid state или неоднозначная placement attribution получают quality flag и исключаются.
+
+Финализированная запись неизменяема. Если overlap sync обнаруживает позднее изменение source day, прежняя запись атомарно получает `SUPERSEDED`, создаётся новая `DRAFT`, а зависящие ещё не отправленные решения получают `SUPERSEDED` и пересчитываются после новой finalization. Исторический audit продолжает ссылаться на старую версию.
+
+Intraday deltas хранятся отдельно либо вычисляются из raw snapshots только для budget monitoring. Они не являются `BidPerformanceDay` и не участвуют в bid-response estimator.
 
 #### `ProductEconomics`
 
@@ -452,8 +491,10 @@ Observation создаётся только из неотрицательных 
 - приоритет: target > campaign > deployment default;
 - `executionMode APPLY | OBSERVE_ONLY`;
 - окна статистики;
-- minimum sample thresholds;
-- `candidateBidStepKopecks`, `minBidObservations`;
+- minimum sample thresholds отдельно для `cpm` и `cpc`;
+- `candidateBidStepPpm`, `explorationStepPpm`, `minBidObservationDays`;
+- `dayFinalizationMinStableReads`, `dayFinalizationMinStableMinutes`;
+- estimator safety parameters и prediction horizon;
 - `minExpectedProfitImprovementMinor`;
 - min/max bid;
 - max increase/decrease per cycle;
@@ -461,7 +502,8 @@ Observation создаётся только из неотрицательных 
 - hysteresis;
 - cooldown;
 - budget guardrails;
-- freshness threshold;
+- exploration limits и concurrency;
+- `freshnessThresholds` и `targetSyncSla` отдельно по data kind;
 - `enabled`;
 - `version`, `validFrom`, `validTo`.
 
@@ -473,7 +515,7 @@ Observation создаётся только из неотрицательных 
 - `productEconomicsId`, `productEconomicsVersion`;
 - `expectedContributionBeforeAdsMinor`;
 - все рассчитанные метрики;
-- оценки и profit score рассмотренных candidate bids;
+- raw, monotonic-adjusted и conservative daily estimates рассмотренных candidate bids;
 - completeness flags;
 - `inputSnapshotChecksum`;
 - algorithm version;
@@ -485,10 +527,12 @@ Observation создаётся только из неотрицательных 
 - `id UUID PK`, значение UUIDv7 генерируется приложением;
 - target;
 - `action`;
-- `currentBidKopecks`;
-- `proposedBidKopecks`;
-- `boundedBidKopecks`;
-- `reasonCode`;
+- `currentBidMinor`;
+- `proposedBidMinor`;
+- `boundedBidMinor`;
+- `strategyReasonCode`;
+- `outcomeReasonCode`;
+- `guardrailCodes`;
 - `explanation JSONB`;
 - `metricSnapshotId`;
 - `policyVersion`;
@@ -496,6 +540,22 @@ Observation создаётся только из неотрицательных 
 - `decisionInputChecksum`;
 - `createdAt`;
 - unique `decisionInputChecksum`.
+
+#### `BidExperiment`
+
+- `id UUID PK`, `targetId`;
+- `status PLANNED | ACTIVE | COLLECTING | EVALUATING | ACCEPTED | REVERTED | FAILED | CANCELLED`;
+- `sourceBidMinor`, `experimentBidMinor`;
+- `plannedFullDays`, `collectedEligibleDays`;
+- `spendLimitMinor`, `spendSafetyBufferMinor`;
+- `startedAt`, `firstEligibleDate`, `lastEligibleDate`, `evaluationNotBefore`;
+- `policyVersion`, `algorithmVersion`;
+- `experimentReasonCode`, `resultDecisionId NULL`;
+- `leaseOwner`, `leaseUntil`;
+- `createdAt`, `completedAt`;
+- не более одного non-terminal experiment для target.
+
+В mock все временные переходы experiment выполняются через виртуальные часы. `POST /__mock/time/advance` может мгновенно завершить несколько statistical days и conversion lag; приложение и тесты не используют реальные sleep для таких сценариев.
 
 #### `DecisionQueueItem`
 
@@ -574,7 +634,7 @@ Read-запросы не создают `WbWriteAttempt`. Их вызовы от
 
 - естественный ключ target: `wbCampaignId`, `nmId`, `placement`, `normalizedNormQuery`;
 - границы статистических периодов, нормализованные значения использованных исходных записей и их source checksum;
-- выбранные `BidPerformanceObservation` с их естественными ключами, подтверждёнными ставками, интервалами, deltas, `exposureMinutes`, `qualityFlags` и `inputChecksum`;
+- выбранные `BidPerformanceDay` с их естественными ключами, WB statistical dates, подтверждёнными bid states, дневными deltas, finalization metadata, `qualityFlags` и `inputChecksum`;
 - текущая подтверждённая ставка, minimum bid WB и состояние подтверждения;
 - `productEconomicsVersion` и `expectedContributionBeforeAdsMinor`;
 - состояние бюджета, полнота, свежесть и иные входные flags, если они влияют на рассчитанные метрики.
@@ -586,8 +646,10 @@ Read-запросы не создают `WbWriteAttempt`. Их вызовы от
 - `inputSnapshotChecksum`;
 - версия и полный разрешённый набор параметров действующей политики;
 - `algorithmVersion`;
-- единый `decisionAt` в UTC, зафиксированный в начале расчёта и повторно используемый при retry;
+- нормализованный time context: `accountLocalDate`, freshness phase, cooldown phase и deadline, daily anchor bid, budget forecast inputs и состояние experiment;
 - фактически использованные состояния cooldown, дневных ограничений, budget guardrail и остальных ограничений, если они ещё не представлены в `inputSnapshotChecksum`.
+
+`decisionAt` фиксируется в audit и explanation, но сам timestamp не входит в semantic fingerprint. Вместо него checksum содержит только нормализованные состояния и границы времени, способные изменить результат. Поэтому два запуска в одной смысловой фазе дедуплицируются, а переход через freshness deadline, окончание cooldown, новый account day либо изменение budget forecast создаёт новый fingerprint. Retry существующего решения не запускает перерасчёт и использует прежний `decisionId`.
 
 Оба checksum вычисляются по одной формуле:
 
@@ -614,12 +676,32 @@ lowerHex(SHA-256(UTF8(scope + "\n" + RFC8785(payload))))
 - `primaryWindowDays`, default 7;
 - `baselineWindowDays`, default 28;
 - `conversionLagDays`, default 2;
-- `minClicks`, default 20;
-- `minOrders`, default 3;
-- `minSpendMinor`;
-- `maxDataAgeMinutes`.
+- `predictionHorizonDays`, default 1;
+- `minBidObservationDays`;
+- `minBidViews` для `cpm`;
+- `minBidClicks` для `cpc`;
+- `minBidOrderedUnits`;
+- `minBidSpendMinor`;
+- `freshnessThresholds` по data kind.
 
-Последние `conversionLagDays` не используются для негативного вывода о конверсии, если атрибуция заказов может запаздывать. Они могут использоваться для защиты бюджета и выявления аномального расхода.
+В начале расчёта фиксируется `decisionAt`. Для source date, возвращаемой WB, определяется:
+
+```text
+conversionCutoffDate =
+  wbStatisticDate(decisionAt) - conversionLagDays
+
+primaryWindow =
+  [conversionCutoffDate - primaryWindowDays, conversionCutoffDate)
+
+baselineWindow =
+  [conversionCutoffDate - baselineWindowDays, conversionCutoffDate)
+```
+
+WB statistical date сохраняется как source dimension и не переинтерпретируется молча через `ACCOUNT_TIMEZONE`. Если точная timezone семантика endpoint не зафиксирована contract fixture, boundary day получает quality flag и не участвует в estimator.
+
+Последние `conversionLagDays` и текущий незавершённый день не используются для оценки заказов и прибыли. Они могут использоваться только для budget guardrail, intraday anomaly detection и freshness. Day становится финализированным по stability rule сущности `BidPerformanceDay` из раздела 8.1.
+
+`baselineWindow` используется для построения bid-response curve. `primaryWindow` используется для диагностики текущего режима, zero-conversion и safety checks; он не заменяет baseline evidence отдельных bid buckets. День может входить в оба окна, но учитывается ровно один раз внутри каждого соответствующего расчёта.
 
 ### 9.3. Формулы
 
@@ -644,143 +726,315 @@ expectedProfit =
 
 Если конкретное поле WB описывает заказы, а не выкупы, название внутреннего поля ДОЛЖНО сохранять эту семантику. Запрещено автоматически называть `orders` продажами. ACOS и ROAS сохраняются в snapshot и explanation, но не являются целями выбора ставки.
 
-### 9.4. Оценка прибыли допустимых ставок
+Расчёт estimator-а выполняется в fixed-point scale `1_000_000`. Дневные ordered units и spend score могут быть дробными и сохраняются как decimal strings; сравнение кандидатов выполняется до округления. Итоговый `conservativeProfitScoreMinor` округляется вниз, в консервативную сторону. `minExpectedProfitImprovementMinor` относится к `predictionHorizonDays`.
 
-Decision Engine строит конечное множество `candidateBids` из:
+### 9.4. Детерминированный daily bid-response estimator
+
+`rules-v1` группирует eligible `BidPerformanceDay` одного target из baseline window по точному `confirmedBidMinor`. Для bucket `b`:
+
+```text
+eligibleDays(b) = count(days)
+views(b) = sum(viewsDelta), если поле доступно
+clicks(b) = sum(clicksDelta)
+orderedUnits(b) = sum(orderedUnitsDelta)
+spendMinor(b) = sum(spendDeltaMinor)
+
+orderedUnitsPerDayRaw(b) =
+  orderedUnits(b) / eligibleDays(b)
+
+spendMinorPerDayRaw(b) =
+  spendMinor(b) / eligibleDays(b)
+```
+
+Обычный `cpm` bucket допускается, если одновременно:
+
+```text
+eligibleDays >= minBidObservationDays
+AND (views >= minBidViews OR spendMinor >= minBidSpendMinor)
+AND orderedUnits >= minBidOrderedUnits
+```
+
+Обычный `cpc` bucket допускается, если одновременно:
+
+```text
+eligibleDays >= minBidObservationDays
+AND (clicks >= minBidClicks OR spendMinor >= minBidSpendMinor)
+AND orderedUnits >= minBidOrderedUnits
+```
+
+Если `minBidSpendMinor=DISABLED`, соответствующая ветвь `OR spendMinor >= ...` отсутствует, а не считается автоматически истинной. `views` не требуется для `cpc`, потому что актуальный WB contract может не возвращать его. Bucket с достаточным traffic evidence и нулём ordered units передаётся специальному zero-conversion rule; bucket с ненулевым, но недостаточным числом ordered units остаётся `INSUFFICIENT_DATA`.
+
+Для raw rates применяется monotonic adjustment PAVA отдельно к ordered units и spend:
+
+1. buckets сортируются по возрастанию bid;
+2. каждый bucket образует block с весом `eligibleDays`;
+3. пока среднее левого block больше среднего правого, blocks сливаются и получают взвешенное среднее;
+4. итоговое среднее block присваивается всем его bids.
+
+Это фиксирует явное предположение v1: при прочих равных повышение bid не уменьшает математическое ожидание traffic/ordered units и spend. PAVA устраняет шумовые нарушения монотонности, но не доказывает причинность. Дни с изменением campaign configuration или payment/bid type исключаются; остатки, сезонность и неизвестные внешние факторы в v1 не моделируются и остаются residual risk, контролируемым replay/observe-only и ограничениями скорости. Algorithm version не может скрыто заменить это предположение другой моделью.
+
+После PAVA:
+
+```text
+orderedUnitsPerDaySafe(b) =
+  orderedUnitsPerDayPava(b)
+  * (1 - orderedUnitsSafetyDiscountPpm / 1_000_000)
+
+spendMinorPerDaySafe(b) =
+  spendMinorPerDayPava(b)
+  * (1 + spendSafetyPremiumPpm / 1_000_000)
+```
+
+Значения между двумя соседними eligible buckets интерполируются линейно по bid с точной rational/Decimal арифметикой. Экстраполяция ниже минимального или выше максимального обеспеченного bucket в обычной оптимизации запрещена.
+
+Для candidate `c`:
+
+```text
+expectedOrderedUnits(c) =
+  orderedUnitsPerDaySafe(c) * predictionHorizonDays
+
+expectedAdvertisingSpend(c) =
+  spendMinorPerDaySafe(c) * predictionHorizonDays
+
+conservativeProfitScore(c) =
+  expectedOrderedUnits(c)
+  * expectedContributionBeforeAdsMinor
+  - expectedAdvertisingSpend(c)
+```
+
+Candidate set состоит из:
 
 - текущей подтверждённой ставки;
-- `max(policyMin, wbMinimumBid)`;
-- `policyMaxBid`;
-- исторически наблюдавшихся подтверждённых ставок объекта;
-- соседних ставок `currentBid ± candidateBidStepKopecks`, не выходящих за floor/cap;
-- exploration candidate, только если он разрешён разделом 9.7.
+- eligible historical bids;
+- `currentBid ± candidateBidStep(currentBid)`, если для них разрешена интерполяция;
+- floor/cap, если они попадают в обеспеченный диапазон либо имеют собственный eligible bucket;
+- актуальных `competitiveBid`, `leadersBid`, ненулевого `top2`, `reachMin`, `reachMedium`, `reachMax` и `bidKopecksMin` для `cpm`, если они попадают в обеспеченный диапазон;
+- отдельного exploration bid из раздела 9.7, который не участвует в обычном profit argmax без evidence.
 
-Для каждой ставки детерминированный versioned estimator рассчитывает по наблюдениям того же target:
+WB recommendations сохраняются со snapshot time и checksum. Из-за лимита endpoint они синхронизируются только для target с недостатком bid-response data, активным experiment, явным admin refresh либо иным версионированным priority rule.
 
-```text
-expectedOrderedUnits(candidateBid)
-expectedAdvertisingSpend(candidateBid)
+### 9.5. Выбор ставки и границы цели
 
-expectedProfit(candidateBid) =
-  expectedOrderedUnits(candidateBid)
-  * expectedContributionBeforeAdsMinor
-  - expectedAdvertisingSpend(candidateBid)
-```
-
-Оценка строится только по периодам, в которых фактическая ставка была подтверждена после последнего изменения. Наблюдения группируются по ставке и нормализуются на одинаковую длительность окна. Кандидат без `minBidObservations` и минимального объёма данных исключается, если это не отдельно разрешённый exploration candidate.
-
-Источником оценки являются `BidPerformanceObservation`, а не произвольное сопоставление дневной статистики с последней известной ставкой.
-
-Алгоритм первой версии не использует ML. Конкретный способ сглаживания соседних bid buckets, поправки на сезонность и формирования доверительной консервативной оценки ДОЛЖЕН иметь отдельную версию и golden tests. При одинаковых входах он обязан возвращать одинаковые оценки.
-
-### 9.5. Выбор ставки с максимальной ожидаемой прибылью
-
-До выбора `bestBid` применяются все предусмотренные спецификацией блокирующие проверки, требования к полноте данных и правила допуска кандидатов из разделов 9.2–9.4. Если только текущая ставка обеспечена достаточными обычными наблюдениями и exploration candidate не разрешён условиями раздела 9.7, результат `NO_CHANGE` с причиной `INSUFFICIENT_BID_RESPONSE_DATA`; дальнейший выбор причины по ожидаемой прибыли не выполняется. Разрешённый exploration candidate является предусмотренным разделом 9.4 исключением из требований к `minBidObservations` и минимальному объёму данных, обходит этот ранний результат и передаётся на оценку вместе с текущей ставкой.
-
-Среди допустимых и обеспеченных данными кандидатов выбирается:
+Обычный argmax выполняется только если текущая ставка и минимум одна альтернатива имеют допустимый score:
 
 ```text
-bestBid = argmax(expectedProfit(candidateBid))
+bestBid = argmax(conservativeProfitScore(candidateBid))
 ```
 
-Правила разрешения равенства:
+Tie-break:
 
-- сначала текущая ставка;
-- затем меньшая ставка;
-- затем меньшее абсолютное изменение.
+1. текущая ставка;
+2. меньшая ставка;
+3. меньшее абсолютное изменение.
 
-После выбора `bestBid` причина определяется в следующем порядке:
+Если текущая ставка не имеет достаточного evidence, результат `INSUFFICIENT_DATA`. Если текущая ставка обеспечена, но альтернативы нет, результат `INSUFFICIENT_BID_RESPONSE_DATA` и отдельно рассматривается exploration.
 
-1. Если `bestBid` равен текущей ставке, в том числе потому, что текущая ставка выиграла по правилам разрешения равенства, результат — `NO_CHANGE` с причиной `MAX_PROFIT_CURRENT_BID`. Порог улучшения для этого случая не проверяется.
-2. Если `bestBid` отличается от текущей ставки, его ожидаемая прибыль выше ожидаемой прибыли текущей ставки. Если абсолютное улучшение меньше `minExpectedProfitImprovementMinor`, результат — `NO_CHANGE` с причиной `NO_PROFIT_IMPROVEMENT`.
-3. Если абсолютное улучшение альтернативного кандидата достигает `minExpectedProfitImprovementMinor`, кандидат переходит к применимому сценарию повышения или снижения и последующим bounds и guardrails.
+Если `bestBid` равен текущей ставке, strategy reason — `MAX_PROFIT_CURRENT_BID`. Если альтернативный score выше, но улучшение меньше `minExpectedProfitImprovementMinor`, outcome — `NO_PROFIT_IMPROVEMENT`. Иначе формируется `PROFITABLE_INCREASE` либо `PROFIT_MAXIMIZING_DECREASE`, после чего применяется pipeline раздела 9.8.
 
-Абсолютный порог используется потому, что относительное улучшение неоднозначно при нулевой или отрицательной текущей прибыли.
+Абсолютный порог используется, потому что относительное улучшение неоднозначно при нулевой или отрицательной текущей прибыли.
 
-Правила:
+Оптимизация targets декомпозируется независимо при следующих явных допущениях v1:
 
-- нулевое или отрицательное `expectedContributionBeforeAdsMinor` является валидным входом, запрещает повышение и выбирает допустимый floor с причиной `NEGATIVE_CONTRIBUTION_BEFORE_ADS`, если текущая ставка выше floor;
-- если есть расход, но нет заказов, применяется отдельное правило zero-conversion;
-- округление ставки выполняется в копейках предсказуемым способом и тестируется;
-- итоговая ставка ограничивается `max(policyMin, wbMinimumBid)` и `policyMaxBid`;
-- ограничения скорости изменения могут заменить `bestBid` ближайшим допустимым кандидатом только после повторного расчёта его ожидаемой прибыли;
-- если WB minimum выше policy maximum, применение блокируется с `MIN_ABOVE_POLICY_MAX`.
+```text
+accountProfitScore = sum(targetProfitScore)
+```
 
-### 9.6. Правило zero-conversion
+- используемые target statistics не пересекаются;
+- изменение одной ставки не изменяет response function другого target;
+- общий campaign budget является guardrail, а не распределяемым ресурсом optimizer;
+- cross-target cannibalization, остатки товара и органическая каннибализация не моделируются.
 
-Если после исключения conversion lag:
+При этих допущениях равенство верно математически: максимум суммы независимых функций на декартовом произведении допустимых ставок равен сумме их отдельных максимумов. Без них вывод неверен. Например, если два targets делят бюджет 100, а локальный максимум каждого требует расхода 100, два локальных решения одновременно недопустимы; нужен portfolio optimizer. Аналогично, если повышение одной ставки отбирает показы у другой, response functions не независимы.
 
-- `orders == 0`;
-- `clicks >= minClicks` или `spend >= zeroConversionSpendThreshold`;
+Если непересекающаяся атрибуция не доказана, target не участвует в APPLY. Сумма локальных score не публикуется как фактическая общая прибыль продавца, а соблюдение общего budget guardrail не объявляется решением задачи оптимального распределения бюджета.
 
-ставка снижается на `zeroConversionDecreasePpm`, но не ниже допустимого floor.
+### 9.6. Защитные стратегии
 
-Защитная пониженная ставка добавляется как candidate bid и проходит обычные ограничения раздела 9.5. Для неё используется консервативная оценка с нулём ожидаемых заказов; повышение в zero-conversion сценарии запрещено. Если floor уже достигнут, решение `NO_CHANGE` с причиной `AT_FLOOR`. Автоматическое удаление кластера или остановка кампании не выполняется.
+Если `expectedContributionBeforeAdsMinor <= 0`, обычный estimator не используется для повышения. `rawRecommendedBid` устанавливается в floor с `NEGATIVE_CONTRIBUTION_BEFORE_ADS`, после чего снижение движется к floor через обычные cycle/daily caps.
 
-### 9.7. Правило недостатка трафика
+Zero-conversion применяется, если после conversion lag:
 
-Ставку МОЖНО увеличить только если одновременно:
+```text
+orderedUnits == 0
+AND (
+  cpm: views >= zeroConversionMinViews
+  OR cpc: clicks >= zeroConversionMinClicks
+  OR spendMinor >= zeroConversionSpendThresholdMinor
+)
+```
 
-- статистика свежая;
-- объект имеет показы меньше заданного порога;
-- текущая ставка не ниже минимальной WB;
-- budget guardrail разрешает рост;
-- объект не имеет достаточных данных, указывающих на убыточность;
-- политика явно включает `explorationEnabled`;
-- рост не превышает `explorationStep` и дневной cap.
+```text
+rawRecommendedBid =
+  currentBid * (1 - zeroConversionDecreasePpm / 1_000_000)
+```
 
-По умолчанию `explorationEnabled=false`.
+Это защитное rule-based снижение, а не доказанный profit argmax. История на пониженной ставке не требуется. Оно проходит floor, rounding, cycle/daily caps и cooldown. Если floor достигнут, outcome `AT_FLOOR`.
 
-Exploration является ограниченным способом получить данные для последующей максимизации прибыли, а не отдельной целью оптимизации. В explanation сохраняются ожидаемая стоимость эксперимента, его предел и причина недостатка bid-response данных.
+Если `zeroConversionSpendThresholdMinor=DISABLED`, spend-ветвь zero-conversion condition отсутствует. Traffic threshold выбирается по `paymentType`, поэтому отсутствие `views` у CPC не блокирует правило.
 
-### 9.8. Hysteresis, cooldown и ограничения
+Budget guardrail использует WB-reported campaign budget snapshot только согласно подтверждённой endpoint contract semantics. Поля `cash`, `netting`, `total` не называются «остатком» без contract fixture. Внутренний `dailySpendLimitMinor` рассчитывается отдельно по intraday spend deltas.
 
-- изменение меньше `minAbsoluteChangeKopecks` или `minRelativeChangePpm` не применяется;
-- после подтверждённого изменения объект не меняется в течение `cooldownMinutes`;
-- суммарное изменение от первой подтверждённой ставки текущих суток ограничено `maxDailyIncreasePpm` и `maxDailyDecreasePpm`;
-- policy min/max применяются после расчёта, но до округления к допустимой ставке;
-- внезапное изменение product economics или policy version снимает cooldown только при явном флаге администратора;
-- защитное снижение при превышении бюджета МОЖЕТ игнорировать обычный cooldown, но не идемпотентность.
+Повышение запрещается, если budget snapshot неизвестен/устарел, daily limit превышен или прогнозируется его превышение, либо обнаружен spend spike. Hard budget breach МОЖЕТ сформировать защитное снижение и игнорировать cooldown только при явном policy flag; floor, idempotency и reconciliation не обходятся.
 
-### 9.9. Budget guardrail
+### 9.7. Exploration
 
-Decision Engine блокирует повышение и разрешает только снижение, если:
+Exploration — отдельный `BidExperiment`, а не необеспеченный candidate обычного argmax. По умолчанию `explorationEnabled=false`.
 
-- остаток бюджета неизвестен или устарел сверх допустимого порога;
-- расход за сутки превысил `dailySpendLimit`;
-- ожидаемый расход до конца суток превышает limit;
-- кампания близка к исчерпанию бюджета;
-- обнаружен расходовой spike относительно baseline.
+Experiment можно создать, только если:
 
-Первая версия не пополняет и не меняет бюджет кампании.
+- обычный outcome — `INSUFFICIENT_BID_RESPONSE_DATA`;
+- текущий bucket имеет достаточный traffic evidence;
+- `expectedContributionBeforeAdsMinor > 0`;
+- target поддерживает APPLY по capability matrix;
+- нет другого non-terminal experiment target;
+- не превышены campaign/account concurrency и spend limits.
+
+Сначала строятся два возможных соседних experiment bids:
+
+```text
+lowerExperimentBid =
+  currentBid - explorationStep(currentBid)
+
+upperExperimentBid =
+  currentBid + explorationStep(currentBid)
+```
+
+Оба значения проходят floor/cap, quantum и cycle/daily caps. Уже обеспеченное данными либо совпавшее после bounds направление исключается. Если доступны оба направления, сначала выбирается снижение как менее рискованное по расходу; после появления eligible lower bucket разрешается повышение. Upper experiment дополнительно требует положительный `conservativeProfitScore(currentBid)` и разрешение budget guardrail. WB recommendation может определить верхнюю границу upper experiment для `cpm`, но не отменяет spend cap. Последовательность deterministic и входит в algorithm version.
+
+Experiment собирает не меньше `max(minExplorationFullDays, minBidObservationDays)` полных eligible WB statistical days. Частичный стартовый день не учитывается. После сбора ставка возвращается к source bid, если policy явно не разрешает удерживать experiment bid до evaluation. Оценка выполняется не раньше conversion cutoff. Если новый bucket стал eligible, обычный estimator решает, принять ставку или оставить/revert source bid.
+
+Во время experiment запрещено дальнейшее повышение. При достижении `maxExplorationSpendMinor - explorationSpendSafetyBufferMinor`, смене конфигурации, manual write, budget breach или invalid data выполняется безопасный revert.
+
+В `mock` весь lifecycle управляется виртуальными часами: `/__mock/time/advance` мгновенно переводит часы mock и материализует положенные seed-сценарием полные дни и conversion lag. Затем E2E явно запускает либо дожидается короткого настроенного tick Data Sync и Decision jobs. Реальные sleep, соответствующие часам или дням model time, запрещены. В `sandbox` быстрый smoke не ждёт daily statistics; отдельный необязательный soak следует фактическому правилу WB о генерации статистики раз в сутки.
+
+### 9.8. Bounds, hysteresis и cooldown
+
+Единственный порядок преобразования ставки:
+
+```text
+rawRecommendedBid
+→ clamp to max(policyMinBidMinor, wbMinimumBidMinor) / policyMaxBidMinor
+→ round to endpoint bid quantum
+→ clamp again
+→ apply per-cycle cap
+→ apply account-day cap from dailyAnchorBidMinor
+→ round and clamp again
+→ minimum absolute/relative change
+→ cooldown
+→ execution mode
+```
+
+- округление и quantum задаются endpoint profile и покрываются golden tests;
+- изменение применяется, только если оно одновременно достигает `minAbsoluteChangeMinor` и `minRelativeChangePpm`; альтернативная AND/OR семантика запрещена;
+- `dailyAnchorBidMinor` — первая подтверждённая ставка target в текущем `ACCOUNT_TIMEZONE` day; manual external change создаёт новый anchor только по явному policy rule, иначе блокирует и требует recalculation;
+- product economics или policy version снимают cooldown только при явном admin flag;
+- speed cap может заменить raw bid ближайшим допустимым значением; для обычной profit strategy bounded bid должен иметь score через интерполяцию либо собственный bucket, иначе outcome `INSUFFICIENT_BID_RESPONSE_DATA`;
+- если WB minimum выше policy maximum, outcome `MIN_ABOVE_POLICY_MAX`.
+
+### 9.9. Порядок решения и reason model
+
+`BidDecision` хранит:
+
+- `strategyReasonCode` — почему рассчитано направление;
+- `outcomeReasonCode` — почему write будет или не будет создан;
+- `guardrailCodes[]` — все дополнительные сработавшие ограничения.
+
+Порядок:
+
+1. собрать все blockers;
+2. проверить capability matrix;
+3. проверить consistency/freshness;
+4. проверить product economics;
+5. проверить floor/cap;
+6. выбрать protective, profit либо exploration strategy;
+7. применить pipeline раздела 9.8;
+8. применить `OBSERVE_ONLY`;
+9. создать queue item только для итогового `INCREASE`/`DECREASE`.
+
+Если blockers несколько, все сохраняются. Primary outcome выбирается в порядке:
+
+```text
+MANUAL_PAUSE
+UNSUPPORTED_CAMPAIGN
+INSUFFICIENT_ATTRIBUTION_GRANULARITY
+DATA_INCONSISTENCY
+INVALID_PRODUCT_ECONOMICS
+MISSING_PRODUCT_ECONOMICS
+STALE_DATA
+MIN_ABOVE_POLICY_MAX
+```
 
 ### 9.10. Причины решения
 
-Минимальный enum и семантика его значений:
-
-| Reason code | `BidDecision.action` / результат | Условие и смысл |
+| Reason code | Роль | Семантика |
 |---|---|---|
-| `PROFITABLE_INCREASE` | `INCREASE` | Обеспеченный данными допустимый кандидат выше текущей ставки имеет максимальную ожидаемую прибыль, улучшение достигает `minExpectedProfitImprovementMinor`, а ограничения роста разрешают изменение. |
-| `MAX_PROFIT_CURRENT_BID` | `NO_CHANGE` | Текущая ставка является argmax среди обеспеченных данными допустимых кандидатов с учётом правил разрешения равенства, причём достаточно наблюдений есть минимум для одной альтернативной ставки; другой кандидат с большей ожидаемой прибылью не найден. Ограничения изменения не являются причиной сохранения ставки. |
-| `NO_PROFIT_IMPROVEMENT` | `NO_CHANGE` | Лучший альтернативный обеспеченный данными кандидат имеет ожидаемую прибыль выше текущей, но абсолютное улучшение меньше `minExpectedProfitImprovementMinor`. |
-| `UNPROFITABLE_DECREASE` | `DECREASE` | Обеспеченный данными допустимый кандидат ниже текущей ставки максимизирует ожидаемую прибыль и даёт требуемое улучшение в обычном сценарии убыточности, не относящемся к zero-conversion или неположительному вкладу до рекламы. |
-| `ZERO_CONVERSION_DECREASE` | `DECREASE` | После исключения conversion lag заказов нет, а порог кликов или расходов достигнут; текущая ставка выше допустимого floor, а прошедший оценку и ограничения защитный пониженный кандидат не ниже floor и может быть равен ему. |
-| `INSUFFICIENT_DATA` | `NO_CHANGE` | Свежий согласованный snapshot не достигает общих minimum sample thresholds для надёжной оценки даже текущего сценария; это не специальный случай нехватки наблюдений по альтернативным ставкам. Разрешённое правилами exploration может вместо этого сформировать отдельное решение. |
-| `INSUFFICIENT_BID_RESPONSE_DATA` | `NO_CHANGE` или exploration `INCREASE` | Текущая ставка обеспечена достаточными данными, но для сравнения нет другого кандидата с требуемыми `minBidObservations` и объёмом данных; причина описывает именно недостаток истории отклика на разные ставки. Повышение допустимо только при одновременном выполнении всех условий exploration из раздела 9.7, а его стоимость, предел и причина сохраняются в explanation. |
-| `STALE_DATA` | `BLOCKED`; ставка не изменяется | Необходимая для оценки ставки статистика или другой основной вход расчёта старше разрешённого `maxDataAgeMinutes` либо соответствующего freshness threshold, поэтому решение, способное создать write, запрещено. Устаревшие бюджетные данные обрабатываются отдельным budget guardrail. |
-| `MISSING_PRODUCT_ECONOMICS` | `BLOCKED`; ставка не изменяется | Для `nmId` отсутствует действующая версия `ProductEconomics` с `expectedContributionBeforeAdsMinor`; переход к другой цели оптимизации запрещён. |
-| `INVALID_PRODUCT_ECONOMICS` | `BLOCKED`; ставка не изменяется | Действующая версия `ProductEconomics` найдена, но её обязательные значения или период действия не проходят валидацию; переход к другой цели оптимизации запрещён. |
-| `NEGATIVE_CONTRIBUTION_BEFORE_ADS` | `DECREASE` | `expectedContributionBeforeAdsMinor` равен нулю или отрицателен: повышение запрещается, а текущая ставка выше floor и снижается до допустимого floor. Если снижение уже невозможно из-за нижней границы, используется причина границы. |
-| `BUDGET_GUARDRAIL` | `NO_CHANGE` или защитный `DECREASE`; никогда `INCREASE` | Бюджет неизвестен или устарел, limit превышен или прогнозируется его превышение, бюджет близок к исчерпанию либо обнаружен расходовой spike. Guardrail отклоняет повышение; допускается только прошедшее остальные ограничения защитное снижение, которое при превышении бюджета может игнорировать обычный cooldown. |
-| `COOLDOWN` | `NO_CHANGE` | Рассчитанное повышение или снижение прошло порог значимости, но после последней подтверждённой смены ставки ещё не истёк `cooldownMinutes`; специальное защитное снижение бюджета может иметь установленное разделом 9.8 исключение. |
-| `BELOW_MIN_CHANGE` | `NO_CHANGE` | Выбранное изменение после применения границ, ограничения скорости и округления меньше `minAbsoluteChangeKopecks` или `minRelativeChangePpm`; это не cooldown и не достижение floor/cap. |
-| `AT_FLOOR` | `NO_CHANGE` | Правило требует снижения, в том числе при zero-conversion, но текущая ставка уже равна `max(policyMin, wbMinimumBid)`. Причина относится только к предотвращённому снижению. |
-| `AT_CAP` | `NO_CHANGE` | Прибыльный или exploration-сценарий требует повышения, но текущая ставка уже равна `policyMaxBid`. Причина относится только к предотвращённому повышению; успешное повышение, ограниченное значением cap, сохраняет причину повышения. |
-| `MIN_ABOVE_POLICY_MAX` | `BLOCKED`; ставка не изменяется | Актуальная минимальная ставка WB выше `policyMaxBid`, поэтому множество применимых ставок пусто и write запрещён. |
-| `UNSUPPORTED_CAMPAIGN` | `BLOCKED`; ставка не изменяется | Тип, статус, модель оплаты, тип ставки, размещение или их комбинация не поддерживают требуемую операцию WB API; запрос на изменение не формируется. |
-| `OBSERVE_ONLY` | `NO_CHANGE`; только explanation | Активная политика имеет `executionMode=OBSERVE_ONLY`: расчёт кандидатов и рекомендуемого изменения сохраняется для наблюдения, но применимое изменение и queue item для WB write не создаются. |
-| `MANUAL_PAUSE` | `BLOCKED`; ставка не изменяется | Автоматизация аккаунта, кампании или target явно приостановлена оператором либо отключена активной политикой; автоматическое возобновление и WB write запрещены. |
-| `DATA_INCONSISTENCY` | `BLOCKED`; ставка не изменяется | Входы одного расчёта не образуют согласованный snapshot, например расходятся target, подтверждённая ставка, окна, версии политики или product economics; расчёт нельзя безопасно применить до следующей успешной синхронизации. |
+| `PROFITABLE_INCREASE` | strategy | Обеспеченный данными кандидат выше текущей ставки максимизирует conservative profit и достигает improvement threshold. |
+| `MAX_PROFIT_CURRENT_BID` | strategy/outcome | Текущая ставка выиграла argmax среди минимум двух обеспеченных candidates. |
+| `NO_PROFIT_IMPROVEMENT` | outcome | Альтернатива лучше, но improvement ниже абсолютного threshold. |
+| `PROFIT_MAXIMIZING_DECREASE` | strategy | Обеспеченный кандидат ниже текущей ставки максимизирует conservative profit. |
+| `ZERO_CONVERSION_DECREASE` | strategy | Достаточный traffic/spend при нулевых ordered units вызвал защитное снижение. |
+| `NEGATIVE_CONTRIBUTION_BEFORE_ADS` | strategy | Contribution неположителен; raw target — floor с соблюдением caps. |
+| `BUDGET_GUARDRAIL` | strategy/outcome/guardrail | Повышение запрещено либо сформировано hard-budget снижение. |
+| `INSUFFICIENT_DATA` | outcome | Даже текущий bucket не проходит evidence thresholds. |
+| `INSUFFICIENT_BID_RESPONSE_DATA` | outcome | Текущий bucket обеспечен, но обычной альтернативы нет. |
+| `INSUFFICIENT_ATTRIBUTION_GRANULARITY` | blocker | Статистика не разделяет результаты нескольких независимо управляемых bids. |
+| `EXPLORATION_PLANNED` | strategy | Создан experiment для получения нового bid bucket. |
+| `EXPLORATION_ACTIVE` | outcome | Experiment активен; иные изменения target запрещены. |
+| `EXPLORATION_ACCEPTED` | strategy | Новый bucket стал eligible и обычный estimator выбрал experiment bid. |
+| `EXPLORATION_REVERTED` | strategy | Experiment завершён возвратом из-за результата, лимита или safety condition. |
+| `STALE_DATA` | blocker | Обязательный основной вход старше freshness threshold. |
+| `MISSING_PRODUCT_ECONOMICS` | blocker | Нет действующей экономики `nmId`. |
+| `INVALID_PRODUCT_ECONOMICS` | blocker | Версия экономики невалидна или имеет конфликтующий период. |
+| `COOLDOWN` | outcome/guardrail | Применимое изменение заблокировано до cooldown deadline. |
+| `BELOW_MIN_CHANGE` | outcome/guardrail | Изменение не достигло одновременно absolute и relative thresholds. |
+| `AT_FLOOR` | outcome/guardrail | Требуется снижение, но floor уже достигнут. |
+| `AT_CAP` | outcome/guardrail | Требуется повышение, но cap уже достигнут. |
+| `MIN_ABOVE_POLICY_MAX` | blocker | WB minimum выше policy maximum. |
+| `UNSUPPORTED_CAMPAIGN` | blocker | Комбинация campaign/payment/bid/placement не поддерживает требуемый write. |
+| `OBSERVE_ONLY` | outcome | Рекомендация рассчитана и сохранена, но queue item не создаётся. |
+| `MANUAL_PAUSE` | blocker | Автоматизация явно остановлена оператором или policy. |
+| `DATA_INCONSISTENCY` | blocker | Входы не образуют согласованный snapshot либо нарушена детерминированность. |
+
+### 9.11. Начальный профиль политики
+
+Значения ниже задают воспроизводимый безопасный старт, а не универсально оптимальную экономическую настройку:
+
+| Параметр | Начальное значение | Семантика |
+|---|---:|---|
+| `executionMode` | `OBSERVE_ONLY` | Переход в `APPLY` требует явного утверждения владельцем продукта. |
+| `primaryWindowDays` / `baselineWindowDays` | `7` / `28` | Короткое safety-окно и полное окно response curve. |
+| `conversionLagDays` / `predictionHorizonDays` | `2` / `1` | Последние два дня исключаются из profit evidence. |
+| `dayFinalizationMinStableReads` / `dayFinalizationMinStableMinutes` | `2` / `30` | После conversion lag нужны два одинаковых чтения source day, разделённых минимум 30 минутами. |
+| `minBidObservationDays` | `3` | Не меньше трёх полных финализированных days на bucket. |
+| `minBidViews` / `minBidClicks` | `1000` / `30` | Traffic evidence для CPM/CPC. |
+| `minBidOrderedUnits` | `3` | Обычная profit-оценка не строится на единичной конверсии. |
+| `minBidSpendMinor` | `DISABLED` | Включается только явным валютным значением; без него evidence проходит по views/clicks. |
+| `orderedUnitsSafetyDiscountPpm` | `200000` | Уменьшает прогноз units на 20%; это детерминированный safety haircut, не статистический confidence interval. |
+| `spendSafetyPremiumPpm` | `100000` | Увеличивает прогноз spend на 10%. |
+| `candidateBidStep` / `explorationStep` | `max(endpointQuantum, roundToQuantum(currentBid × 10%))` | Динамический шаг; итог всегда проходит bounds pipeline. |
+| `minExpectedProfitImprovementMinor` | `REQUIRED_FOR_APPLY` | Явный абсолютный порог в `ACCOUNT_CURRENCY`; в `OBSERVE_ONLY` допустим `0`. |
+| `minAbsoluteChangeMinor` | `endpointQuantum` | Оба порога hysteresis применяются через AND. |
+| `minRelativeChangePpm` | `50000` | Минимум 5% изменения ставки. |
+| `maxIncreasePerCyclePpm` / `maxDecreasePerCyclePpm` | `100000` / `200000` | До +10% / −20% за цикл. |
+| `maxDailyIncreasePpm` / `maxDailyDecreasePpm` | `200000` / `400000` | До +20% / −40% от daily anchor. |
+| `cooldownMinutes` | `1440` | Один обычный write target в сутки; emergency budget rule оговаривается отдельно. |
+| `policyMinBidMinor` | `UNSET` | Эффективный floor равен максимуму явного policy floor и актуального `wbMinimumBidMinor`. |
+| `policyMaxBidMinor` | `REQUIRED_FOR_APPLY` | Без явного cap target остаётся `OBSERVE_ONLY`. |
+| `dailySpendLimitMinor` | `REQUIRED_FOR_INCREASE` | Без лимита разрешены observe и защитные снижения, но не повышение. |
+| `zeroConversionMinViews` / `zeroConversionMinClicks` | `1000` / `30` | Проверяются в primary window после conversion lag. |
+| `zeroConversionSpendThresholdMinor` | `DISABLED` | Включается только явным валютным значением. |
+| `zeroConversionDecreasePpm` | `200000` | Защитное снижение на 20% до bounds. |
+| `explorationEnabled` | `false` | Включается отдельно после проверки обычного observe-only режима. |
+| `minExplorationFullDays` | `3` | Эффективное значение не меньше `minBidObservationDays`. |
+| `maxExplorationSpendMinor` | `REQUIRED_WHEN_ENABLED` | Жёсткий денежный предел experiment. |
+| `explorationSpendSafetyBufferPpm` | `200000` | Revert начинается при 80% лимита. |
+| `maxConcurrentExperimentsPerCampaign` / `PerAccount` | `1` / `10` | Ограничивает общий риск и влияние временных факторов. |
+
+Freshness defaults для основных источников согласованы с default cron и endpoint throughput: current bid — 20 минут, campaign details/status — 45 минут, minimum bid — 120 минут, budget — 60 минут, факт успешного обновления daily statistics — 180 минут, cluster list — 24 часа, bid recommendations — 6 часов. Recommendations остаются необязательными. Эти значения валидируются с `targetSyncSla`; если аккаунт при фактических лимитах WB не успевает их выдерживать, система остаётся `OBSERVE_ONLY`, пока оператор не уменьшит scope, не изменит расписание или не утвердит более длинный SLA.
+
+Любая policy с `APPLY` невалидна без `policyMaxBidMinor`, `minExpectedProfitImprovementMinor` и требуемых budget limits. Переход из начального профиля выполняется только после replay/backtest на истории аккаунта и минимум одного полного observe-only окна; конкретные валютные пороги нельзя безопасно вывести из документации WB.
+
+Discounts и относительные изменения валидируются в диапазоне `0..1_000_000` ppm; safety premiums и иные параметры, которым разрешено значение больше 100%, имеют отдельный документированный upper bound. Окна и sample thresholds — положительные целые числа, `baselineWindowDays >= primaryWindowDays`, а `baselineWindowDays + conversionLagDays <= 31`, чтобы один запрос `fullstats` мог покрыть необходимый период. Невалидная policy не активируется.
 
 ## 10. Очередь и идемпотентность
 
@@ -808,7 +1062,7 @@ QUEUED
 - если checksum уже существует, используется существующий `BidDecision`, а второй `DecisionQueueItem` не создаётся;
 - если одинаковому checksum соответствует отличающийся результат решения, операция завершается ошибкой `DATA_INCONSISTENCY` как нарушение детерминированности.
 
-`targetBidKopecks` не входит в fingerprint как отдельное поле, поскольку это детерминированный результат, а не вход. Target, product economics, policy и algorithm не дублируются в механизме идемпотентности отдельными полями: они уже покрыты `decisionInputChecksum`.
+`boundedBidMinor` не входит в fingerprint как отдельное поле, поскольку это детерминированный результат, а не вход. Target, product economics, policy и algorithm не дублируются в механизме идемпотентности отдельными полями: они уже покрыты `decisionInputChecksum`.
 
 Retry постановки или отправки использует существующий `decisionId`; новый UUID для retry не генерируется. UUIDv5 от checksum и отдельный составной `idempotencyKey` для `BidDecision` не требуются.
 
@@ -846,6 +1100,10 @@ Retry постановки или отправки использует суще
 
 `DATA_SYNC_CRON`, `DECISION_CRON` и `CAMPAIGN_APPLY_CRON` конфигурируются независимо. Таким образом, частота обновления данных в БД не связана с частотой применения настроек через WB API. По умолчанию тяжёлые jobs не должны стартовать в одну секунду, чтобы избегать пиков. Если предыдущий run того же job ещё активен, новый запуск не создаёт параллельный дубликат.
 
+Cron означает частоту попыток запустить job, а не SLA завершения полного обхода аккаунта. Например, `GET /adv/v3/fullstats` принимает не более 50 campaign IDs и допускает 3 запроса в минуту; поэтому только этот endpoint для 10 000 кампаний имеет теоретическую нижнюю границу полного прохода около 67 минут. Требование «синхронизация каждые 30 минут» не означает, что все 10 000 кампаний станут моложе 30 минут.
+
+Для каждого вида данных задаются отдельные `freshnessThreshold` и `targetSyncSla`. Data Sync использует quota-aware round-robin с persisted cursor, приоритизирует targets с активным experiment, ожидающим решением, близким budget limit и наибольшим возрастом snapshot. Decision job не ждёт завершения глобального sync run: он атомарно захватывает только targets, для которых все обязательные входы образуют согласованный target-level snapshot и укладываются в policy freshness thresholds. Остальные targets пропускаются с измеримой причиной.
+
 ### 11.2. Блокировки jobs
 
 - Для scheduler используется PostgreSQL advisory lock или таблица lease.
@@ -853,6 +1111,7 @@ Retry постановки или отправки использует суще
 - Несколько реплик bidder поддерживаются без дублирования job.
 - Пропущенный запуск не порождает неограниченную очередь старых запусков.
 - Каждый run имеет deadline и checkpoint.
+- Если run не завершён к следующему cron tick, новый run не создаётся, но текущий продолжает работу от checkpoint до deadline; после deadline следующий run продолжает с сохранённого cursor.
 
 ### 11.3. Тысячи кампаний
 
@@ -860,8 +1119,10 @@ Retry постановки или отправки использует суще
 - Кампании обрабатываются страницами/порциями без загрузки всего набора в память.
 - Статистика синхронизируется инкрементально с небольшим overlap для поздних изменений.
 - Данные за overlap upsert-ятся.
+- Приоритет и cursor полного прохода сохраняются, поэтому постоянный поток срочных targets не должен навсегда вытеснять остальные.
 - Для backfill создаётся отдельный низкоприоритетный job.
 - Горизонтальное масштабирование ограничивается общим rate limiter единственного WB-аккаунта, а не числом pod.
+- Наблюдаемость показывает возраст snapshot и прогноз завершения полного прохода отдельно по endpoint/data kind; target, который нарушил `targetSyncSla`, создаёт alert и не участвует в APPLY.
 
 ## 12. WB API client и rate limiting
 
@@ -870,7 +1131,7 @@ Retry постановки или отправки использует суще
 | Режим | Default base URL | Токен | Разрешение записи |
 |---|---|---|---|
 | `mock` | `http://wb-mock:3001` | тестовая строка | да |
-| `sandbox` | `https://advert-api-sandbox.wildberries.ru` | тестовый токен WB | да |
+| `sandbox` | `https://advert-api-sandbox.wildberries.ru` | тестовый токен WB | да, только для документированно поддерживаемых sandbox методов и тестовых кампаний |
 | `prod` | `https://advert-api.wildberries.ru` | production-токен категории «Продвижение» | только при отдельном флаге |
 
 URL каждого режима переопределяется env:
@@ -888,6 +1149,13 @@ URL каждого режима переопределяется env:
 - `WB_API_CONNECT_TIMEOUT_MS`.
 
 Production startup должен завершаться ошибкой, если `WB_API_MODE=prod`, но отсутствует корректная комбинация токена, secret provider и явного `WB_API_WRITE_ENABLED=true`.
+
+Sandbox не считается ускоренной моделью production time. По документации WB статистика продвижения в sandbox создаётся один раз в сутки только для запущенных тестовых кампаний и доступна за последние 30 дней. Поэтому:
+
+- `sandbox smoke` проверяет авторизацию, schemas, документированные read/write методы, rate-limit headers и read-after-write, не ожидая появления новой дневной статистики;
+- `sandbox soak` является отдельным необязательным профилем длительного теста: запускает тестовую кампанию, фиксирует UTC/WB statistical dates и проверяет появление и неизменяемость дневных данных после фактической суточной генерации;
+- multi-day lifecycle estimator и exploration в CI доказывается в `mock` через виртуальные часы, а не реальным ожиданием sandbox;
+- отсутствие свежей дневной статистики во время smoke является ожидаемым ограничением контура, а не дефектом bidder.
 
 ### 12.2. Rate limiter
 
@@ -957,10 +1225,12 @@ Retry policy задаётся отдельно для read, write и verify. Б�
 2. `SYNC_CAMPAIGN_DETAILS` — пакетами загружает подробности обнаруженных кампаний: статус, тип, `bid_type`, `payment_type`, карточки, места размещения и остальные необходимые для последующих стадий метаданные. Результат нормализуется, валидируется и upsert-ится с `fetchedAt`, checksum и идентификатором sync run.
 3. `SYNC_CURRENT_BIDS` — читает фактически подтверждённые WB текущие ставки по всем поддерживаемым target и местам размещения, включая ставки кластеров там, где они применимы. Результат связывается с конкретными campaign, target, bid/payment type и используется как исходное состояние для решений и reconciliation.
 4. `SYNC_MIN_BIDS` — запрашивает актуальные минимальные ставки для поддерживаемых сочетаний `nmId`, вида оплаты и места размещения, соблюдая batch limits. Результат задаёт нижнюю границу допустимых candidate bids; отсутствие или несовместимость minimum bid отмечается как неполнота либо неподдерживаемая комбинация.
-5. `SYNC_CAMPAIGN_STATS` — инкрементально загружает статистику кампаний за требуемое окно с overlap для поздних изменений, точно нормализует денежные единицы и upsert-ит периоды по естественному ключу. Результат содержит метрики кампаний и interval deltas, привязанные к подтверждённой ставке.
-6. `SYNC_CLUSTER_STATS` — для применимых кампаний загружает дневную статистику поисковых кластеров, учитывая различия схем для CPM и CPC и опциональность показателей, основанных на показах. Неприменимые кампании стадия явно пропускает, а применимые данные связывает с campaign, `nmId`, нормализованным кластером и периодом.
-7. `SYNC_BUDGETS` — при включённом budget guardrail получает текущий бюджет каждой применимой кампании, нормализует его денежные поля и сохраняет freshness. Если guardrail выключен, стадия получает явный статус `SKIPPED`; ошибка обязательной проверки бюджета делает соответствующую часть snapshot неполной.
-8. `FINALIZE` — проверяет результаты и checkpoints всех предыдущих стадий, фиксирует для каждой статус `SUCCEEDED`, `FAILED` или `SKIPPED`, вычисляет completeness и freshness и завершает sync run. Стадия публикует согласованный snapshot для Decision Engine только с явным указанием отсутствующих или невалидных данных; обязательные пробелы далее блокируют применение решения по правилам раздела 13.2.
+5. `SYNC_CAMPAIGN_STATS` — инкрементально загружает статистику кампаний за требуемое дневное окно с overlap для поздних изменений, точно нормализует денежные единицы и upsert-ит source days по естественному ключу. Дневные значения связываются с подтверждённой историей ставки; только полный день с одним неизменным bid/configuration state может стать `BidPerformanceDay`.
+6. `SYNC_CLUSTER_LIST` — получает доступные пары `advertId`/`nmId` с нормализованными кластерами пакетами до 100 пар. Кластеры, не возвращённые WB из-за порога видимости, не синтезируются и не считаются доступными для управления.
+7. `SYNC_CLUSTER_STATS` — для применимых кампаний загружает дневную статистику поисковых кластеров, учитывая различия схем для CPM и CPC и опциональность показателей, основанных на показах. Неприменимые кампании стадия явно пропускает, а применимые данные связывает с campaign, `nmId`, нормализованным кластером и периодом.
+8. `SYNC_BID_RECOMMENDATIONS` — по priority queue получает CPM-рекомендации WB только для targets, которым они нужны согласно разделу 9.4; сохраняет каждое поле как candidate hint вместе с `fetchedAt`, checksum и endpoint profile. Отсутствие рекомендации не блокирует обычный estimator, а сама рекомендация не считается доказательством прибыли.
+9. `SYNC_BUDGETS` — при включённом budget guardrail получает текущий бюджет каждой применимой кампании, нормализует его денежные поля и сохраняет freshness. Если guardrail выключен, стадия получает явный статус `SKIPPED`; ошибка обязательной проверки бюджета делает соответствующую часть snapshot неполной.
+10. `FINALIZE` — проверяет результаты и checkpoints всех предыдущих стадий, фиксирует для каждой статус `SUCCEEDED`, `FAILED` или `SKIPPED`, вычисляет completeness и freshness и завершает sync run. Стадия публикует согласованные target-level snapshots с явным указанием отсутствующих или невалидных данных; обязательные пробелы далее блокируют применение решения по правилам раздела 13.2.
 
 Частичный сбой одной стадии не должен удалять ранее корректные данные. Completeness snapshot отражает успешные и неуспешные стадии.
 
@@ -968,10 +1238,12 @@ Retry policy задаётся отдельно для read, write и verify. Б�
 
 Decision Engine использует только snapshot, у которого:
 
-- завершены обязательные стадии;
-- `fetchedAt` не старше policy threshold;
+- завершены обязательные для capability конкретного target стадии;
+- возраст каждого обязательного source не больше отдельного policy threshold;
 - период статистики непрерывен либо пробел явно допустим;
 - текущая ставка подтверждена после последнего отправленного решения.
+
+Глобальное завершение обхода всех кампаний не является условием расчёта. Snapshot target должен атомарно ссылаться на версии campaign details, current bid, minimum bid, budget и статистических days; смешивание данных из несовместимых bid/configuration states запрещено. Recommendations являются необязательным source, кроме явно начатого workflow их обновления.
 
 ### 13.3. Аномалии данных
 
@@ -1064,6 +1336,27 @@ Mock ДОЛЖЕН реализовать совместимое подмноже
 - `GET /__mock/state`;
 - `GET /__mock/requests`.
 
+`POST /__mock/time/advance` принимает только положительную модельную длительность:
+
+```json
+{
+  "days": 5,
+  "hours": 0,
+  "minutes": 0,
+  "finalizeStatistics": true
+}
+```
+
+В одном синхронном вызове mock:
+
+1. переводит virtual clock;
+2. разрезает прошедшее время по WB statistical dates seed-сценария;
+3. материализует полные daily statistics и оставляет частичный последний день незавершённым;
+4. применяет заданные late-attribution events;
+5. возвращает новое virtual time, список созданных/изменённых source dates и checksum состояния.
+
+Endpoint не вызывает bidder напрямую. E2E после advance явно запускает manual resync/recalculate через внутренний Admin API либо использует ускоренный scheduler tick и bounded polling в секундах. Ожидание реального модельного часа или дня запрещено.
+
 Сценарии:
 
 - profitable campaign;
@@ -1073,7 +1366,12 @@ Mock ДОЛЖЕН реализовать совместимое подмноже
 - insufficient data;
 - stale statistics;
 - manual and unified bid;
+- manual campaign with two active placements and ambiguous attribution;
 - CPM and CPC;
+- cluster list visibility threshold;
+- CPM bid recommendations and unsupported CPC recommendations;
+- exploration lower/upper bucket with conversion lag;
+- late attribution for an already returned source day;
 - minimum bid above policy maximum;
 - 429 with headers;
 - transient 5xx;
@@ -1085,6 +1383,8 @@ Mock ДОЛЖЕН реализовать совместимое подмноже
 - manual external bid change.
 
 Mock должен быть детерминированным: один seed и одна последовательность команд дают одинаковый результат.
+
+Seed generator обязан формировать API-compatible daily rows, а не готовый `BidPerformanceDay`: исключение частичных дней, связь с bid history, conversion cutoff и finalization проверяет bidder. Полный multi-day exploration test должен завершаться за минуты wall-clock time независимо от числа виртуальных дней.
 
 ### 15.4. Rate limit mock
 
@@ -1419,6 +1719,14 @@ Authorization: Bearer <service-token>
 - `WB_API_TIMEOUT_MS`;
 - `WB_API_CONNECT_TIMEOUT_MS`.
 
+Для mock-сервера:
+
+- `MOCK_CLOCK_MODE=virtual` — единственный допустимый режим в CI/E2E;
+- `MOCK_INITIAL_TIME` — фиксированный RFC 3339 seed time;
+- `MOCK_SEED` — идентификатор детерминированного сценария.
+
+`SANDBOX_TEST_PROFILE=smoke|soak` относится к test harness, а не меняет поведение production bidder. `smoke` является default и не ждёт новой дневной статистики; `soak` запускается вручную или по отдельному расписанию с sandbox credentials.
+
 Rate limiting и параллелизм WB API:
 
 - `WB_API_GLOBAL_RATE_LIMIT_REQUESTS`, default `5`;
@@ -1445,6 +1753,8 @@ Rate limiting и параллелизм WB API:
 - `WB_WRITE_ATTEMPT_RETENTION_DAYS` — положительный срок хранения детализированного журнала write-попыток, не меньше максимального окна retry и reconciliation.
 
 `.env.example` содержит безопасные значения без секретов. Для каждого env в русской документации указываются тип, default, допустимый диапазон, секретность и влияние изменения.
+
+Алгоритмические thresholds не дублируются в env: они хранятся в неизменяемых версиях `BiddingPolicy` и получают начальные значения из раздела 9.11. Startup и policy activation валидируют межполевые инварианты, включая обязательные caps для `APPLY` и лимиты experiment.
 
 ## 19. Логирование и аудит
 
@@ -1477,12 +1787,15 @@ Production logs — JSON в stdout/stderr. Обязательные поля:
 Для решения сохраняются:
 
 - исходная и целевая ставка;
-- метрики и окно;
+- границы primary/baseline window, conversion cutoff и перечень включённых/исключённых `BidPerformanceDay` с quality reasons;
 - `productEconomicsVersion` и `expectedContributionBeforeAdsMinor`;
-- оценки ordered units, рекламных расходов и прибыли для всех рассмотренных candidate bids;
+- raw, PAVA-adjusted и safety-adjusted оценки ordered units, рекламных расходов и прибыли для всех рассмотренных candidate bids;
+- evidence counters и причины исключения каждого bucket/candidate;
+- источник candidate (`CURRENT`, `HISTORY`, `STEP`, `BOUND`, `WB_RECOMMENDATION`, `EXPERIMENT`);
+- `strategyReasonCode`, `outcomeReasonCode` и полный `guardrailCodes`;
+- состояние и переход `BidExperiment`, если применимо;
 - policy и algorithm version;
-- причины;
-- все применённые ограничения;
+- normalized time context, не раскрывая секретных payload;
 - идентификаторы и итоги исходящих write-attempts;
 - фактически прочитанная ставка;
 - actor ручного вмешательства.
@@ -1507,6 +1820,9 @@ Audit events append-only. Изменение или удаление audit recor
 - `bidder_scheduler_run_duration_seconds`;
 - `bidder_sync_campaigns_total{status}`;
 - `bidder_sync_lag_seconds`;
+- `bidder_snapshot_age_seconds{data_kind}`;
+- `bidder_sync_sla_violations_total{data_kind}`;
+- `bidder_sync_full_pass_eta_seconds{data_kind}`;
 - `bidder_decisions_total{action,reason}`;
 - `bidder_decision_duration_seconds`;
 - `bidder_queue_items{status}`;
@@ -1522,7 +1838,11 @@ Audit events append-only. Изменение или удаление audit recor
 - `bidder_product_economics_imports_total{status,dry_run}`;
 - `bidder_product_economics_import_items_total{status,reason}`;
 - `bidder_targets_without_product_economics`;
+- `bidder_bid_experiments{status}`;
+- `bidder_bid_experiment_reverts_total{reason}`;
 - `bidder_audit_write_failures_total`.
+
+`bidder_snapshot_age_seconds{data_kind}` публикует max age по управляемому scope, а не отдельный time series на target; распределение возрастов описывается bounded buckets либо вычисляется в audit/query storage.
 
 Нельзя помещать campaign/nm/query в Prometheus labels из-за высокой кардинальности. Для этого используются logs и audit query.
 
@@ -1531,6 +1851,7 @@ Audit events append-only. Изменение или удаление audit recor
 Документация должна предложить:
 
 - sync lag выше допустимого;
+- target sync SLA нарушен либо full-pass ETA устойчиво растёт;
 - очередь растёт или oldest age превышен;
 - terminal failure;
 - серия `401/403`;
@@ -1540,7 +1861,8 @@ Audit events append-only. Изменение или удаление audit recor
 - DB pool saturation;
 - audit write failure;
 - незавершённый product economics import или рост доли targets без действующей экономики;
-- неожиданный рост расходов.
+- неожиданный рост расходов;
+- experiment завис в non-terminal state либо достиг safety buffer без revert.
 
 ## 21. Безопасность
 
@@ -1648,7 +1970,13 @@ JSDoc НЕ ДОЛЖЕН пересказывать очевидный код и�
 - optimistic locking и идемпотентности single/batch economics endpoints;
 - частично успешного batch import и dry-run;
 - выборки окон и conversion lag;
+- eligibility `BidPerformanceDay`, включая частичный день, смену ставки/configuration и late attribution;
+- bucket evidence отдельно для CPM и CPC без обязательного `views` в CPC;
+- PAVA с одним bucket, несколькими нарушениями монотонности и точными весами `eligibleDays`;
+- safety discount/premium, linear interpolation и запрет extrapolation;
+- построения candidate set, включая фильтрацию WB recommendations;
 - zero-conversion;
+- state machine и deterministic direction `BidExperiment`;
 - floor/cap/hysteresis/cooldown/daily cap;
 - разрешения policy precedence;
 - канонизация `inputSnapshotChecksum` и `decisionInputChecksum`;
@@ -1670,8 +1998,11 @@ JSDoc НЕ ДОЛЖЕН пересказывать очевидный код и�
 - при равных входах результат идентичен;
 - выбранная ставка имеет максимальную ожидаемую прибыль среди допустимых и обеспеченных данными кандидатов;
 - рост/снижение не превышает cap;
+- ordinary argmax никогда не использует extrapolated candidate;
+- при равном score tie-break выбирает current, затем меньшую ставку;
+- неоднозначная attribution двух manual placements никогда не создаёт write;
 - невалидные или stale данные никогда не создают write;
-- деньги не теряют копейки из-за float.
+- деньги не теряют minor units из-за float.
 
 ### 25.2. Integration tests
 
@@ -1679,7 +2010,8 @@ JSDoc НЕ ДОЛЖЕН пересказывать очевидный код и�
 
 - Prisma migrations;
 - upsert статистики;
-- формирование `BidPerformanceObservation` только для интервалов с одной подтверждённой ставкой;
+- формирование `BidPerformanceDay` только для полного финализированного source day с одной подтверждённой ставкой и неизменной configuration;
+- повторное чтение дня с late attribution обновляет source row, инвалидирует прежнюю finalization и меняет checksum;
 - immutable product economics versions и запрет пересекающихся периодов;
 - single update с optimistic locking;
 - идемпотентный batch import, dry-run, partial success и сериализация конкурирующих строк одного `nmId`;
@@ -1691,7 +2023,8 @@ JSDoc НЕ ДОЛЖЕН пересказывать очевидный код и�
 - durable-регистрация `WbWriteAttempt` до отправки, reconciliation для `UNKNOWN` и плановая retention-очистка;
 - advisory scheduler lock;
 - audit append-only;
-- startup validation констант `ACCOUNT_CURRENCY` и `ACCOUNT_TIMEZONE`.
+- startup validation констант `ACCOUNT_CURRENCY` и `ACCOUNT_TIMEZONE`;
+- quota-aware round-robin сохраняет cursor, не создаёт starvation и публикует согласованные target-level snapshots.
 
 ### 25.3. Contract tests
 
@@ -1706,7 +2039,7 @@ JSDoc НЕ ДОЛЖЕН пересказывать очевидный код и�
 - ошибки;
 - fixtures из официальной документации без секретов.
 
-Один и тот же набор consumer contract tests запускается против mock и, где безопасно, sandbox. Production contract tests выполняют только read methods.
+Полный consumer contract suite запускается против mock. Sandbox smoke запускает только документированно доступное и безопасное подмножество read/write contracts и не требует появления новой daily statistics. Sandbox soak отдельно проверяет суточную генерацию статистики и не входит в обычный PR CI. Production contract tests выполняют только read methods.
 
 Для внутренних product economics endpoints отдельные contract tests покрывают JSON schemas, decimal-string сериализацию `BIGINT`, conditional headers, idempotency, request-level и item-level ошибки, pagination и все состояния import job.
 
@@ -1736,7 +2069,16 @@ JSDoc НЕ ДОЛЖЕН пересказывать очевидный код и�
 18. отсутствие product economics блокирует только соответствующий `nmId`;
 19. single economics update supersedes неотправленное старое решение;
 20. batch import с успешными и ошибочными строками;
-21. выбор максимальной ожидаемой прибыли по нескольким подтверждённым bid buckets.
+21. выбор максимальной ожидаемой прибыли по нескольким подтверждённым bid buckets;
+22. PAVA, interpolation и отказ от extrapolation;
+23. блокировка двух manual placement bids при неразделённой статистике;
+24. кластер CPM оптимизируется, кластер CPC остаётся diagnostic-only;
+25. WB recommendation используется только как обеспеченный candidate hint;
+26. lower и upper exploration с безопасным revert;
+27. `/__mock/time/advance` создаёт несколько полных days и conversion lag без ожидания wall-clock time;
+28. late attribution инвалидирует day и приводит к новому детерминированному snapshot.
+
+Сценарии 21–28 используют фиксированное `MOCK_INITIAL_TIME`: test harness делает `time/advance`, запускает resync/recalculate и применяет bounded polling только к выполнению jobs. Wall-clock budget полного multi-day набора фиксируется CI и не должен зависеть от числа виртуальных дней.
 
 ### 25.5. Негативные и нагрузочные тесты
 
@@ -1748,7 +2090,9 @@ JSDoc НЕ ДОЛЖЕН пересказывать очевидный код и�
 - clock skew;
 - истёкший токен;
 - race двух executor replicas;
-- graceful shutdown.
+- graceful shutdown;
+- starvation при постоянном потоке high-priority targets;
+- полный проход 10 000 кампаний при лимите `fullstats` 3 запроса/мин с проверкой cursor и ETA, используя виртуализированный limiter.
 
 ### 25.6. Coverage gates
 
@@ -1803,15 +2147,15 @@ Production deployment СЛЕДУЕТ включать:
 
 ### AC-03. Data Sync
 
-Повторная синхронизация одного периода не создаёт дубликатов, сохраняет freshness/completeness и соблюдает batch/rate limits.
+Повторная синхронизация одного периода не создаёт дубликатов, сохраняет freshness/completeness и соблюдает batch/rate limits. При полном проходе дольше cron interval новый run не дублируется: cursor продолжается, targets не голодают, а Decision Engine обрабатывает только согласованные target-level snapshots в пределах SLA.
 
 ### AC-04. Decision Engine
 
-Для фиксированного fixture возвращает детерминированное решение с полным объяснением; к WB API не обращается.
+Для фиксированного fixture возвращает детерминированное решение с полным объяснением, включая eligible days/buckets, PAVA, safety adjustment, candidates и bounds; к WB API не обращается.
 
 ### AC-05. Прибыль
 
-Decision Engine выбирает допустимую ставку с максимальной детерминированно оценённой прибылью. Без действующего `expectedContributionBeforeAdsMinor` объект блокируется; переключение на другую цель не происходит. ACOS и ROAS используются только как диагностические метрики.
+Decision Engine выбирает допустимую обеспеченную данными ставку с максимальной детерминированно оценённой прибылью. Сумма локальных максимумов признаётся максимумом account score только при выполнении допущений separability из раздела 9.5; общий budget остаётся guardrail. Без действующего `expectedContributionBeforeAdsMinor` объект блокируется; переключение на другую цель не происходит. ACOS и ROAS используются только как диагностические метрики.
 
 ### AC-06. Guardrails
 
@@ -1843,7 +2187,7 @@ Live, ready и metrics endpoints работают; ключевые stages им�
 
 ### AC-13. Mock
 
-Mock реализует согласованное подмножество WB API, детерминированные сценарии, delayed consistency, fault injection и rate-limit headers.
+Mock реализует согласованное подмножество WB API, детерминированные сценарии, delayed consistency, fault injection, rate-limit headers и virtual clock. Multi-day statistics, conversion lag и exploration проверяются без ожидания model time в wall clock.
 
 ### AC-14. Тесты
 
@@ -1869,6 +2213,18 @@ Deployment принимает один WB token и обрабатывает то
 
 Bidder и mock-сервер возвращают Swagger UI по `GET /docs` и валидный OpenAPI 3.x JSON по `GET /docs-json`. Автоматический contract test запускает каждое приложение, проверяет HTTP `200`, валидирует OpenAPI schema и подтверждает наличие всех реализованных endpoints: `/api/v1` для bidder, совместимого подмножества WB API и `/__mock` для mock-сервера. Схемы, ошибки, security requirements и примеры соответствуют runtime DTO и не содержат секретов.
 
+### AC-20. Bid-response estimator
+
+Golden fixtures подтверждают разбиение по полным WB statistical days и точной ставке, CPM/CPC evidence thresholds, weighted PAVA, safety adjustments, линейную interpolation без extrapolation, deterministic tie-break и выбор argmax. Late attribution меняет source checksum и исключает преждевременно финализированный day.
+
+### AC-21. Возможности WB и атрибуция
+
+Capability matrix исполняется fail-closed: unified card, single-placement manual card и manual CPM cluster допускают `APPLY`; dual-placement manual card без разделённой статистики блокируется; CPC cluster не создаёт write. WB recommendation только добавляет CPM candidate hint и сама по себе не обосновывает изменение.
+
+### AC-22. Exploration и тестовые режимы
+
+`BidExperiment` допускает не более одного активного experiment на target, собирает требуемое число полных days, ждёт conversion cutoff, соблюдает spend/concurrency caps и безопасно возвращает ставку. Mock выполняет этот lifecycle через `/__mock/time/advance` за минуты wall-clock time. Sandbox smoke завершается без ожидания daily statistics; sandbox soak запускается и оценивается отдельно.
+
 ## 28. Матрица трассировки исходных требований
 
 | № | Исходное требование | Разделы | Критерии |
@@ -1891,6 +2247,10 @@ Bidder и mock-сервер возвращают Swagger UI по `GET /docs` и 
 | 16 | Предоставление экономики множества позиций | 8, 17 | AC-17 |
 | 17 | Один продавец и тысячи его кампаний | 2, 3, 8, 11, 18 | AC-16, AC-18 |
 | 18 | Swagger UI и OpenAPI для bidder и mock-сервера | 15.5, 17, 24, 25 | AC-19 |
+| 19 | Конкретный способ оценки и выбора ставки | 8.1, 9.2–9.11 | AC-04, AC-05, AC-20 |
+| 20 | Ограничения WB по placement, cluster и recommendations | 4.2–4.4, 13 | AC-21 |
+| 21 | Быстрый multi-day mock и реалистичный sandbox | 9.7, 12.1, 15, 25 | AC-13, AC-22 |
+| 22 | Независимое расписание при ограниченном API throughput | 11, 13 | AC-03, AC-16 |
 
 ## 29. Этапы реализации
 
@@ -1907,25 +2267,26 @@ Bidder и mock-сервер возвращают Swagger UI по `GET /docs` и 
 ### Этап 1. WB adapter и mock
 
 - runtime schemas;
-- read endpoints;
+- read endpoints, включая cluster list и CPM bid recommendations;
 - rate limiter;
 - журнал `WbWriteAttempt`, structured request logs и redaction;
-- mock scenarios и contract tests.
+- virtual clock, daily statistics generator, mock scenarios и contract tests.
 
 ### Этап 2. Data Sync
 
 - schema/migrations;
 - scheduler locks;
-- incremental sync;
-- freshness/completeness;
+- quota-aware incremental sync, persisted cursors и priority fairness;
+- `BidPerformanceDay`, target-level freshness/completeness и late-attribution invalidation;
 - integration/load tests.
 
 ### Этап 3. Decision Engine
 
 - product economics и batch import;
 - policy versioning;
-- metrics;
-- детерминированная оценка прибыли candidate bids;
+- exact fixed-point metrics, evidence thresholds, PAVA и interpolation;
+- capability matrix и candidate hints WB;
+- `BidExperiment` и safety/revert state machine;
 - explanation и property-based tests;
 - observe-only.
 
@@ -1942,7 +2303,7 @@ Bidder и mock-сервер возвращают Swagger UI по `GET /docs` и 
 - Admin API auth;
 - observability/runbook;
 - security/load testing;
-- sandbox soak;
+- быстрый sandbox smoke; отдельный sandbox soak перед первым production write enable;
 - canary prod observe-only;
 - controlled write enable.
 
@@ -1953,7 +2314,11 @@ Bidder и mock-сервер возвращают Swagger UI по `GET /docs` и 
 | Риск/вопрос | Требуемое действие |
 |---|---|
 | WB меняет методы и лимиты | Версионировать endpoint profile, проверять release notes, contract tests |
-| Статистика и ставка видимы с задержкой | Conversion lag, delayed verification, reconciliation |
+| Статистика и ставка видимы с задержкой | Daily finalization, conversion lag, delayed verification, reconciliation |
+| `fullstats` не разделяет manual placements | Блокировать независимый APPLY при двух активных placements; не выводить placement-эффект вычитанием |
+| Статистика sandbox создаётся раз в сутки | Быстрый smoke без ожидания; отдельный scheduled soak; multi-day CI только через mock virtual time |
+| Рекомендации WB отражают аукцион, а не прибыль | Использовать только как CPM candidate hints внутри обеспеченного диапазона или ограничитель experiment |
+| Полный sync дольше cron interval | Persisted cursor, round-robin fairness, target-level snapshots, SLA/ETA metrics |
 | Рекламные заказы не равны выкупам | Требовать, чтобы `expectedContributionBeforeAdsMinor` уже учитывал ожидаемый невыкуп и возврат; не называть orders продажами |
 | Нет product economics | Блокировать изменение ставки конкретного `nmId`; не переключать цель оптимизации |
 | Ручное изменение конфликтует с bidder | Pre-send compare, audit, cancel + recalculate |
@@ -1973,16 +2338,18 @@ Bidder и mock-сервер возвращают Swagger UI по `GET /docs` и 
 6. identity provider Admin API;
 7. целевой sync SLA для полного набора кампаний аккаунта;
 8. допустимость автоматического повышения ставок;
-9. процедуру аварийного глобального отключения writes.
+9. процедуру аварийного глобального отключения writes;
+10. результаты backtest/observe-only и валютные thresholds обязательных полей policy;
+11. результат хотя бы одного sandbox soak перед первым production write enable либо документированное исключение, если WB sandbox не поддерживает необходимый метод.
 
 ## 31. Definition of Done разработки
 
 Система считается готовой, только когда:
 
-1. выполнены AC-01–AC-18;
+1. выполнены AC-01–AC-22;
 2. нет известных нарушений денежных единиц и WB rate limits;
 3. все критические тесты и CI gates зелёные;
-4. sandbox soak завершён без необъяснённых расхождений;
+4. sandbox smoke завершён без необъяснённых расхождений; soak не блокирует обычный development DoD и применяется как отдельный pre-production gate из раздела 30;
 5. runbook проверен на сценариях WB outage, DB outage, 429 storm и stuck queue;
 6. документация на русском актуальна;
 7. секреты отсутствуют в репозитории и логах;
