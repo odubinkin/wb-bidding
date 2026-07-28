@@ -4,7 +4,7 @@ title: "Stage 5: production readiness and complete DoD audit"
 status: "DOING"
 priority: "high"
 owner: "CODER"
-revision: 6
+revision: 7
 origin:
   system: "manual"
 depends_on:
@@ -40,10 +40,10 @@ plan_approval:
   note: null
 verification:
   state: "needs_rework"
-  updated_at: "2026-07-28T19:24:51.501Z"
+  updated_at: "2026-07-28T20:04:45.360Z"
   updated_by: "CODER"
-  note: "Local Stage 5 runtime and quality gates pass; release DoD remains open."
-  attempts: 1
+  note: "Local functional scope complete: 51/51 scenarios, quality/integration/e2e/load/runbook/property/mutation/build/built-smoke/docs/secrets/container-policy/compose-config green; release remains externally gated."
+  attempts: 2
 commit: null
 comments:
   -
@@ -63,8 +63,14 @@ events:
     author: "CODER"
     state: "needs_rework"
     note: "Local Stage 5 runtime and quality gates pass; release DoD remains open."
+  -
+    type: "verify"
+    at: "2026-07-28T20:04:45.360Z"
+    author: "CODER"
+    state: "needs_rework"
+    note: "Local functional scope complete: 51/51 scenarios, quality/integration/e2e/load/runbook/property/mutation/build/built-smoke/docs/secrets/container-policy/compose-config green; release remains externally gated."
 doc_version: 3
-doc_updated_at: "2026-07-28T19:24:51.564Z"
+doc_updated_at: "2026-07-28T20:04:45.425Z"
 doc_updated_by: "CODER"
 description: "Complete security hardening, observability, retention, non-root Docker images, all Compose scenarios, full CI gates, load, graceful-shutdown, outage, rollback and kill-switch validation, Russian documentation and Mermaid diagrams, endpoint-profile evidence, AC-01 through AC-30 traceability, section 31 evidence, sandbox smoke harness and explicit deviations register. Production remains write-disabled until separately approved."
 sections:
@@ -126,6 +132,36 @@ sections:
     - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
     - risks: none
 
+    ### 2026-07-28T20:04:45.360Z — VERIFY — needs_rework
+
+    By: CODER
+
+    Note: Local functional scope complete: 51/51 scenarios, quality/integration/e2e/load/runbook/property/mutation/build/built-smoke/docs/secrets/container-policy/compose-config green; release remains externally gated.
+    Attempts: 2
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-28T19:24:51.564Z, excerpt_hash=sha256:0f7ebe81cafca4ae9eda8825f8edf22adeacc6abe07cae0aa0bc3ca8b936f5a3
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607281323-PZZ48N/blueprint/resolved-snapshot.json
+    - old_digest: dd16438f127e6adb6f7a1435b7f7fc1e7ab22cfda2fe1298c4b616ac2f02c0ae
+    - current_digest: dd16438f127e6adb6f7a1435b7f7fc1e7ab22cfda2fe1298c4b616ac2f02c0ae
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202607281323-PZZ48N
+
+    DecisionContextRef:
+    - operator_action: run_exact_argv
+    - can_execute_now: true
+    - safe_command: agentplane task verify-show 202607281323-PZZ48N
+    - diagnostic_command: none
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: true
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: none
+
     <!-- END VERIFICATION RESULTS -->
   Rollback Plan: |-
     - Revert task-related commit(s).
@@ -134,6 +170,10 @@ sections:
     - Observation: E2E-24 and E2E-49 lack a verified mock-only cluster profile/executor; Docker runtime/image/dependency scans, sandbox smoke, and product/API owner decisions have no evidence.
       Impact: AC-14, AC-24, AC-30 and DoD 31.1/31.3/31.4/31.10 cannot be marked complete; production writes remain disabled.
       Resolution: Implement the immutable verified mock cluster contract and cluster write/delete pipeline; then obtain green CI/Docker, sandbox manifest/Test credential evidence, and signed owner decisions.
+
+    - Observation: Docker runtime/image scan unavailable; full all-dependencies audit retains dev-only brace-expansion advisory; sandbox fixture/Test credential and product/API release-owner evidence were not supplied.
+      Impact: DoD section 31 and production release cannot be marked complete or task finished without external CI/sandbox/owner evidence.
+      Resolution: Run CI Docker/Trivy and parent dev-tool dependency upgrades, provide sandbox manifest/Test credential with approval, and attach signed product/API release-owner decisions.
 id_source: "generated"
 ---
 ## Summary
@@ -203,6 +243,36 @@ DecisionContextRef:
 - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
 - risks: none
 
+### 2026-07-28T20:04:45.360Z — VERIFY — needs_rework
+
+By: CODER
+
+Note: Local functional scope complete: 51/51 scenarios, quality/integration/e2e/load/runbook/property/mutation/build/built-smoke/docs/secrets/container-policy/compose-config green; release remains externally gated.
+Attempts: 2
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-28T19:24:51.564Z, excerpt_hash=sha256:0f7ebe81cafca4ae9eda8825f8edf22adeacc6abe07cae0aa0bc3ca8b936f5a3
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607281323-PZZ48N/blueprint/resolved-snapshot.json
+- old_digest: dd16438f127e6adb6f7a1435b7f7fc1e7ab22cfda2fe1298c4b616ac2f02c0ae
+- current_digest: dd16438f127e6adb6f7a1435b7f7fc1e7ab22cfda2fe1298c4b616ac2f02c0ae
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202607281323-PZZ48N
+
+DecisionContextRef:
+- operator_action: run_exact_argv
+- can_execute_now: true
+- safe_command: agentplane task verify-show 202607281323-PZZ48N
+- diagnostic_command: none
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: true
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: none
+
 <!-- END VERIFICATION RESULTS -->
 
 ## Rollback Plan
@@ -215,3 +285,7 @@ DecisionContextRef:
 - Observation: E2E-24 and E2E-49 lack a verified mock-only cluster profile/executor; Docker runtime/image/dependency scans, sandbox smoke, and product/API owner decisions have no evidence.
   Impact: AC-14, AC-24, AC-30 and DoD 31.1/31.3/31.4/31.10 cannot be marked complete; production writes remain disabled.
   Resolution: Implement the immutable verified mock cluster contract and cluster write/delete pipeline; then obtain green CI/Docker, sandbox manifest/Test credential evidence, and signed owner decisions.
+
+- Observation: Docker runtime/image scan unavailable; full all-dependencies audit retains dev-only brace-expansion advisory; sandbox fixture/Test credential and product/API release-owner evidence were not supplied.
+  Impact: DoD section 31 and production release cannot be marked complete or task finished without external CI/sandbox/owner evidence.
+  Resolution: Run CI Docker/Trivy and parent dev-tool dependency upgrades, provide sandbox manifest/Test credential with approval, and attach signed product/API release-owner decisions.
