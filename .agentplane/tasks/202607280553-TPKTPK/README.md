@@ -4,7 +4,7 @@ title: "Align specification with single-seller scope"
 status: "DOING"
 priority: "med"
 owner: "DOCS"
-revision: 10
+revision: 13
 origin:
   system: "manual"
 depends_on: []
@@ -18,10 +18,27 @@ plan_approval:
   note: null
 verification:
   state: "ok"
-  updated_at: "2026-07-28T05:59:31.244Z"
+  updated_at: "2026-07-28T06:00:55.788Z"
   updated_by: "DOCS"
-  note: "Command: targeted rg checks, full diff review, git diff --check, node .agentplane/policy/check-routing.mjs, ap doctor, git status. Result: pass. Evidence: sellerId, seller-scoped routes, CURRENCY_MISMATCH, fairness, round-robin and per-record currency fields are absent; ACCOUNT_CURRENCY is a required startup-validated env value used as one runtime constant; routing OK; doctor errors=0 warnings=0. Scope: docs/technical-specification.md and task artifacts. Links: sections 2, 3, 8, 11-14, 17-18, 21, 25-31."
+  note: "ТЗ приведено к одному WB-аккаунту на deployment; ACCOUNT_CURRENCY задаётся через env и используется как единая runtime-константа; multi-seller и per-record currency требования удалены."
   attempts: 0
+quality_review:
+  state: "pass"
+  provenance: "evaluator_supplied"
+  updated_at: "2026-07-28T06:00:46.694Z"
+  updated_by: "EVALUATOR"
+  note: "ТЗ последовательно приведено к single-seller deployment с одной валютой из env."
+  evaluated_sha: "e868a798ecbfb3cd2763dd820787c18c99cb8258"
+  blueprint_digest: "55af973df1173cfecb9c9c70b6d6cd66849a0be6a0bbb7d060731df4e6a28c30"
+  evidence_refs:
+    - ".agentplane/tasks/202607280553-TPKTPK/README.md"
+    - ".agentplane/tasks/202607280553-TPKTPK/quality/20260728-060046694-recovery-context/quality-report.json"
+    - ".agentplane/tasks/202607280553-TPKTPK/quality/20260728-060046694-recovery-context/evaluator-prompt.md"
+    - ".agentplane/tasks/202607280553-TPKTPK/quality/20260728-060046694-recovery-context/evaluator-opinion.md"
+    - ".agentplane/tasks/202607280553-TPKTPK/blueprint/resolved-snapshot.json"
+    - "docs/technical-specification.md"
+  findings:
+    - "Один WB token и один account scope зафиксированы в продуктовых границах; sellerId, seller-scoped API routes, multi-seller scheduling/fairness and per-record currency fields removed across data model, scheduler, executor, internal API, tests and acceptance criteria. ACCOUNT_CURRENCY is required at startup and becomes the sole runtime currency constant; conversion and currency selection remain explicitly out of scope."
 commit: null
 comments:
   -
@@ -41,8 +58,20 @@ events:
     author: "DOCS"
     state: "ok"
     note: "Command: targeted rg checks, full diff review, git diff --check, node .agentplane/policy/check-routing.mjs, ap doctor, git status. Result: pass. Evidence: sellerId, seller-scoped routes, CURRENCY_MISMATCH, fairness, round-robin and per-record currency fields are absent; ACCOUNT_CURRENCY is a required startup-validated env value used as one runtime constant; routing OK; doctor errors=0 warnings=0. Scope: docs/technical-specification.md and task artifacts. Links: sections 2, 3, 8, 11-14, 17-18, 21, 25-31."
+  -
+    type: "verify"
+    at: "2026-07-28T06:00:22.668Z"
+    author: "DOCS"
+    state: "ok"
+    note: "ТЗ приведено к одному WB-аккаунту на deployment; ACCOUNT_CURRENCY задаётся через env и используется как единая runtime-константа; multi-seller и per-record currency требования удалены."
+  -
+    type: "verify"
+    at: "2026-07-28T06:00:55.788Z"
+    author: "DOCS"
+    state: "ok"
+    note: "ТЗ приведено к одному WB-аккаунту на deployment; ACCOUNT_CURRENCY задаётся через env и используется как единая runtime-константа; multi-seller и per-record currency требования удалены."
 doc_version: 3
-doc_updated_at: "2026-07-28T05:59:31.550Z"
+doc_updated_at: "2026-07-28T06:00:56.094Z"
 doc_updated_by: "DOCS"
 description: "Revise docs/technical-specification.md for one WB seller account per deployment and a deployment-level currency constant; remove unsupported multi-seller and multi-currency requirements."
 sections:
@@ -60,6 +89,66 @@ sections:
     Attempts: 0
 
     VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-28T05:54:10.043Z, excerpt_hash=sha256:fc18f00fb3b24638b841a365f6850a6a41a1bfd6e4e76378a301d6824306f323
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607280553-TPKTPK/blueprint/resolved-snapshot.json
+    - old_digest: 55af973df1173cfecb9c9c70b6d6cd66849a0be6a0bbb7d060731df4e6a28c30
+    - current_digest: 55af973df1173cfecb9c9c70b6d6cd66849a0be6a0bbb7d060731df4e6a28c30
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202607280553-TPKTPK
+
+    DecisionContextRef:
+    - operator_action: stop
+    - can_execute_now: false
+    - safe_command: none
+    - diagnostic_command: none
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: false
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: none
+
+    ### 2026-07-28T06:00:22.668Z — VERIFY — ok
+
+    By: DOCS
+
+    Note: ТЗ приведено к одному WB-аккаунту на deployment; ACCOUNT_CURRENCY задаётся через env и используется как единая runtime-константа; multi-seller и per-record currency требования удалены.
+    Attempts: 0
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-28T05:59:31.550Z, excerpt_hash=sha256:fc18f00fb3b24638b841a365f6850a6a41a1bfd6e4e76378a301d6824306f323
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607280553-TPKTPK/blueprint/resolved-snapshot.json
+    - old_digest: 55af973df1173cfecb9c9c70b6d6cd66849a0be6a0bbb7d060731df4e6a28c30
+    - current_digest: 55af973df1173cfecb9c9c70b6d6cd66849a0be6a0bbb7d060731df4e6a28c30
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202607280553-TPKTPK
+
+    DecisionContextRef:
+    - operator_action: stop
+    - can_execute_now: false
+    - safe_command: none
+    - diagnostic_command: none
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: false
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: none
+
+    ### 2026-07-28T06:00:55.788Z — VERIFY — ok
+
+    By: DOCS
+
+    Note: ТЗ приведено к одному WB-аккаунту на deployment; ACCOUNT_CURRENCY задаётся через env и используется как единая runtime-константа; multi-seller и per-record currency требования удалены.
+    Attempts: 0
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-28T06:00:22.984Z, excerpt_hash=sha256:fc18f00fb3b24638b841a365f6850a6a41a1bfd6e4e76378a301d6824306f323
 
     Details:
 
@@ -118,6 +207,66 @@ Note: Command: targeted rg checks, full diff review, git diff --check, node .age
 Attempts: 0
 
 VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-28T05:54:10.043Z, excerpt_hash=sha256:fc18f00fb3b24638b841a365f6850a6a41a1bfd6e4e76378a301d6824306f323
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607280553-TPKTPK/blueprint/resolved-snapshot.json
+- old_digest: 55af973df1173cfecb9c9c70b6d6cd66849a0be6a0bbb7d060731df4e6a28c30
+- current_digest: 55af973df1173cfecb9c9c70b6d6cd66849a0be6a0bbb7d060731df4e6a28c30
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202607280553-TPKTPK
+
+DecisionContextRef:
+- operator_action: stop
+- can_execute_now: false
+- safe_command: none
+- diagnostic_command: none
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: false
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: none
+
+### 2026-07-28T06:00:22.668Z — VERIFY — ok
+
+By: DOCS
+
+Note: ТЗ приведено к одному WB-аккаунту на deployment; ACCOUNT_CURRENCY задаётся через env и используется как единая runtime-константа; multi-seller и per-record currency требования удалены.
+Attempts: 0
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-28T05:59:31.550Z, excerpt_hash=sha256:fc18f00fb3b24638b841a365f6850a6a41a1bfd6e4e76378a301d6824306f323
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607280553-TPKTPK/blueprint/resolved-snapshot.json
+- old_digest: 55af973df1173cfecb9c9c70b6d6cd66849a0be6a0bbb7d060731df4e6a28c30
+- current_digest: 55af973df1173cfecb9c9c70b6d6cd66849a0be6a0bbb7d060731df4e6a28c30
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202607280553-TPKTPK
+
+DecisionContextRef:
+- operator_action: stop
+- can_execute_now: false
+- safe_command: none
+- diagnostic_command: none
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: false
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: none
+
+### 2026-07-28T06:00:55.788Z — VERIFY — ok
+
+By: DOCS
+
+Note: ТЗ приведено к одному WB-аккаунту на deployment; ACCOUNT_CURRENCY задаётся через env и используется как единая runtime-константа; multi-seller и per-record currency требования удалены.
+Attempts: 0
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-28T06:00:22.984Z, excerpt_hash=sha256:fc18f00fb3b24638b841a365f6850a6a41a1bfd6e4e76378a301d6824306f323
 
 Details:
 

@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "task_id": "202607280553-TPKTPK",
+  "evaluator_id": "recovery-context",
+  "evaluator_profile": "EVALUATOR",
+  "generated_at": "2026-07-28T06:00:46.694Z",
+  "provenance": "evaluator_supplied",
+  "verdict": "pass",
+  "summary": "ТЗ последовательно приведено к single-seller deployment с одной валютой из env.",
+  "evaluated_sha": "e868a798ecbfb3cd2763dd820787c18c99cb8258",
+  "blueprint_digest": "55af973df1173cfecb9c9c70b6d6cd66849a0be6a0bbb7d060731df4e6a28c30",
+  "findings": [
+    "Один WB token и один account scope зафиксированы в продуктовых границах; sellerId, seller-scoped API routes, multi-seller scheduling/fairness and per-record currency fields removed across data model, scheduler, executor, internal API, tests and acceptance criteria. ACCOUNT_CURRENCY is required at startup and becomes the sole runtime currency constant; conversion and currency selection remain explicitly out of scope."
+  ],
+  "evidence_refs": [
+    ".agentplane/tasks/202607280553-TPKTPK/README.md",
+    "docs/technical-specification.md"
+  ],
+  "missing_tests": [],
+  "hidden_assumptions": [],
+  "residual_risks": [
+    "Корректность значения ACCOUNT_CURRENCY зависит от deployment configuration и должна быть обеспечена владельцем конкретного WB-аккаунта."
+  ]
+}
