@@ -1,0 +1,24 @@
+{
+  "name": "@wb-bidder/data-sync",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@wb-bidder/contracts": "workspace:*",
+    "@wb-bidder/wb-api": "workspace:*",
+    "pg": "8.16.3"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --clean",
+    "clean": "rimraf dist",
+    "typecheck": "tsc --noEmit"
+  }
+}

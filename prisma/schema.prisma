@@ -159,12 +159,33 @@ enum SchedulerRunStatus {
   DEADLINE_EXCEEDED
 }
 
+enum SyncDataKind {
+  CAMPAIGN_DISCOVERY
+  CAMPAIGN_DETAILS
+  CURRENT_BID
+  MINIMUM_BID
+  CAMPAIGN_STATISTICS
+  CLUSTER_LIST
+  CLUSTER_STATISTICS
+  BID_RECOMMENDATION
+  BUDGET_DIAGNOSTIC
+  SAME_DAY_SPEND
+}
+
+enum SyncSnapshotStatus {
+  COMPLETE
+  INCOMPLETE
+  INVALID
+  STALE
+}
+
 model DeploymentAccountBinding {
   id                      String        @id @default(uuid()) @db.Uuid
   sellerSid               String
   wbEnvironment           WbEnvironment
   tokenType               WbTokenType
   tokenCategory           String
+  tokenFor                String?
   tokenAccessFingerprint  String
   accountCurrency         String        @db.Char(3)
   accountTimezone         String
@@ -178,28 +199,32 @@ model DeploymentAccountBinding {
 }
 
 model Campaign {
-  id                String                   @id @default(uuid()) @db.Uuid
-  wbCampaignId      BigInt                   @unique
+  id                String               @id @default(uuid()) @db.Uuid
+  wbCampaignId      BigInt               @unique
   type              Int
   status            Int
   bidType           CampaignBidType
   paymentType       CampaignPaymentType
   name              String
-  wbChangedAt       DateTime?                @db.Timestamptz(3)
-  lastSyncedAt      DateTime                 @db.Timestamptz(3)
+  wbChangedAt       DateTime?            @db.Timestamptz(3)
+  lastSyncedAt      DateTime             @db.Timestamptz(3)
   supported         Boolean
   unsupportedReason String?
+  detailsFetchedAt  DateTime?            @db.Timestamptz(3)
+  detailsChecksum   String?              @db.Char(64)
+  detailsSyncRunId  String?              @db.Uuid
   targets           CampaignTarget[]
   statistics        CampaignStatDaily[]
   policies          BiddingPolicy[]
+  sourceSnapshots   SyncSourceSnapshot[]
 
   @@index([status, supported])
 }
 
 model CampaignTarget {
-  id                        String                    @id @default(uuid()) @db.Uuid
-  campaignId                String                    @db.Uuid
-  campaign                  Campaign                  @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  id                        String                @id @default(uuid()) @db.Uuid
+  campaignId                String                @db.Uuid
+  campaign                  Campaign              @relation(fields: [campaignId], references: [id], onDelete: Restrict)
   nmId                      BigInt
   targetKind                CampaignTargetKind
   placement                 CampaignPlacement
@@ -209,8 +234,17 @@ model CampaignTarget {
   minimumBidMinor           BigInt?
   clusterBidState           ClusterBidState?
   clusterBidContractVersion String?
-  lastConfirmedAt           DateTime?                 @db.Timestamptz(3)
+  lastConfirmedAt           DateTime?             @db.Timestamptz(3)
+  currentBidChecksum        String?               @db.Char(64)
+  currentBidSyncRunId       String?               @db.Uuid
+  minimumBidConfirmedAt     DateTime?             @db.Timestamptz(3)
+  minimumBidChecksum        String?               @db.Char(64)
+  minimumBidSyncRunId       String?               @db.Uuid
+  capability                String                @default("OBSERVE_ONLY")
   performanceDays           BidPerformanceDay[]
+  bidStateObservations      BidStateObservation[]
+  sourceSnapshots           SyncSourceSnapshot[]
+  dataSnapshots             TargetDataSnapshot[]
   metricSnapshots           MetricSnapshot[]
   decisions                 BidDecision[]
   experiments               BidExperiment[]
@@ -256,29 +290,29 @@ model BidPerformanceDay {
   targetId                 String                   @db.Uuid
   target                   CampaignTarget           @relation(fields: [targetId], references: [id], onDelete: Restrict)
   wbStatisticDate          DateTime                 @db.Date
-  statisticalDayProfile   String
-  confirmedBidMinor       BigInt?
-  placementBidState       Json
-  campaignStatus          Int
-  paymentType             CampaignPaymentType
-  bidType                 CampaignBidType
-  activePlacementConfig   Json
-  viewsDelta              BigInt?
-  clicksDelta             BigInt
-  atbsDelta               BigInt
-  ordersDelta             BigInt
-  orderedUnitsDelta       BigInt
-  spendDeltaMinor         BigInt
-  attributedRevenueDelta  BigInt
-  orderedUnitsSource      String                   @default("SHKS")
-  coverageStartedAt       DateTime                 @db.Timestamptz(3)
-  coverageEndedAt         DateTime                 @db.Timestamptz(3)
-  maxObservedGapMinutes   Int
-  externalWriteControl    ExternalWriteControlMode
-  changeMarkerCoverage    String
+  statisticalDayProfile    String
+  confirmedBidMinor        BigInt?
+  placementBidState        Json
+  campaignStatus           Int
+  paymentType              CampaignPaymentType
+  bidType                  CampaignBidType
+  activePlacementConfig    Json
+  viewsDelta               BigInt?
+  clicksDelta              BigInt
+  atbsDelta                BigInt
+  ordersDelta              BigInt
+  orderedUnitsDelta        BigInt
+  spendDeltaMinor          BigInt
+  attributedRevenueDelta   BigInt
+  orderedUnitsSource       String                   @default("SHKS")
+  coverageStartedAt        DateTime                 @db.Timestamptz(3)
+  coverageEndedAt          DateTime                 @db.Timestamptz(3)
+  maxObservedGapMinutes    Int
+  externalWriteControl     ExternalWriteControlMode
+  changeMarkerCoverage     String
   sourceSnapshotReferences Json
-  statisticsFinalizedAt   DateTime?                @db.Timestamptz(3)
-  conversionLagDays       Int
+  statisticsFinalizedAt    DateTime?                @db.Timestamptz(3)
+  conversionLagDays        Int
   status                   PerformanceDayStatus
   supersededAt             DateTime?                @db.Timestamptz(3)
   qualityFlags             String[]
@@ -290,20 +324,20 @@ model BidPerformanceDay {
 }
 
 model ProductEconomics {
-  id                                  String                   @id @default(uuid()) @db.Uuid
-  nmId                                BigInt
-  effectiveFrom                       DateTime                 @db.Timestamptz(3)
-  effectiveTo                         DateTime?                @db.Timestamptz(3)
-  expectedContributionBeforeAdsMinor  BigInt
-  source                              ProductEconomicsSource
-  sourceUpdatedAt                     DateTime?                @db.Timestamptz(3)
-  sourceReference                     String?
-  version                             BigInt
-  mutationKey                         String                   @unique
-  inputChecksum                       String                   @db.Char(64)
-  createdAt                           DateTime                 @default(now()) @db.Timestamptz(3)
-  createdByActor                      String
-  metricSnapshots                     MetricSnapshot[]
+  id                                 String                 @id @default(uuid()) @db.Uuid
+  nmId                               BigInt
+  effectiveFrom                      DateTime               @db.Timestamptz(3)
+  effectiveTo                        DateTime?              @db.Timestamptz(3)
+  expectedContributionBeforeAdsMinor BigInt
+  source                             ProductEconomicsSource
+  sourceUpdatedAt                    DateTime?              @db.Timestamptz(3)
+  sourceReference                    String?
+  version                            BigInt
+  mutationKey                        String                 @unique
+  inputChecksum                      String                 @db.Char(64)
+  createdAt                          DateTime               @default(now()) @db.Timestamptz(3)
+  createdByActor                     String
+  metricSnapshots                    MetricSnapshot[]
 
   @@unique([nmId, version])
   @@index([nmId, effectiveFrom, effectiveTo])
@@ -337,19 +371,19 @@ model ProductEconomicsImport {
 }
 
 model ProductEconomicsImportItem {
-  id                             String                 @id @default(uuid()) @db.Uuid
-  importId                       String                 @db.Uuid
-  import                         ProductEconomicsImport @relation(fields: [importId], references: [id], onDelete: Restrict)
-  rowId                          String
-  nmId                           BigInt
-  normalizedInput               Json
-  rowChecksum                    String                 @db.Char(64)
-  status                         ImportItemStatus
-  errorCode                      String?
-  errorDetail                    String?
-  expectedCurrentVersion         BigInt
-  actualCurrentVersion           BigInt?
-  createdVersion                 BigInt?
+  id                     String                 @id @default(uuid()) @db.Uuid
+  importId               String                 @db.Uuid
+  import                 ProductEconomicsImport @relation(fields: [importId], references: [id], onDelete: Restrict)
+  rowId                  String
+  nmId                   BigInt
+  normalizedInput        Json
+  rowChecksum            String                 @db.Char(64)
+  status                 ImportItemStatus
+  errorCode              String?
+  errorDetail            String?
+  expectedCurrentVersion BigInt
+  actualCurrentVersion   BigInt?
+  createdVersion         BigInt?
 
   @@unique([importId, rowId])
   @@unique([importId, nmId])
@@ -357,56 +391,56 @@ model ProductEconomicsImportItem {
 }
 
 model BiddingPolicy {
-  id               String          @id @default(uuid()) @db.Uuid
-  scope             PolicyScope
-  campaignId       String?         @db.Uuid
-  campaign         Campaign?       @relation(fields: [campaignId], references: [id], onDelete: Restrict)
-  targetId         String?         @db.Uuid
-  target           CampaignTarget? @relation(fields: [targetId], references: [id], onDelete: Restrict)
-  executionMode    ExecutionMode
-  configuration    Json
-  enabled          Boolean
-  version          BigInt
-  validFrom        DateTime        @db.Timestamptz(3)
-  validTo          DateTime?       @db.Timestamptz(3)
-  inputChecksum    String          @db.Char(64)
-  createdAt        DateTime        @default(now()) @db.Timestamptz(3)
-  createdByActor   String
-  metricSnapshots  MetricSnapshot[]
+  id              String           @id @default(uuid()) @db.Uuid
+  scope           PolicyScope
+  campaignId      String?          @db.Uuid
+  campaign        Campaign?        @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  targetId        String?          @db.Uuid
+  target          CampaignTarget?  @relation(fields: [targetId], references: [id], onDelete: Restrict)
+  executionMode   ExecutionMode
+  configuration   Json
+  enabled         Boolean
+  version         BigInt
+  validFrom       DateTime         @db.Timestamptz(3)
+  validTo         DateTime?        @db.Timestamptz(3)
+  inputChecksum   String           @db.Char(64)
+  createdAt       DateTime         @default(now()) @db.Timestamptz(3)
+  createdByActor  String
+  metricSnapshots MetricSnapshot[]
 
   @@unique([scope, campaignId, targetId, version])
   @@index([scope, campaignId, targetId, validFrom, validTo])
 }
 
 model MetricSnapshot {
-  id                                  String            @id @default(uuid()) @db.Uuid
-  targetId                            String            @db.Uuid
-  target                              CampaignTarget    @relation(fields: [targetId], references: [id], onDelete: Restrict)
-  productEconomicsId                  String            @db.Uuid
-  productEconomics                    ProductEconomics  @relation(fields: [productEconomicsId], references: [id], onDelete: Restrict)
-  productEconomicsVersion             BigInt
-  expectedContributionBeforeAdsMinor  BigInt
-  policyId                            String            @db.Uuid
-  policy                              BiddingPolicy     @relation(fields: [policyId], references: [id], onDelete: Restrict)
-  periodStart                         DateTime          @db.Date
-  periodEnd                           DateTime          @db.Date
-  metrics                             Json
-  candidateEstimates                  Json
-  completenessFlags                   String[]
-  inputSnapshotChecksum               String            @db.Char(64)
-  inputSnapshotSchema                 String
-  algorithmVersion                    String
-  calculatedAt                        DateTime           @db.Timestamptz(3)
-  decisions                           BidDecision[]
+  id                                 String           @id @default(uuid()) @db.Uuid
+  targetId                           String           @db.Uuid
+  target                             CampaignTarget   @relation(fields: [targetId], references: [id], onDelete: Restrict)
+  productEconomicsId                 String           @db.Uuid
+  productEconomics                   ProductEconomics @relation(fields: [productEconomicsId], references: [id], onDelete: Restrict)
+  productEconomicsVersion            BigInt
+  expectedContributionBeforeAdsMinor BigInt
+  policyId                           String           @db.Uuid
+  policy                             BiddingPolicy    @relation(fields: [policyId], references: [id], onDelete: Restrict)
+  periodStart                        DateTime         @db.Date
+  periodEnd                          DateTime         @db.Date
+  metrics                            Json
+  candidateEstimates                 Json
+  completenessFlags                  String[]
+  inputSnapshotChecksum              String           @db.Char(64)
+  inputSnapshotSchema                String
+  algorithmVersion                   String
+  calculatedAt                       DateTime         @db.Timestamptz(3)
+  decisions                          BidDecision[]
 
   @@unique([targetId, inputSnapshotChecksum])
   @@index([targetId, calculatedAt])
 }
 
 model BidDecision {
-  id                    String              @id @db.Uuid
-  targetId              String              @db.Uuid
-  target                CampaignTarget      @relation(fields: [targetId], references: [id], onDelete: Restrict)
+  id                    String               @id @db.Uuid
+  targetId              String               @db.Uuid
+  target                CampaignTarget       @relation(fields: [targetId], references: [id], onDelete: Restrict)
   action                DecisionAction
   currentBidMinor       BigInt?
   proposedBidMinor      BigInt?
@@ -415,12 +449,12 @@ model BidDecision {
   outcomeReasonCode     String
   guardrailCodes        String[]
   explanation           Json
-  metricSnapshotId      String              @db.Uuid
-  metricSnapshot        MetricSnapshot      @relation(fields: [metricSnapshotId], references: [id], onDelete: Restrict)
+  metricSnapshotId      String               @db.Uuid
+  metricSnapshot        MetricSnapshot       @relation(fields: [metricSnapshotId], references: [id], onDelete: Restrict)
   policyVersion         BigInt
   algorithmVersion      String
-  decisionInputChecksum String              @unique @db.Char(64)
-  createdAt             DateTime            @default(now()) @db.Timestamptz(3)
+  decisionInputChecksum String               @unique @db.Char(64)
+  createdAt             DateTime             @default(now()) @db.Timestamptz(3)
   queueItem             DecisionQueueItem?
   writeAttemptItems     WbWriteAttemptItem[]
 
@@ -428,33 +462,33 @@ model BidDecision {
 }
 
 model BidExperiment {
-  id                              String            @id @default(uuid()) @db.Uuid
-  targetId                        String            @db.Uuid
-  target                          CampaignTarget    @relation(fields: [targetId], references: [id], onDelete: Restrict)
-  status                          ExperimentStatus
-  sourceBidMinor                  BigInt
-  experimentBidMinor              BigInt
-  desiredRevertBidMinor           BigInt
-  actualRevertBidMinor            BigInt?
-  plannedFullDays                 Int
-  collectedEligibleDays           Int               @default(0)
-  spendLimitMinor                 BigInt
-  spendSafetyBufferMinor          BigInt
-  observedExperimentSpendMinor    BigInt             @default(0)
-  reservedUnobservedSpendMinor     BigInt             @default(0)
-  startedAt                       DateTime?          @db.Timestamptz(3)
-  firstEligibleDate               DateTime?          @db.Date
-  lastEligibleDate                DateTime?          @db.Date
-  evaluationNotBefore             DateTime?          @db.Timestamptz(3)
-  policyVersion                   BigInt
-  algorithmVersion                String
-  experimentReasonCode            String
-  terminalReasonCode              String?
-  resultDecisionId                String?            @db.Uuid
-  leaseOwner                      String?
-  leaseUntil                      DateTime?          @db.Timestamptz(3)
-  createdAt                       DateTime           @default(now()) @db.Timestamptz(3)
-  completedAt                     DateTime?          @db.Timestamptz(3)
+  id                           String           @id @default(uuid()) @db.Uuid
+  targetId                     String           @db.Uuid
+  target                       CampaignTarget   @relation(fields: [targetId], references: [id], onDelete: Restrict)
+  status                       ExperimentStatus
+  sourceBidMinor               BigInt
+  experimentBidMinor           BigInt
+  desiredRevertBidMinor        BigInt
+  actualRevertBidMinor         BigInt?
+  plannedFullDays              Int
+  collectedEligibleDays        Int              @default(0)
+  spendLimitMinor              BigInt
+  spendSafetyBufferMinor       BigInt
+  observedExperimentSpendMinor BigInt           @default(0)
+  reservedUnobservedSpendMinor BigInt           @default(0)
+  startedAt                    DateTime?        @db.Timestamptz(3)
+  firstEligibleDate            DateTime?        @db.Date
+  lastEligibleDate             DateTime?        @db.Date
+  evaluationNotBefore          DateTime?        @db.Timestamptz(3)
+  policyVersion                BigInt
+  algorithmVersion             String
+  experimentReasonCode         String
+  terminalReasonCode           String?
+  resultDecisionId             String?          @db.Uuid
+  leaseOwner                   String?
+  leaseUntil                   DateTime?        @db.Timestamptz(3)
+  createdAt                    DateTime         @default(now()) @db.Timestamptz(3)
+  completedAt                  DateTime?        @db.Timestamptz(3)
 
   @@index([targetId, status])
 }
@@ -481,28 +515,28 @@ model DecisionQueueItem {
 }
 
 model WbWriteAttempt {
-  id                       String               @id @default(uuid()) @db.Uuid
-  endpointKey              String
-  method                   String
-  correlationId            String               @db.Uuid
-  wbRequestId              String?
-  requestChecksum          String               @db.Char(64)
-  batchSize                Int
-  status                   WriteAttemptStatus
-  preparedAt               DateTime             @db.Timestamptz(3)
-  dispatchCommittedAt      DateTime?            @db.Timestamptz(3)
-  completedAt              DateTime?            @db.Timestamptz(3)
-  latencyMs                Int?
-  preWriteReadAt           DateTime?            @db.Timestamptz(3)
-  preWriteStateChecksum    String?              @db.Char(64)
-  preWriteSourceMarker     String?
-  httpStatus               Int?
-  rateLimitHeaders         Json?
-  requestDigest            Json
-  responseDigest           Json?
-  errorClass               String?
-  errorCode                String?
-  items                    WbWriteAttemptItem[]
+  id                    String               @id @default(uuid()) @db.Uuid
+  endpointKey           String
+  method                String
+  correlationId         String               @db.Uuid
+  wbRequestId           String?
+  requestChecksum       String               @db.Char(64)
+  batchSize             Int
+  status                WriteAttemptStatus
+  preparedAt            DateTime             @db.Timestamptz(3)
+  dispatchCommittedAt   DateTime?            @db.Timestamptz(3)
+  completedAt           DateTime?            @db.Timestamptz(3)
+  latencyMs             Int?
+  preWriteReadAt        DateTime?            @db.Timestamptz(3)
+  preWriteStateChecksum String?              @db.Char(64)
+  preWriteSourceMarker  String?
+  httpStatus            Int?
+  rateLimitHeaders      Json?
+  requestDigest         Json
+  responseDigest        Json?
+  errorClass            String?
+  errorCode             String?
+  items                 WbWriteAttemptItem[]
 
   @@index([status, preparedAt])
 }
@@ -562,6 +596,81 @@ model SchedulerRun {
   leaseUntil   DateTime?          @db.Timestamptz(3)
 
   @@index([jobType, status, startedAt])
+}
+
+model SyncCheckpoint {
+  dataKind            SyncDataKind @id
+  cursor              Json
+  fullPassStartedAt   DateTime     @db.Timestamptz(3)
+  fullPassCompletedAt DateTime?    @db.Timestamptz(3)
+  lastSuccessAt       DateTime?    @db.Timestamptz(3)
+  oldestPendingAt     DateTime?    @db.Timestamptz(3)
+  processedCount      BigInt       @default(0)
+  totalEstimate       BigInt?
+  updatedAt           DateTime     @updatedAt @db.Timestamptz(3)
+}
+
+model BidStateObservation {
+  id                       String                   @id @default(uuid()) @db.Uuid
+  targetId                 String                   @db.Uuid
+  target                   CampaignTarget           @relation(fields: [targetId], references: [id], onDelete: Restrict)
+  observedAt               DateTime                 @db.Timestamptz(3)
+  currentBidMinor          BigInt?
+  clusterBidState          ClusterBidState?
+  campaignStatus           Int
+  bidType                  CampaignBidType
+  paymentType              CampaignPaymentType
+  activePlacementConfig    Json
+  configurationChecksum    String                   @db.Char(64)
+  sourceMarker             String?
+  syncRunId                String                   @db.Uuid
+  externalWriteControlMode ExternalWriteControlMode
+  changeMarkerObserved     Boolean
+
+  @@unique([targetId, observedAt, configurationChecksum])
+  @@index([targetId, observedAt])
+  @@index([syncRunId])
+}
+
+model SyncSourceSnapshot {
+  id              String          @id @default(uuid()) @db.Uuid
+  dataKind        SyncDataKind
+  campaignId      String?         @db.Uuid
+  campaign        Campaign?       @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  targetId        String?         @db.Uuid
+  target          CampaignTarget? @relation(fields: [targetId], references: [id], onDelete: Restrict)
+  sourceDate      DateTime?       @db.Date
+  fetchedAt       DateTime        @db.Timestamptz(3)
+  endpointProfile String
+  sourceChecksum  String          @db.Char(64)
+  normalizedData  Json
+  valid           Boolean
+  invalidReason   String?
+  syncRunId       String          @db.Uuid
+  createdAt       DateTime        @default(now()) @db.Timestamptz(3)
+
+  @@index([dataKind, fetchedAt])
+  @@index([targetId, dataKind, fetchedAt])
+  @@index([syncRunId])
+}
+
+model TargetDataSnapshot {
+  id                     String             @id @default(uuid()) @db.Uuid
+  targetId               String             @db.Uuid
+  target                 CampaignTarget     @relation(fields: [targetId], references: [id], onDelete: Restrict)
+  syncRunId              String             @db.Uuid
+  createdAt              DateTime           @db.Timestamptz(3)
+  status                 SyncSnapshotStatus
+  requiredSourceVersions Json
+  completenessFlags      String[]
+  oldestFetchedAt        DateTime?          @db.Timestamptz(3)
+  coherentRegimeChecksum String?            @db.Char(64)
+  applyEligible          Boolean
+  increaseEligible       Boolean
+  inputChecksum          String             @unique @db.Char(64)
+
+  @@index([targetId, createdAt])
+  @@index([status, createdAt])
 }
 
 model IdempotencyRecord {

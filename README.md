@@ -62,6 +62,8 @@ docker compose -f docker-compose.mock-only.yml down
 Сценарии и служебные запросы описаны в [документации mock-сервера](docs/mock-server.md).
 Профиль интеграции, статусы `VERIFIED | UNVERIFIED | DEPRECATED` и правила fail-closed
 описаны в [документации WB API](docs/wb-api-integration.md).
+Архитектура jobs, checkpoints, target snapshots и статистических evidence описана в
+[документации синхронизации](docs/data-synchronization.md).
 
 ## Локальная проверка
 

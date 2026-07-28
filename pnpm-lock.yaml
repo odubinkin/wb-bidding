@@ -216,6 +216,18 @@ importers:
 
   packages/contracts: {}
 
+  packages/data-sync:
+    dependencies:
+      '@wb-bidder/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@wb-bidder/wb-api':
+        specifier: workspace:*
+        version: link:../wb-api
+      pg:
+        specifier: 8.16.3
+        version: 8.16.3
+
   packages/wb-api:
     dependencies:
       '@wb-bidder/contracts':

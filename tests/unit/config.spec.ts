@@ -25,8 +25,17 @@ describe('loadConfiguration', () => {
 
     expect(configuration.wb.baseUrl.href).toBe('https://advert-api.wildberries.ru/');
     expect(configuration.wb.writesEnabled).toBe(false);
+    expect(configuration.sync).toMatchObject({
+      currentBidFreshnessMinutes: 20,
+      currentBidTargetSlaMinutes: 20,
+      currentStateCron: '5 */15 * * * *',
+      currentStateDeadlineMinutes: 10,
+      minimumBidTargetSlaMinutes: 720,
+      pageSize: 500,
+    });
     expect(Object.isFrozen(configuration)).toBe(true);
     expect(Object.isFrozen(configuration.wb)).toBe(true);
+    expect(Object.isFrozen(configuration.sync)).toBe(true);
   });
 
   it('requires both the write flag and explicit production confirmation', () => {
@@ -153,6 +162,51 @@ describe('loadConfiguration', () => {
         WB_ENDPOINT_PROFILE_VERSION: 'unknown-profile',
       }),
     ).toThrow('WB_ENDPOINT_PROFILE_VERSION is not embedded in this artifact');
+  });
+
+  it('rejects incoherent scheduler deadlines, freshness, cron shape and rate JSON', () => {
+    expect(() =>
+      loadConfiguration({
+        ...BASE_ENVIRONMENT,
+        CURRENT_STATE_SYNC_RUN_DEADLINE_MINUTES: '15',
+      }),
+    ).toThrow('must be less than the cron interval');
+    expect(() =>
+      loadConfiguration({
+        ...BASE_ENVIRONMENT,
+        CURRENT_BID_FRESHNESS_MINUTES: '10',
+      }),
+    ).toThrow('must not exceed current-bid freshness');
+    expect(() =>
+      loadConfiguration({
+        ...BASE_ENVIRONMENT,
+        CURRENT_STATE_SYNC_CRON: '* * * * *',
+      }),
+    ).toThrow('must contain six fields');
+    expect(() =>
+      loadConfiguration({
+        ...BASE_ENVIRONMENT,
+        CURRENT_STATE_SYNC_CRON: '5 */60 * * * *',
+      }),
+    ).toThrow('must be between 1 and 59');
+    expect(
+      loadConfiguration({
+        ...BASE_ENVIRONMENT,
+        CURRENT_STATE_SYNC_CRON: '5 0 * * * *',
+      }).sync.currentStateCron,
+    ).toBe('5 0 * * * *');
+    expect(() =>
+      loadConfiguration({
+        ...BASE_ENVIRONMENT,
+        WB_API_RATE_LIMITS_JSON: '{',
+      }),
+    ).toThrow('must be valid JSON');
+    expect(() =>
+      loadConfiguration({
+        ...BASE_ENVIRONMENT,
+        WB_API_RATE_LIMITS_JSON: '[]',
+      }),
+    ).toThrow('must be a JSON object');
   });
 });
 

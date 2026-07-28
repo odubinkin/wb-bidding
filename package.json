@@ -30,7 +30,7 @@
     "test:property": "vitest run tests/property --passWithNoTests",
     "test:mutation": "node scripts/test-placeholder.mjs mutation",
     "test:load": "node scripts/test-placeholder.mjs load",
-    "test:load-sync": "node scripts/test-placeholder.mjs load-sync",
+    "test:load-sync": "vitest run tests/load/sync-capacity.load.spec.ts",
     "test:runbook": "node scripts/test-placeholder.mjs runbook",
     "test:mock-openapi": "vitest run tests/openapi",
     "prisma:generate": "DATABASE_URL=postgresql://validation:validation@localhost:5432/validation prisma generate",

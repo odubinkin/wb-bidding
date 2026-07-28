@@ -28,6 +28,35 @@ export interface AppConfiguration {
   readonly port: number;
   /** Whether scheduler jobs are registered. */
   readonly schedulerEnabled: boolean;
+  /** Data synchronization schedules, evidence gates, and bounded page sizes. */
+  readonly sync: {
+    /** Current-state six-field cron. */
+    readonly currentStateCron: string;
+    /** Maximum wall time for one current-state run. */
+    readonly currentStateDeadlineMinutes: number;
+    /** Maximum current-bid observation age. */
+    readonly currentBidFreshnessMinutes: number;
+    /** Maximum full-pass SLA for current-bid observations. */
+    readonly currentBidTargetSlaMinutes: number;
+    /** Slow data-sync six-field cron. */
+    readonly dataCron: string;
+    /** Full statistical days to wait for attribution. */
+    readonly conversionLagDays: number;
+    /** Stable source reads required before finalization. */
+    readonly dayFinalizationStableReads: number;
+    /** Minimum minutes spanned by stable finalization reads. */
+    readonly dayFinalizationStableMinutes: number;
+    /** Maximum accepted bid-state observation gap. */
+    readonly bidStateMaxObservationGapMinutes: number;
+    /** Minimum-bid freshness threshold. */
+    readonly minimumBidFreshnessMinutes: number;
+    /** Maximum full-pass SLA for minimum bids. */
+    readonly minimumBidTargetSlaMinutes: number;
+    /** Database page size; all sync paths remain bounded by this value. */
+    readonly pageSize: number;
+    /** Operator guarantee governing external bid provenance. */
+    readonly externalWriteControlMode: 'EXCLUSIVE' | 'SHARED';
+  };
   /** Validated WB integration settings. */
   readonly wb: {
     /** Base URL selected for the current mode. */
@@ -106,6 +135,18 @@ const rawSchema = z.object({
   METRICS_ENABLED: booleanFromString,
   PORT: z.coerce.number().int().min(1).max(65_535).default(3000),
   SCHEDULER_ENABLED: booleanFromString,
+  BID_STATE_MAX_OBSERVATION_GAP_MINUTES: z.coerce.number().int().min(1).max(1_440).default(20),
+  CONVERSION_LAG_DAYS: z.coerce.number().int().min(0).max(30).default(1),
+  CURRENT_BID_FRESHNESS_MINUTES: z.coerce.number().int().min(1).max(1_440).default(20),
+  CURRENT_STATE_SYNC_CRON: z.string().trim().min(1).default('5 */15 * * * *'),
+  CURRENT_STATE_SYNC_RUN_DEADLINE_MINUTES: z.coerce.number().int().min(1).max(1_440).default(10),
+  CURRENT_STATE_TARGET_SYNC_SLA_MINUTES: z.coerce.number().int().min(1).max(1_440).default(20),
+  DATA_SYNC_CRON: z.string().trim().min(1).default('25 */30 * * * *'),
+  DAY_FINALIZATION_MIN_STABLE_MINUTES: z.coerce.number().int().min(0).max(10_080).default(60),
+  DAY_FINALIZATION_MIN_STABLE_READS: z.coerce.number().int().min(2).max(100).default(2),
+  EXTERNAL_WRITE_CONTROL_MODE: z.enum(['EXCLUSIVE', 'SHARED']).default('SHARED'),
+  MINIMUM_BID_FRESHNESS_MINUTES: z.coerce.number().int().min(1).max(43_200).default(720),
+  MINIMUM_BID_TARGET_SYNC_SLA_MINUTES: z.coerce.number().int().min(1).max(43_200).default(720),
   WB_API_CONNECT_TIMEOUT_MS: z.coerce.number().int().min(100).max(60_000).default(2_000),
   WB_API_GLOBAL_RATE_LIMIT_BURST: z.coerce.number().int().min(1).max(1_000).default(5),
   WB_API_GLOBAL_RATE_LIMIT_INTERVAL_MS: z.coerce.number().int().min(1).max(60_000).default(1_000),
@@ -122,6 +163,7 @@ const rawSchema = z.object({
   WB_ENDPOINT_PROFILE_VERSION: z.string().min(1),
   WB_EXPECTED_TOKEN_TYPE: z.enum(['PERSONAL', 'TEST', 'BASE']),
   WB_PRODUCTION_WRITE_CONFIRMATION: z.string().default(''),
+  SYNC_PAGE_SIZE: z.coerce.number().int().min(1).max(5_000).default(500),
 });
 
 const mockRawSchema = z.object({
@@ -162,6 +204,7 @@ export function loadConfiguration(
 
   const writesEnabled = calculateWriteGate(value);
   const rateLimitOverrides = parseRateLimitOverrides(value.WB_API_RATE_LIMITS_JSON);
+  validateSyncInvariants(value);
 
   return Object.freeze({
     accountCurrency: value.ACCOUNT_CURRENCY,
@@ -171,6 +214,21 @@ export function loadConfiguration(
     metricsEnabled: value.METRICS_ENABLED,
     port: value.PORT,
     schedulerEnabled: value.SCHEDULER_ENABLED,
+    sync: Object.freeze({
+      bidStateMaxObservationGapMinutes: value.BID_STATE_MAX_OBSERVATION_GAP_MINUTES,
+      conversionLagDays: value.CONVERSION_LAG_DAYS,
+      currentBidFreshnessMinutes: value.CURRENT_BID_FRESHNESS_MINUTES,
+      currentBidTargetSlaMinutes: value.CURRENT_STATE_TARGET_SYNC_SLA_MINUTES,
+      currentStateCron: value.CURRENT_STATE_SYNC_CRON,
+      currentStateDeadlineMinutes: value.CURRENT_STATE_SYNC_RUN_DEADLINE_MINUTES,
+      dataCron: value.DATA_SYNC_CRON,
+      dayFinalizationStableMinutes: value.DAY_FINALIZATION_MIN_STABLE_MINUTES,
+      dayFinalizationStableReads: value.DAY_FINALIZATION_MIN_STABLE_READS,
+      externalWriteControlMode: value.EXTERNAL_WRITE_CONTROL_MODE,
+      minimumBidFreshnessMinutes: value.MINIMUM_BID_FRESHNESS_MINUTES,
+      minimumBidTargetSlaMinutes: value.MINIMUM_BID_TARGET_SYNC_SLA_MINUTES,
+      pageSize: value.SYNC_PAGE_SIZE,
+    }),
     wb: Object.freeze({
       baseUrl,
       connectTimeoutMs: value.WB_API_CONNECT_TIMEOUT_MS,
@@ -187,6 +245,57 @@ export function loadConfiguration(
       writesEnabled,
     }),
   });
+}
+
+/**
+ * Enforces schedule, freshness, and evidence ordering before scheduler registration.
+ *
+ * @param value - Parsed application environment.
+ * @returns Nothing when synchronization invariants are coherent.
+ * @throws {ConfigurationError} When a deadline or SLA cannot preserve current-state coverage.
+ */
+function validateSyncInvariants(value: z.infer<typeof rawSchema>): void {
+  const currentStateIntervalMinutes = inferSimpleMinuteInterval(value.CURRENT_STATE_SYNC_CRON);
+  if (
+    currentStateIntervalMinutes !== null &&
+    value.CURRENT_STATE_SYNC_RUN_DEADLINE_MINUTES >= currentStateIntervalMinutes
+  ) {
+    throw new ConfigurationError(
+      'CURRENT_STATE_SYNC_RUN_DEADLINE_MINUTES must be less than the cron interval',
+    );
+  }
+  if (
+    value.CURRENT_STATE_TARGET_SYNC_SLA_MINUTES > value.CURRENT_BID_FRESHNESS_MINUTES ||
+    value.BID_STATE_MAX_OBSERVATION_GAP_MINUTES > value.CURRENT_BID_FRESHNESS_MINUTES
+  ) {
+    throw new ConfigurationError(
+      'Current-state SLA and observation gap must not exceed current-bid freshness',
+    );
+  }
+}
+
+/**
+ * Reads the interval from the supported six-field star-slash minute schedule.
+ *
+ * Other valid cron forms remain operator-managed and return null.
+ *
+ * @param expression - Six-field cron expression.
+ * @returns Minute interval or null for a non-simple schedule.
+ */
+function inferSimpleMinuteInterval(expression: string): number | null {
+  const fields = expression.trim().split(/\s+/u);
+  if (fields.length !== 6) {
+    throw new ConfigurationError('Scheduler cron values must contain six fields');
+  }
+  const match = /^\*\/(\d+)$/.exec(fields[1] ?? '');
+  if (match === null) {
+    return null;
+  }
+  const minutes = Number(match[1]);
+  if (!Number.isInteger(minutes) || minutes < 1 || minutes > 59) {
+    throw new ConfigurationError('Scheduler cron minute interval must be between 1 and 59');
+  }
+  return minutes;
 }
 
 /**
