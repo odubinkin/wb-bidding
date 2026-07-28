@@ -1,10 +1,11 @@
 ---
 id: "202607280628-MEEK6T"
 title: "Replace WbApiCall with WbWriteAttempt"
-status: "DOING"
+result_summary: "Replaced WbApiCall with the scoped WbWriteAttempt journal in the technical specification."
+status: "DONE"
 priority: "med"
 owner: "DOCS"
-revision: 16
+revision: 17
 origin:
   system: "manual"
 depends_on: []
@@ -39,11 +40,16 @@ quality_review:
     - "docs/technical-specification.md"
   findings:
     - "WbWriteAttempt has a clear decision link, attempt identity, transport and reconciliation states, redacted digests, safe retry behavior, and bounded terminal retention; related execution, logging, audit, testing, implementation, and production-decision sections are aligned without retaining ordinary read calls in PostgreSQL."
-commit: null
+commit:
+  hash: "0ff243fd8c4ca11d9038a03768a8c8ee0b501f79"
+  message: "✅ MEEK6T docs: done"
 comments:
   -
     author: "DOCS"
     body: "Start: revise the specification to persist outbound WB write attempts only and align logging, retention, reconciliation, and verification semantics."
+  -
+    author: "DOCS"
+    body: "Verified: WbWriteAttempt now persists outbound WB write attempts only; read calls remain in logs and metrics, with reconciliation, redaction, retention, and tests specified."
 events:
   -
     type: "status"
@@ -64,8 +70,15 @@ events:
     author: "DOCS"
     state: "ok"
     note: "Semantic quality review passed after deterministic checks; the approved documentation scope is complete."
+  -
+    type: "status"
+    at: "2026-07-28T06:33:31.809Z"
+    author: "DOCS"
+    from: "DOING"
+    to: "DONE"
+    note: "Verified: WbWriteAttempt now persists outbound WB write attempts only; read calls remain in logs and metrics, with reconciliation, redaction, retention, and tests specified."
 doc_version: 3
-doc_updated_at: "2026-07-28T06:33:13.309Z"
+doc_updated_at: "2026-07-28T06:33:31.810Z"
 doc_updated_by: "DOCS"
 description: "Revise docs/technical-specification.md so PostgreSQL persists outbound WB write attempts rather than every WB API call; keep ordinary reads in structured logs and metrics, and define redaction, reconciliation linkage, and retention semantics."
 sections:
@@ -141,6 +154,9 @@ sections:
   Rollback Plan: "Revert only the specification edits and task-local artifacts introduced by this task; no runtime or data migration rollback is required."
   Findings: "No material scope drift, security issue, skipped check, or unresolved documentation conflict was found."
 extensions:
+  implementation_commit:
+    hash: "8145854af1dad6b9fc175bad2a7a5309280429d2"
+    message: "✅ MEEK6T docs: done"
   workflow_route_baseline:
     start_head_sha: "ebfa8ee7248ca20fe0fc00100270d719e9bd4452"
     version: 1
