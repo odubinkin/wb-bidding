@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "task_id": "202607281144-TJNYAE",
+  "evaluator_id": "recovery-context",
+  "evaluator_profile": "EVALUATOR",
+  "generated_at": "2026-07-28T12:06:50.134Z",
+  "verdict": "pass",
+  "summary": "The independent specification revision satisfies the approved documentation scope and verification contract; API claims are aligned with current official WB evidence, cross-section contracts are internally consistent, and the document status is unchanged.",
+  "evaluated_sha": "4fcf4647646d39d32e2ecfe9257d386d82826529",
+  "blueprint_digest": "a79d1efe467cc91aba33f647e309fe3e284733ed94637d355d8a1e9da2a8a187",
+  "findings": [
+    "Self-hosted authorization is correctly modeled as Personal for production APPLY and Test for sandbox; Base is retained only as an explicitly reduced-limit observe-only migration profile with one-way upgrade semantics.",
+    "The minimum-bid throughput lower bound, 720-minute SLA, exact cluster DELETE contract, status 4 behavior, canceled field meaning, and HTTP 402 classification are explicit and traceable to official WB sources.",
+    "Delayed spend, UNKNOWN reconciliation, zero-conversion regimes, experiment spend, constrained revert, terminal failure, and product-economics regime behavior now fail closed with testable formulas and states."
+  ],
+  "evidence_refs": [
+    ".agentplane/tasks/202607281144-TJNYAE/README.md",
+    ".agentplane/tasks/202607281144-TJNYAE/quality/20260728-120606559-recovery-context/quality-report.json",
+    "docs/technical-specification.md@4fcf464",
+    "git diff --check and semantic assertion: pass",
+    "node .agentplane/policy/check-routing.mjs: policy routing OK",
+    "ap doctor: OK, errors=0 warnings=0"
+  ],
+  "missing_tests": [],
+  "hidden_assumptions": [
+    "The operator-provided maxSpendPerMinuteMinor and maxSpendReportingLagMinutes remain conservative upper bounds; if reality exceeds them, the internal guardrail cannot guarantee a strict overspend bound."
+  ],
+  "residual_risks": [
+    "Wildberries can change schemas, semantics, and token-specific limits independently; APPLY remains dependent on a freshly pinned VERIFIED endpoint profile and release-owner evidence report.",
+    "Direct curl to dev.wildberries.ru returns portal-specific HTTP 498; canonical links and claims were validated through the official indexed browser/search surface."
+  ]
+}
