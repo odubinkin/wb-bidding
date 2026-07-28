@@ -1,10 +1,12 @@
 ---
 id: "202607280615-PRC6DA"
 title: "Require Swagger and OpenAPI documentation endpoints"
-status: "DOING"
+result_summary: "Required Swagger UI and OpenAPI JSON endpoints for bidder and mock server in the technical specification."
+risk_level: "low"
+status: "DONE"
 priority: "med"
 owner: "DOCS"
-revision: 13
+revision: 14
 origin:
   system: "manual"
 depends_on: []
@@ -44,11 +46,16 @@ quality_review:
     - "git diff --check: pass"
   findings:
     - "The change mandates /docs and /docs-json for both applications, defines complete contract coverage, connects the requirement to tests and CI, adds AC-19 and traceability, and preserves bidder production access controls."
-commit: null
+commit:
+  hash: "e36b5e0d291f4cd86334dd5c9ca4f77279160bac"
+  message: "✅ PRC6DA docs: done"
 comments:
   -
     author: "DOCS"
     body: "Start: continue direct-mode task in current checkout."
+  -
+    author: "DOCS"
+    body: "Verified: semantic quality report for the Swagger and OpenAPI documentation requirement is recorded and linked to the implementation commit."
 events:
   -
     type: "status"
@@ -75,8 +82,15 @@ events:
     author: "EVALUATOR"
     state: "ok"
     note: "Semantic quality review passed against commit 0cf90b49b359 and all approved verification checks."
+  -
+    type: "status"
+    at: "2026-07-28T06:20:37.558Z"
+    author: "DOCS"
+    from: "DOING"
+    to: "DONE"
+    note: "Verified: semantic quality report for the Swagger and OpenAPI documentation requirement is recorded and linked to the implementation commit."
 doc_version: 3
-doc_updated_at: "2026-07-28T06:19:46.044Z"
+doc_updated_at: "2026-07-28T06:20:37.559Z"
 doc_updated_by: "DOCS"
 description: "Add mandatory Swagger UI and machine-readable OpenAPI documentation endpoints for both bidder and WB mock server to the technical specification."
 sections:
@@ -199,6 +213,9 @@ sections:
       Impact: Implementations now have testable documentation endpoint contracts for both applications.
       Resolution: Verified the approved documentation-only change with targeted text review, routing validation, repository doctor, whitespace validation, and final scope status.
 extensions:
+  implementation_commit:
+    hash: "0cf90b49b359c3291e965a123c0ec84cebeb8626"
+    message: "✅ PRC6DA docs: done"
   workflow_route_baseline:
     start_head_sha: "0656e02030a383f91f692fed73773ebd49093961"
     version: 1
