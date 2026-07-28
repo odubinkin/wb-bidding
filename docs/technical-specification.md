@@ -5,7 +5,7 @@
 | Поле | Значение |
 |---|---|
 | Назначение | Техническое задание на разработку сервиса автоматического управления ставками в кампаниях WB Продвижение |
-| Версия | 1.1 |
+| Версия | 1.2 |
 | Статус | Готово к декомпозиции и оценке разработки |
 | Дата актуализации сведений WB API | 27 июля 2026 года |
 | Язык продукта и документации | Русский |
@@ -24,7 +24,7 @@
 
 Нужно разработать постоянно работающий backend-сервис, который:
 
-1. получает состояние и статистику тысяч рекламных кампаний продавцов;
+1. получает состояние и статистику тысяч рекламных кампаний одного продавца;
 2. хранит нормализованный снимок данных в PostgreSQL;
 3. детерминированно рассчитывает показатели эффективности без ML;
 4. принимает объяснимое решение об изменении ставки;
@@ -34,6 +34,8 @@
 8. сохраняет полный аудит входных данных, расчёта, решения и результата.
 
 Бизнес-цель — максимизировать ожидаемую прибыль продавца при соблюдении заданных ограничений риска, бюджета и допустимых ставок.
+
+Один deployment обслуживает ровно один WB seller account. Все кампании, targets, статистика, политики и product economics внутри deployment относятся к этому аккаунту. Поддержка нескольких seller accounts в одном deployment не требуется.
 
 ### 2.1. Важное ограничение бизнес-цели
 
@@ -51,7 +53,7 @@
 - налоги;
 - прочие переменные расходы, изменяющиеся вместе с количеством заказов.
 
-Постоянные расходы, не зависящие от дополнительного заказа и рекламной ставки, в этот показатель не включаются. Значение задаётся в minor units валюты продавца на одну единицу, может быть положительным, нулевым или отрицательным и имеет период действия.
+Постоянные расходы, не зависящие от дополнительного заказа и рекламной ставки, в этот показатель не включаются. Значение задаётся в minor units константы `ACCOUNT_CURRENCY` на одну единицу, может быть положительным, нулевым или отрицательным и имеет период действия.
 
 Для окна статистики:
 
@@ -63,7 +65,7 @@ expectedProfit =
   expectedContributionBeforeAdsTotal - expectedAdvertisingSpend
 ```
 
-Если действующее значение `expectedContributionBeforeAdsMinor` отсутствует, невалидно или задано в другой валюте, объект получает решение `BLOCKED` с причиной `MISSING_PRODUCT_ECONOMICS` либо `INVALID_PRODUCT_ECONOMICS`. Ставка этого объекта не изменяется. Автоматический переход к другой цели оптимизации запрещён.
+Если действующее значение `expectedContributionBeforeAdsMinor` отсутствует или невалидно, объект получает решение `BLOCKED` с причиной `MISSING_PRODUCT_ECONOMICS` либо `INVALID_PRODUCT_ECONOMICS`. Ставка этого объекта не изменяется. Автоматический переход к другой цели оптимизации запрещён.
 
 ## 3. Границы продукта
 
@@ -80,6 +82,8 @@ expectedProfit =
 - идемпотентное применение и последующая сверка;
 - управление политиками через внутренний REST API;
 - три режима WB-интеграции: `mock`, `sandbox`, `prod`;
+- один WB seller account на deployment;
+- единая неизменяемая в runtime валюта аккаунта, заданная константой `ACCOUNT_CURRENCY`;
 - отдельный NestJS mock-сервер;
 - Docker Compose, логирование, аудит, health/readiness и Prometheus-метрики;
 - автоматизированные unit, integration, contract и end-to-end тесты.
@@ -94,7 +98,9 @@ expectedProfit =
 - пользовательский web-интерфейс;
 - самостоятельное чтение product economics из внешней ERP; ERP или оператор могут передавать агрегированное значение через внутренний API;
 - изменение цен и скидок товара;
-- попытка обойти или увеличить лимиты WB API.
+- попытка обойти или увеличить лимиты WB API;
+- несколько WB seller accounts в одном deployment;
+- выбор валюты через API, хранение валюты в бизнес-записях и конвертация валют.
 
 Эти функции могут быть добавлены позднее отдельным изменением ТЗ.
 
@@ -182,7 +188,7 @@ expectedProfit =
 5. **Детерминированность.** Одинаковые входные данные, версия политики и конфигурация дают одинаковое решение.
 6. **Fail closed.** При устаревших, неполных или противоречивых данных ставка не изменяется.
 7. **Объяснимость.** Каждое решение содержит формулы, значения входов, сработавшие ограничения и причину.
-8. **Деньги — целые числа.** Ставки и денежные суммы хранятся как `BigInt` в минимальной единице валюты; для ставок WB — копейки. `float` для денег запрещён.
+8. **Деньги — целые числа.** Ставки и денежные суммы хранятся как `BigInt` в minor units константы `ACCOUNT_CURRENCY`; для ставок WB — копейки. `float` для денег запрещён.
 9. **UTC внутри системы.** В БД и API сервиса используется UTC; локальная зона применяется только для календарных политик продавца.
 
 ## 6. Компоненты
@@ -228,13 +234,12 @@ Observability ──────> logs, /health/live, /health/ready, /metrics
 
 Data Sync Worker ДОЛЖЕН:
 
-1. выбирать активных продавцов с включённой автоматизацией;
-2. получать список кампаний;
+1. проверить, что автоматизация аккаунта включена;
+2. получать список кампаний единственного настроенного WB-аккаунта;
 3. обрабатывать кампании в статусах `9` и `11`, а завершённые `7` — только для дозагрузки статистики;
 4. исключать удалённые, отменённые, неподдерживаемые и явно отключённые кампании;
 5. разбивать ID на пакеты согласно лимиту метода;
-6. обеспечивать fairness: один крупный продавец не должен блокировать остальных;
-7. хранить cursor/checkpoint каждой стадии отдельно по продавцу.
+6. хранить cursor/checkpoint каждой стадии обработки.
 
 ### 7.2. Шаг 2. Получение данных
 
@@ -250,7 +255,6 @@ Data Sync Worker ДОЛЖЕН:
 
 Каждая запись данных ДОЛЖНА иметь:
 
-- `sellerId`;
 - время бизнес-периода;
 - `sourceUpdatedAt`, если оно дано WB;
 - `fetchedAt`;
@@ -290,8 +294,8 @@ Data Sync Worker ДОЛЖЕН:
 Decision Engine ДОЛЖЕН:
 
 1. получить согласованный snapshot данных и активную версию политики;
-2. разрешить действующую версию `ProductEconomics` для `sellerId + nmId`;
-3. проверить полноту, валюту, допуски и свежесть;
+2. разрешить действующую версию `ProductEconomics` для `nmId`;
+3. проверить полноту, допуски и свежесть;
 4. построить допустимые candidate bids и оценить ожидаемую прибыль каждого;
 5. выбрать ставку с максимальной ожидаемой прибылью;
 6. применить floor, cap, hysteresis, cooldown и ограничение скорости изменения;
@@ -334,22 +338,11 @@ Executor ДОЛЖЕН:
 
 ### 8.1. Основные сущности
 
-#### `SellerAccount`
-
-- `id UUID PK`;
-- `externalName`;
-- `mode MOCK | SANDBOX | PROD`;
-- `tokenSecretRef` — ссылка на секрет, не открытый токен;
-- `timezone`;
-- `currency`;
-- `automationEnabled`;
-- `createdAt`, `updatedAt`;
-- `version` для optimistic locking.
+Параметры единственного WB-аккаунта (`mode`, token secret reference, timezone, `ACCOUNT_CURRENCY`, automation/write flags) задаются типизированной конфигурацией deployment и не моделируются как изменяемая коллекция seller accounts в PostgreSQL.
 
 #### `Campaign`
 
 - `id UUID PK`;
-- `sellerId FK`;
 - `wbCampaignId BIGINT`;
 - `type`;
 - `status`;
@@ -360,8 +353,8 @@ Executor ДОЛЖЕН:
 - `lastSyncedAt`;
 - `supported`;
 - `unsupportedReason`;
-- unique `(sellerId, wbCampaignId)`;
-- index `(sellerId, status, supported)`.
+- unique `wbCampaignId`;
+- index `(status, supported)`.
 
 #### `CampaignTarget`
 
@@ -381,11 +374,10 @@ Executor ДОЛЖЕН:
 
 #### `CampaignStatDaily`
 
-- `sellerId`, `wbCampaignId`, `nmId`, `date`;
+- `wbCampaignId`, `nmId`, `date`;
 - опционально `placement` и `normQueryNormalized`;
 - исходные счётчики;
 - `spendMinor`, `attributedRevenueMinor`;
-- `currency`;
 - `fetchedAt`, `sourceVersion`, `syncRunId`;
 - составной unique по измерениям дня;
 - партиционирование по `date` SHOULD применяться при подтверждённом объёме.
@@ -409,9 +401,8 @@ Observation создаётся только из неотрицательных 
 #### `ProductEconomics`
 
 - `id UUID PK`;
-- `sellerId`, `nmId`;
+- `nmId`;
 - `effectiveFrom`, `effectiveTo NULL`;
-- `currency`;
 - `expectedContributionBeforeAdsMinor BIGINT`;
 - `source MANUAL | IMPORT`;
 - `sourceUpdatedAt NULL`;
@@ -420,16 +411,15 @@ Observation создаётся только из неотрицательных 
 - `mutationKey`;
 - `inputChecksum`;
 - `createdAt`, `createdByActor`;
-- unique `(sellerId, nmId, version)`;
-- unique `(sellerId, mutationKey)`;
-- запрет пересекающихся периодов для одной пары `(sellerId, nmId)`.
+- unique `(nmId, version)`;
+- unique `mutationKey`;
+- запрет пересекающихся периодов для одного `nmId`.
 
 `expectedContributionBeforeAdsMinor` хранится как signed `BIGINT`: отрицательное значение является допустимым экономическим сигналом, а не ошибкой данных. Версии неизменяемы. Исправление создаёт новую версию; использованная версия сохраняется в каждом snapshot и решении.
 
 #### `ProductEconomicsImport`
 
 - `id UUID PK`;
-- `sellerId`;
 - `status QUEUED | PROCESSING | COMPLETED | COMPLETED_WITH_ERRORS | FAILED`;
 - `dryRun`;
 - `idempotencyScope`, `idempotencyKey`, `requestChecksum`;
@@ -437,7 +427,7 @@ Observation создаётся только из неотрицательных 
 - `leaseOwner`, `leaseUntil`, `attemptCount`, `lastError`;
 - `createdAt`, `startedAt`, `finishedAt`;
 - `createdByActor`, `correlationId`;
-- unique `(sellerId, idempotencyScope, idempotencyKey)`.
+- unique `(idempotencyScope, idempotencyKey)`.
 
 #### `ProductEconomicsImportItem`
 
@@ -455,8 +445,8 @@ Observation создаётся только из неотрицательных 
 
 #### `BiddingPolicy`
 
-- область: seller, campaign или target;
-- приоритет: target > campaign > seller default;
+- область: deployment default, campaign или target;
+- приоритет: target > campaign > deployment default;
 - `executionMode APPLY | OBSERVE_ONLY`;
 - окна статистики;
 - minimum sample thresholds;
@@ -519,7 +509,7 @@ Observation создаётся только из неотрицательных 
 
 #### `WbApiCall`
 
-- seller, endpoint key, method;
+- endpoint key, method;
 - correlation ID, WB request ID;
 - attempt;
 - request time, latency;
@@ -542,7 +532,6 @@ Observation создаётся только из неотрицательных 
 #### `SchedulerRun`
 
 - job type;
-- seller/shard;
 - start/end;
 - status;
 - counters;
@@ -756,7 +745,6 @@ QUEUED
 Ключ строится из:
 
 ```text
-sellerId
 wbCampaignId
 nmId
 placement
@@ -777,7 +765,7 @@ algorithmVersion
 - Для одного target одновременно допускается только одно non-terminal решение.
 - Более новое решение может пометить ещё не отправленное старое как `SUPERSEDED`.
 - После `SENT` supersede запрещён до reconciliation.
-- Порядок между разными продавцами справедливый, между изменениями одного target — последовательный.
+- Изменения одного target обрабатываются последовательно.
 
 ### 10.4. Неопределённый результат записи
 
@@ -802,12 +790,12 @@ algorithmVersion
 | Verification | Проверка отправленных решений | `VERIFICATION_POLL_INTERVAL_MS` |
 | Reconciliation | Восстановление зависших lease и неизвестных результатов | `RECONCILIATION_CRON` |
 
-`DATA_SYNC_CRON`, `DECISION_CRON` и `CAMPAIGN_APPLY_CRON` конфигурируются независимо. Таким образом, частота обновления данных в БД не связана с частотой применения настроек через WB API. По умолчанию тяжёлые jobs не должны стартовать в одну секунду, чтобы избегать пиков. Если предыдущий run того же seller/job ещё активен, новый запуск не создаёт параллельный дубликат.
+`DATA_SYNC_CRON`, `DECISION_CRON` и `CAMPAIGN_APPLY_CRON` конфигурируются независимо. Таким образом, частота обновления данных в БД не связана с частотой применения настроек через WB API. По умолчанию тяжёлые jobs не должны стартовать в одну секунду, чтобы избегать пиков. Если предыдущий run того же job ещё активен, новый запуск не создаёт параллельный дубликат.
 
 ### 11.2. Блокировки jobs
 
 - Для scheduler используется PostgreSQL advisory lock или таблица lease.
-- На один seller + job одновременно работает не более одного worker.
+- Для одного job одновременно работает не более одного worker.
 - Несколько реплик bidder поддерживаются без дублирования job.
 - Пропущенный запуск не порождает неограниченную очередь старых запусков.
 - Каждый run имеет deadline и checkpoint.
@@ -816,11 +804,10 @@ algorithmVersion
 
 - Все WB-запросы пакетируются по фактическим ограничениям endpoint.
 - Кампании обрабатываются страницами/порциями без загрузки всего набора в память.
-- Планировщик использует round-robin по продавцам.
 - Статистика синхронизируется инкрементально с небольшим overlap для поздних изменений.
 - Данные за overlap upsert-ятся.
 - Для backfill создаётся отдельный низкоприоритетный job.
-- Горизонтальное масштабирование ограничивается общим rate limiter продавца, а не числом pod.
+- Горизонтальное масштабирование ограничивается общим rate limiter единственного WB-аккаунта, а не числом pod.
 
 ## 12. WB API client и rate limiting
 
@@ -852,7 +839,7 @@ Production startup должен завершаться ошибкой, если 
 
 Нужны два уровня token bucket:
 
-1. общий safety cap на seller account;
+1. общий safety cap на настроенный WB-аккаунт;
 2. отдельный bucket на endpoint key.
 
 Обязательные env:
@@ -865,7 +852,7 @@ Production startup должен завершаться ошибкой, если 
 
 Встроенный профиль endpoint limits должен соответствовать таблице раздела 4.2. Более строгий из общего и endpoint-specific limit всегда побеждает. Профиль sandbox по умолчанию совпадает с документированным профилем продвижения; пользователь может задать более строгие значения.
 
-Limiter ДОЛЖЕН быть распределённым на уровне seller account. Допустим PostgreSQL-based limiter; in-memory limiter разрешён только при одной реплике и в `mock`.
+Limiter ДОЛЖЕН быть общим для всех реплик deployment. Допустим PostgreSQL-based limiter; in-memory limiter разрешён только при одной реплике и в `mock`.
 
 ### 12.3. Адаптация по заголовкам
 
@@ -890,7 +877,7 @@ Limiter ДОЛЖЕН быть распределённым на уровне sel
 | Класс | Поведение |
 |---|---|
 | `400`, `403`, `422` | terminal для конкретного payload; без слепого retry |
-| `401` | остановить seller integration, alert; токен не логировать |
+| `401` | остановить WB-интеграцию deployment, alert; токен не логировать |
 | `404` | сверить endpoint/profile; terminal либо resync сущности |
 | `409` | классифицировать по телу; повторять только документированно временные случаи |
 | `429` | retry по заголовкам |
@@ -902,7 +889,7 @@ Retry policy задаётся отдельно для read, write и verify. Б�
 
 ### 12.5. Circuit breaker
 
-- отдельный breaker на seller + endpoint group;
+- отдельный breaker на endpoint group;
 - `401/403` открывают auth breaker;
 - серия `5xx/timeouts` открывает availability breaker;
 - half-open probe не должен нарушать rate limit;
@@ -930,12 +917,11 @@ Decision Engine использует только snapshot, у которого:
 - завершены обязательные стадии;
 - `fetchedAt` не старше policy threshold;
 - период статистики непрерывен либо пробел явно допустим;
-- currency совпадает с действующей версией product economics;
 - текущая ставка подтверждена после последнего отправленного решения.
 
 ### 13.3. Аномалии данных
 
-При отрицательных счётчиках, расходе без валюты, уменьшении кумулятивного счётчика или невозможной комбинации campaign/bid/payment type:
+При отрицательных счётчиках, денежном значении, которое нельзя точно нормализовать в minor units, уменьшении кумулятивного счётчика или невозможной комбинации campaign/bid/payment type:
 
 - исходный payload сохраняется в redacted diagnostic storage;
 - snapshot отмечается `INVALID`;
@@ -949,7 +935,6 @@ Decision Engine использует только snapshot, у которого:
 
 В один запрос объединяются только решения с одинаковыми:
 
-- seller;
 - endpoint;
 - payment/bid type;
 - совместимым payload;
@@ -966,7 +951,7 @@ Decision Engine использует только snapshot, у которого:
 3. обычное повышение по убыванию ожидаемого прироста прибыли на единицу дополнительного рекламного расхода;
 4. exploration.
 
-Приоритет не отменяет fairness между seller accounts.
+Приоритет не отменяет последовательность изменений одного target и endpoint rate limits.
 
 ### 14.3. Перед отправкой
 
@@ -1089,14 +1074,13 @@ API version prefix: `/api/v1`.
 
 Минимальные группы:
 
-- seller accounts: создать/изменить метаданные и secret reference;
 - policies: CRUD с неизменяемыми версиями;
 - product economics: чтение, единичное версионированное изменение и асинхронный batch-импорт;
 - campaign automation: включить, выключить, observe-only;
 - manual resync/recalculate без обхода блокировок;
 - decisions: список, детали, explanation;
 - queue failures: просмотр и безопасный retry terminal item;
-- audit events: фильтрация по seller/campaign/target/correlation ID.
+- audit events: фильтрация по campaign/target/correlation ID.
 
 Токен WB никогда не возвращается API. Все mutating endpoints должны быть аутентифицированы, авторизованы и создавать audit event. Конкретный корпоративный identity provider выбирается до production; до этого API слушает только localhost/private network и защищается service token.
 
@@ -1105,24 +1089,23 @@ API version prefix: `/api/v1`.
 Во всех product economics endpoints:
 
 - чтение требует permission `product-economics:read`, single update — `product-economics:write`, batch import — `product-economics:import`;
-- `sellerId` является UUID внутреннего seller account;
 - `nmId` передаётся десятичной строкой положительного WB ID;
-- `expectedContributionBeforeAdsMinor` передаётся signed decimal string в minor units, например `"125000"` для `1250,00` RUB и `"-500"` для `-5,00` RUB;
-- `currency` является ISO 4217 кодом и должна совпадать с валютой seller account;
+- `expectedContributionBeforeAdsMinor` передаётся signed decimal string в minor units константы `ACCOUNT_CURRENCY`, например `"125000"` для `1250,00` и `"-500"` для `-5,00`;
+- валюта не передаётся в path, query, request или response: все денежные значения internal API относятся к `ACCOUNT_CURRENCY`;
 - даты передаются как RFC 3339 UTC;
 - `effectiveTo`, если задан, строго больше `effectiveFrom`;
 - изменение никогда не перезаписывает использованную версию, а создаёт следующую immutable-версию;
-- два периода одной пары `(sellerId, nmId)` не могут пересекаться;
+- два периода одного `nmId` не могут пересекаться;
 - исторические `MetricSnapshot` и `BidDecision` после изменения не пересчитываются автоматически;
 - request-level ошибки возвращаются как `application/problem+json` с `type`, `title`, `status`, `code`, `detail`, `correlationId` и опциональным `errors[]`.
-- область уникальности `Idempotency-Key` — seller + HTTP method + canonical path; срок хранения результата не меньше audit retention.
+- область уникальности `Idempotency-Key` — HTTP method + canonical path; срок хранения результата не меньше audit retention.
 
 `expectedContributionBeforeAdsMinor` относится к одной единице `orderedUnits` из раздела 4.4 и уже включает ожидание невыкупа, возврата, полученной выручки, всех налогов и переменных расходов. API не принимает отдельные поля себестоимости, комиссии, логистики или налога.
 
 ### 17.2. Чтение значения одной позиции
 
 ```http
-GET /api/v1/sellers/{sellerId}/product-economics/{nmId}?at={RFC3339}
+GET /api/v1/product-economics/{nmId}?at={RFC3339}
 Authorization: Bearer <service-token>
 ```
 
@@ -1131,9 +1114,7 @@ Authorization: Bearer <service-token>
 ```json
 {
   "id": "8af46341-08fd-4d2c-9d16-4911f1d2eacd",
-  "sellerId": "e11dbe92-55d9-4af8-94ab-129b2fd598de",
   "nmId": "123456789",
-  "currency": "RUB",
   "expectedContributionBeforeAdsMinor": "125000",
   "effectiveFrom": "2026-08-01T00:00:00Z",
   "effectiveTo": null,
@@ -1151,7 +1132,7 @@ Authorization: Bearer <service-token>
 ### 17.3. Единичное изменение позиции
 
 ```http
-PUT /api/v1/sellers/{sellerId}/product-economics/{nmId}
+PUT /api/v1/product-economics/{nmId}
 Authorization: Bearer <service-token>
 Idempotency-Key: <UUID>
 If-Match: "product-economics-4"
@@ -1162,7 +1143,6 @@ Content-Type: application/json
 
 ```json
 {
-  "currency": "RUB",
   "expectedContributionBeforeAdsMinor": "137500",
   "effectiveFrom": "2026-08-05T00:00:00Z",
   "effectiveTo": null,
@@ -1174,7 +1154,7 @@ Content-Type: application/json
 
 Семантика:
 
-1. Сервер валидирует seller, валюту, signed `BIGINT`, даты, optimistic-lock header и отсутствие конфликтующей будущей версии.
+1. Сервер валидирует signed `BIGINT`, даты, optimistic-lock header и отсутствие конфликтующей будущей версии.
 2. В одной транзакции открытая предыдущая версия закрывается на `effectiveFrom`, а новая версия вставляется с `source=MANUAL`.
 3. Если предыдущий период нельзя закрыть без пересечения или отрицательной длительности, запрос отклоняется целиком.
 4. Успешный ответ — `201 Created`, полное представление новой версии, `Location` на endpoint чтения с `at=effectiveFrom` и новый `ETag`.
@@ -1182,12 +1162,12 @@ Content-Type: application/json
 6. `If-Match` должен совпадать с версией, действующей непосредственно перед `effectiveFrom`; устаревшая версия возвращает `412 VERSION_MISMATCH`, отсутствие обязательного conditional header — `428 PRECONDITION_REQUIRED`.
 7. Каждое успешное изменение создаёт append-only audit event с before/after, actor, причиной, idempotency key и correlation ID.
 
-Дополнительные ошибки: `400 INVALID_JSON`, `401 UNAUTHENTICATED`, `403 FORBIDDEN`, `404 SELLER_NOT_FOUND`, `409 EFFECTIVE_PERIOD_OVERLAP`, `422 INVALID_NM_ID`, `422 CURRENCY_MISMATCH`, `422 VALUE_OUT_OF_BIGINT_RANGE`.
+Дополнительные ошибки: `400 INVALID_JSON`, `401 UNAUTHENTICATED`, `403 FORBIDDEN`, `409 EFFECTIVE_PERIOD_OVERLAP`, `422 INVALID_NM_ID`, `422 VALUE_OUT_OF_BIGINT_RANGE`.
 
 ### 17.4. Создание batch-импорта
 
 ```http
-POST /api/v1/sellers/{sellerId}/product-economics/imports
+POST /api/v1/product-economics/imports
 Authorization: Bearer <service-token>
 Idempotency-Key: <UUID>
 Content-Type: application/json
@@ -1204,7 +1184,6 @@ Content-Type: application/json
       "rowId": "erp-row-000001",
       "nmId": "123456789",
       "expectedCurrentVersion": 4,
-      "currency": "RUB",
       "expectedContributionBeforeAdsMinor": "137500",
       "effectiveFrom": "2026-08-05T00:00:00Z",
       "effectiveTo": null,
@@ -1215,7 +1194,6 @@ Content-Type: application/json
       "rowId": "erp-row-000002",
       "nmId": "987654321",
       "expectedCurrentVersion": 0,
-      "currency": "RUB",
       "expectedContributionBeforeAdsMinor": "-2500",
       "effectiveFrom": "2026-08-05T00:00:00Z",
       "effectiveTo": null,
@@ -1238,7 +1216,7 @@ Content-Type: application/json
 - single update записывает `mutationKey` из canonical path и idempotency key; batch row использует `IMPORT:{importId}:{rowId}`, поэтому retry строки не создаёт дубликат;
 - ошибка одной строки не откатывает успешные строки; итоговый статус становится `COMPLETED_WITH_ERRORS`;
 - при `dryRun=true` выполняются все проверки, но версии product economics и их audit events не создаются;
-- один seller может иметь не более одного batch import в `PROCESSING`; остальные задания остаются `QUEUED`;
+- deployment может иметь не более одного batch import в `PROCESSING`; остальные задания остаются `QUEUED`;
 - повтор с тем же idempotency key и payload возвращает тот же `importId`; другой payload с тем же ключом возвращает `409 IDEMPOTENCY_KEY_REUSED`;
 - request checksum, actor, correlation ID и агрегированные результаты сохраняются в audit.
 
@@ -1249,14 +1227,13 @@ Request-level ошибки включают `400 EMPTY_ITEMS`, `400 DUPLICATE_RO
 ```json
 {
   "importId": "6bd2135d-3c3d-4a9e-ac0c-84600e9aaf31",
-  "sellerId": "e11dbe92-55d9-4af8-94ab-129b2fd598de",
   "status": "QUEUED",
   "dryRun": false,
   "totalItems": 2,
   "createdAt": "2026-08-04T15:02:00Z",
   "links": {
-    "self": "/api/v1/sellers/e11dbe92-55d9-4af8-94ab-129b2fd598de/product-economics/imports/6bd2135d-3c3d-4a9e-ac0c-84600e9aaf31",
-    "items": "/api/v1/sellers/e11dbe92-55d9-4af8-94ab-129b2fd598de/product-economics/imports/6bd2135d-3c3d-4a9e-ac0c-84600e9aaf31/items"
+    "self": "/api/v1/product-economics/imports/6bd2135d-3c3d-4a9e-ac0c-84600e9aaf31",
+    "items": "/api/v1/product-economics/imports/6bd2135d-3c3d-4a9e-ac0c-84600e9aaf31/items"
   }
 }
 ```
@@ -1270,7 +1247,7 @@ Import worker использует lease. После рестарта задан
 ### 17.5. Статус и результаты batch-импорта
 
 ```http
-GET /api/v1/sellers/{sellerId}/product-economics/imports/{importId}
+GET /api/v1/product-economics/imports/{importId}
 Authorization: Bearer <service-token>
 ```
 
@@ -1292,7 +1269,7 @@ Authorization: Bearer <service-token>
   "requestChecksum": "sha256:...",
   "errorSummary": {
     "VERSION_MISMATCH": 1,
-    "CURRENCY_MISMATCH": 1
+    "ROW_PROCESSING_FAILED": 1
   }
 }
 ```
@@ -1300,7 +1277,7 @@ Authorization: Bearer <service-token>
 Построчные результаты читаются с cursor pagination:
 
 ```http
-GET /api/v1/sellers/{sellerId}/product-economics/imports/{importId}/items?status=FAILED&cursor={cursor}&limit=100
+GET /api/v1/product-economics/imports/{importId}/items?status=FAILED&cursor={cursor}&limit=100
 Authorization: Bearer <service-token>
 ```
 
@@ -1322,7 +1299,7 @@ Authorization: Bearer <service-token>
 
 ### 17.6. Конкуренция и влияние на Decision Engine
 
-- Single update и строки batch import используют одну блокировку `(sellerId, nmId)` и не могут создать пересекающиеся версии.
+- Single update и строки batch import используют одну блокировку по `nmId` и не могут создать пересекающиеся версии.
 - Snapshot фиксирует `productEconomicsVersion`; изменение во время расчёта приводит к отмене результата и повторному расчёту.
 - Ещё не отправленное решение со старой версией product economics получает `SUPERSEDED`.
 - После `SENT` сначала завершается reconciliation; новая экономика применяется только к следующему решению.
@@ -1334,6 +1311,8 @@ Authorization: Bearer <service-token>
 
 Кроме перечисленных ранее обязательны:
 
+- `ACCOUNT_CURRENCY` — обязательный ISO 4217 код валюты единственного WB-аккаунта; читается из env при старте, валидируется и затем используется как неизменяемая runtime-константа;
+- `ACCOUNT_TIMEZONE` — календарная зона единственного аккаунта;
 - `DATABASE_URL`;
 - `PORT`;
 - `LOG_LEVEL`;
@@ -1364,7 +1343,7 @@ Production logs — JSON в stdout/stderr. Обязательные поля:
 - service, version, environment;
 - message, event code;
 - correlation ID, causation ID;
-- seller ID, campaign ID, target ID, decision ID;
+- campaign ID, target ID, decision ID;
 - scheduler run ID;
 - endpoint key, attempt, latency, HTTP status;
 - result/reason code.
@@ -1429,7 +1408,7 @@ Audit events append-only. Изменение или удаление audit recor
 - `bidder_targets_without_product_economics`;
 - `bidder_audit_write_failures_total`.
 
-Нельзя помещать seller/campaign/nm/query в Prometheus labels из-за высокой кардинальности. Для этого используются logs и audit query.
+Нельзя помещать campaign/nm/query в Prometheus labels из-за высокой кардинальности. Для этого используются logs и audit query.
 
 ### 20.3. Алерты
 
@@ -1453,7 +1432,7 @@ Audit events append-only. Изменение или удаление audit recor
 - Product economics являются коммерчески чувствительными данными: значения не помещаются в обычные logs и Prometheus labels, а доступ к ним в Admin API и audit ограничивается отдельными permissions.
 - Предпочтительно хранить WB token во внешнем secret manager; допустимо зашифрованное хранение в БД с ключом вне БД.
 - Токен расшифровывается только перед запросом и не кешируется дольше необходимого.
-- Разные seller accounts изолируются во всех запросах к БД.
+- Один deployment и его БД обслуживают только аккаунт, которому принадлежит настроенный WB token; подключение другого аккаунта требует отдельного deployment и отдельной БД.
 - Admin API использует authentication + authorization.
 - Production write требует отдельного feature flag и подтверждённого режима.
 - Sandbox token нельзя использовать с production URL и наоборот.
@@ -1485,7 +1464,7 @@ Audit events append-only. Изменение или удаление audit recor
 - Все деньги хранятся в minor units.
 - Все rate/ratio хранятся как integer ppm или Decimal с явно заданной точностью.
 - Каждый расчёт имеет golden tests.
-- Timezone boundary, leap day и DST покрываются тестами там, где влияют на сутки продавца.
+- Timezone boundary, leap day и DST покрываются тестами там, где влияют на сутки настроенного аккаунта.
 
 ### 22.4. Сопровождаемость
 
@@ -1591,7 +1570,7 @@ JSDoc НЕ ДОЛЖЕН пересказывать очевидный код и�
 - supersede rules;
 - advisory scheduler lock;
 - audit append-only;
-- isolation seller accounts.
+- startup validation констант `ACCOUNT_CURRENCY` и `ACCOUNT_TIMEZONE`.
 
 ### 25.3. Contract tests
 
@@ -1683,7 +1662,7 @@ Production deployment SHOULD включать:
 1. migration job;
 2. запуск в `OBSERVE_ONLY`;
 3. readiness;
-4. canary seller accounts;
+4. canary-подмножество кампаний и targets;
 5. ограниченный write enable;
 6. мониторинг verify mismatch и расходов;
 7. постепенное расширение.
@@ -1758,6 +1737,10 @@ Lint подтверждает обязательный JSDoc; комплект �
 
 Единичный `PUT` создаёт immutable-версию с conditional update и идемпотентностью. Batch endpoint принимает до 10 000 позиций, возвращает `202`, обрабатывает строки асинхронно и предоставляет агрегированный статус и построчные результаты. Dry-run не изменяет product economics; частичная ошибка не откатывает успешные строки.
 
+### AC-18. Один аккаунт и единая валюта
+
+Deployment принимает один WB token и обрабатывает только кампании соответствующего seller account. Все денежные значения относятся к `ACCOUNT_CURRENCY`; internal API и таблицы не принимают и не хранят валюту на уровне отдельных записей. Отсутствующее или невалидное значение `ACCOUNT_CURRENCY` приводит к startup failure.
+
 ## 28. Матрица трассировки исходных требований
 
 | № | Исходное требование | Разделы | Критерии |
@@ -1778,6 +1761,7 @@ Lint подтверждает обязательный JSDoc; комплект �
 | 14 | Data Sync, Decision, queue, Executor | 6, 7, 13, 14 | AC-03–AC-09 |
 | 15 | Максимизация прибыли продавца | 2.1, 8, 9 | AC-04, AC-05 |
 | 16 | Предоставление экономики множества позиций | 8, 17 | AC-17 |
+| 17 | Один продавец и тысячи его кампаний | 2, 3, 8, 11, 18 | AC-16, AC-18 |
 
 ## 29. Этапы реализации
 
@@ -1843,7 +1827,7 @@ Lint подтверждает обязательный JSDoc; комплект �
 | Рекламные заказы не равны выкупам | Требовать, чтобы `expectedContributionBeforeAdsMinor` уже учитывал ожидаемый невыкуп и возврат; не называть orders продажами |
 | Нет product economics | Блокировать изменение ставки конкретного `nmId`; не переключать цель оптимизации |
 | Ручное изменение конфликтует с bidder | Pre-send compare, audit, cancel + recalculate |
-| Две реплики превышают общий лимит | Distributed limiter по seller |
+| Две реплики превышают общий лимит | Distributed limiter, общий для deployment |
 | HTTP success без фактического изменения | Read-after-write verification |
 | Timeout после записи | Verify-before-retry |
 | Слишком много метрик labels | IDs только в logs/audit |
@@ -1857,7 +1841,7 @@ Lint подтверждает обязательный JSDoc; комплект �
 4. лимиты дневного расхода;
 5. retention статистики и аудита;
 6. identity provider Admin API;
-7. число seller accounts и целевой sync SLA;
+7. целевой sync SLA для полного набора кампаний аккаунта;
 8. допустимость автоматического повышения ставок;
 9. процедуру аварийного глобального отключения writes.
 
@@ -1865,7 +1849,7 @@ Lint подтверждает обязательный JSDoc; комплект �
 
 Система считается готовой, только когда:
 
-1. выполнены AC-01–AC-17;
+1. выполнены AC-01–AC-18;
 2. нет известных нарушений денежных единиц и WB rate limits;
 3. все критические тесты и CI gates зелёные;
 4. sandbox soak завершён без необъяснённых расхождений;
