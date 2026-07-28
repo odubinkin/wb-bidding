@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "task_id": "202607281322-QKFWZS",
+  "evaluator_id": "recovery-context",
+  "evaluator_profile": "EVALUATOR",
+  "generated_at": "2026-07-28T14:42:44.386Z",
+  "verdict": "pass",
+  "summary": "Stage 1 adapter, distributed limiter, deterministic mock and contracts satisfy approved scope with fail-closed uncertain WB semantics.",
+  "evaluated_sha": "1c5d82e00a9aceb982bb0c0b5e7666a4ca8fbd50",
+  "blueprint_digest": "226d93ae7730451d39ca4e20b8a491c481eb75470b615bf4ec3c753a24218e08",
+  "findings": [
+    "Quality/build/smoke/contracts/OpenAPI and PostgreSQL limiter integration passed; Docker daemon is externally unavailable locally, while CI retains Docker build gates."
+  ],
+  "evidence_refs": [
+    ".agentplane/tasks/202607281322-QKFWZS/README.md",
+    "pnpm run quality; pnpm run build; pnpm run smoke:built; pnpm run test:integration; docker compose -f docker-compose.mock-only.yml config"
+  ],
+  "missing_tests": [],
+  "hidden_assumptions": [],
+  "residual_risks": []
+}
