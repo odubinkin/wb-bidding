@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "task_id": "202607280604-ACGWF7",
+  "evaluator_id": "recovery-context",
+  "evaluator_profile": "EVALUATOR",
+  "generated_at": "2026-07-28T06:08:37.003Z",
+  "provenance": "evaluator_supplied",
+  "verdict": "pass",
+  "summary": "The wording-only change satisfies the approved clarification scope and remains consistent with the per-unit profit formulas.",
+  "evaluated_sha": "5b2d7c350744ae46f1f4e84503361d100e2b33dd",
+  "blueprint_digest": "b78dcba108faa0211e10db4eb9ae1c586730a6c8826d593b3fb43b444855b84b",
+  "findings": [
+    "No defects found: section 2.1 now explicitly identifies expected per-unit variable costs and states the proportionality assumption within the calculation window, without changing formulas, API contracts, or data-model semantics."
+  ],
+  "evidence_refs": [
+    ".agentplane/tasks/202607280604-ACGWF7/README.md",
+    "docs/technical-specification.md:46",
+    "docs/technical-specification.md:54",
+    "docs/technical-specification.md:61",
+    "commit 5b2d7c350744",
+    "node .agentplane/policy/check-routing.mjs: policy routing OK",
+    "ap doctor: OK, errors=0 warnings=0"
+  ],
+  "missing_tests": [],
+  "hidden_assumptions": [
+    "The first-version estimator intentionally models contribution as linear in ordered units within each calculation window."
+  ],
+  "residual_risks": [
+    "Nonlinear or threshold-based variable costs still require the seller to refresh the per-unit expectation or a future richer economics model; this limitation is now explicit rather than hidden."
+  ]
+}
