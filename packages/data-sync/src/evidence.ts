@@ -34,6 +34,20 @@ export interface RawCampaignStatisticDay {
 }
 
 /**
+ * Runtime-validated WB cluster day before semantic normalization.
+ */
+export interface RawClusterStatisticDay {
+  readonly atbs: number;
+  readonly clicks: number;
+  readonly date: string;
+  readonly normQuery: string;
+  readonly orders: number;
+  readonly shks?: number;
+  readonly spend: number | string;
+  readonly views?: number;
+}
+
+/**
  * Normalizes a WB daily row only when its money/aggregation contract is VERIFIED.
  *
  * @param source - Runtime-schema-validated source row.
@@ -72,6 +86,46 @@ export function normalizeCampaignStatisticDay(
     orderedUnits: BigInt(source.shks),
     orders: BigInt(source.orders),
     spendMinor: decimalMajorToMinor(source.sum, 'fullstats.sum'),
+    views: source.views === undefined ? null : BigInt(source.views),
+  });
+}
+
+/**
+ * Normalizes one verified cluster day without inventing unavailable revenue or impression fields.
+ *
+ * @param source - Runtime-validated cluster row.
+ * @param contractStatus - Immutable mock/fullstats semantic evidence state.
+ * @returns Exact counters and minor-unit spend.
+ */
+export function normalizeClusterStatisticDay(
+  source: RawClusterStatisticDay,
+  contractStatus: 'UNVERIFIED' | 'VERIFIED',
+): NormalizedStatisticDay {
+  if (contractStatus !== 'VERIFIED') {
+    throw new Error('Cluster statistics money and aggregation contract is UNVERIFIED');
+  }
+  if (source.shks === undefined) {
+    throw new Error('WB cluster statistical day is missing SHKS ordered units');
+  }
+  for (const [field, value] of Object.entries({
+    atbs: source.atbs,
+    clicks: source.clicks,
+    orders: source.orders,
+    shks: source.shks,
+    ...(source.views === undefined ? {} : { views: source.views }),
+  })) {
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw new Error(`WB cluster statistical counter is invalid: ${field}`);
+    }
+  }
+  return Object.freeze({
+    atbs: BigInt(source.atbs),
+    attributedRevenueMinor: 0n,
+    clicks: BigInt(source.clicks),
+    date: source.date,
+    orderedUnits: BigInt(source.shks),
+    orders: BigInt(source.orders),
+    spendMinor: decimalMajorToMinor(source.spend, 'cluster-statistics.spend'),
     views: source.views === undefined ? null : BigInt(source.views),
   });
 }

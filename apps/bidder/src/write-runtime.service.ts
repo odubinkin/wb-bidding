@@ -4,10 +4,15 @@ import { hostname } from 'node:os';
 import { APP_CONFIGURATION } from './application-config.js';
 import { ObservabilityService } from './observability.service.js';
 import { DatabasePreDispatchValidator } from './pre-dispatch-validator.js';
-import { CARD_BID_GATEWAY, WRITE_PIPELINE_REPOSITORY } from './runtime.providers.js';
+import {
+  CARD_BID_GATEWAY,
+  CLUSTER_BID_GATEWAY,
+  WRITE_PIPELINE_REPOSITORY,
+} from './runtime.providers.js';
 import type { AppConfiguration } from '@wb-bidder/config';
 import {
   WbCardBidGateway,
+  WbClusterBidGateway,
   WriteExecutor,
   WritePipelineRepository,
   classifyReconciliation,
@@ -23,8 +28,11 @@ const RECONCILIATION_BATCH_SIZE = 100;
  */
 @Injectable()
 export class WriteRuntimeService {
-  private readonly executor: WriteExecutor;
-  private readonly workerId = `${hostname()}:${String(process.pid)}:card-writer`;
+  private readonly executors: readonly {
+    readonly endpointKey: 'cardBidsWrite' | 'clusterDeleteBids' | 'clusterWriteBids';
+    readonly executor: WriteExecutor;
+    readonly workerId: string;
+  }[];
 
   /**
    * Creates all write workers over the same repository, gateway, and validator.
@@ -32,6 +40,7 @@ export class WriteRuntimeService {
    * @param configuration - Write safety windows.
    * @param repository - Durable write persistence.
    * @param gateway - Card-bid WB gateway.
+   * @param clusterGateway - Verified-mock cluster-bid WB gateway.
    * @param validator - Complete pre-dispatch validation.
    * @param observability - Bounded metrics.
    */
@@ -40,11 +49,11 @@ export class WriteRuntimeService {
     @Inject(WRITE_PIPELINE_REPOSITORY)
     private readonly repository: WritePipelineRepository,
     @Inject(CARD_BID_GATEWAY) private readonly gateway: WbCardBidGateway,
+    @Inject(CLUSTER_BID_GATEWAY) private readonly clusterGateway: WbClusterBidGateway,
     private readonly validator: DatabasePreDispatchValidator,
     private readonly observability: ObservabilityService,
   ) {
-    this.executor = new WriteExecutor(repository, gateway, validator, {
-      endpointKey: 'cardBidsWrite',
+    const common = {
       leaseSeconds: LEASE_SECONDS,
       maximumBatchSize: MAXIMUM_BATCH_SIZE,
       maximumWriteAttempts: configuration.writePipeline.maximumWriteAttempts,
@@ -52,7 +61,34 @@ export class WriteRuntimeService {
       preWriteStateMaximumAgeMs: configuration.writePipeline.preWriteStateMaximumAgeMs,
       reconciliationDeadlineMs: configuration.writePipeline.verificationTimeoutMs,
       visibilityDelayMs: configuration.writePipeline.verificationInitialDelayMs,
-    });
+    };
+    const processKey = `${hostname()}:${String(process.pid)}`;
+    this.executors = Object.freeze([
+      Object.freeze({
+        endpointKey: 'cardBidsWrite' as const,
+        executor: new WriteExecutor(repository, gateway, validator, {
+          ...common,
+          endpointKey: 'cardBidsWrite',
+        }),
+        workerId: `${processKey}:card-writer`,
+      }),
+      Object.freeze({
+        endpointKey: 'clusterWriteBids' as const,
+        executor: new WriteExecutor(repository, clusterGateway, validator, {
+          ...common,
+          endpointKey: 'clusterWriteBids',
+        }),
+        workerId: `${processKey}:cluster-set-writer`,
+      }),
+      Object.freeze({
+        endpointKey: 'clusterDeleteBids' as const,
+        executor: new WriteExecutor(repository, clusterGateway, validator, {
+          ...common,
+          endpointKey: 'clusterDeleteBids',
+        }),
+        workerId: `${processKey}:cluster-delete-writer`,
+      }),
+    ]);
   }
 
   /**
@@ -61,12 +97,16 @@ export class WriteRuntimeService {
    * @returns Number of claimed items.
    */
   public async executeOnce(): Promise<number> {
-    const claimed = await this.executor.runOnce(this.workerId);
-    this.observability.executorAttempts.inc({
-      endpoint: 'cardBidsWrite',
-      result: claimed === 0 ? 'idle' : 'processed',
-    });
-    return claimed;
+    let total = 0;
+    for (const runtime of this.executors) {
+      const claimed = await runtime.executor.runOnce(runtime.workerId);
+      total += claimed;
+      this.observability.executorAttempts.inc({
+        endpoint: runtime.endpointKey,
+        result: claimed === 0 ? 'idle' : 'processed',
+      });
+    }
+    return total;
   }
 
   /**
@@ -78,7 +118,10 @@ export class WriteRuntimeService {
     const work = await this.repository.loadReconciliationBatch(RECONCILIATION_BATCH_SIZE);
     for (const entry of work) {
       try {
-        const live = await this.gateway.readLiveState(entry.item);
+        const live =
+          entry.item.targetKind === 'CLUSTER'
+            ? await this.clusterGateway.readLiveState(entry.item)
+            : await this.gateway.readLiveState(entry.item);
         const prevalidation = await this.validator.validate(entry.item, live);
         const classification = classifyReconciliation(live, entry.oldState, entry.desired);
         const outcome = await this.repository.recordReconciliation({
@@ -138,6 +181,8 @@ export class WriteRuntimeService {
    * @returns Released lease count.
    */
   public releaseLeases(): Promise<number> {
-    return this.repository.releaseWorkerLeases(this.workerId);
+    return Promise.all(
+      this.executors.map((runtime) => this.repository.releaseWorkerLeases(runtime.workerId)),
+    ).then((counts) => counts.reduce((total, count) => total + count, 0));
   }
 }

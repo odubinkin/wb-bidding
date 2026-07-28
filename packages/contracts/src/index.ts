@@ -1,8 +1,11 @@
 export {
   CURRENT_ENDPOINT_PROFILE,
+  MOCK_CLUSTER_BID_CONTRACT,
+  MOCK_ENDPOINT_PROFILE,
   type ContractStatus,
   type EndpointKey,
   type EndpointProfile,
+  type MockClusterBidContract,
   type RateLimitProfile,
   type WireContractProfile,
 } from './wb-endpoint-profile.js';

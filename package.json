@@ -52,7 +52,6 @@
   },
   "dependencies": {
     "@nestjs/common": "11.1.28",
-    "@nestjs/config": "4.0.2",
     "@nestjs/core": "11.1.28",
     "@nestjs/platform-express": "11.1.28",
     "@nestjs/swagger": "11.4.6",
@@ -98,6 +97,9 @@
     "vitest": "4.1.10"
   },
   "pnpm": {
+    "overrides": {
+      "@nestjs/swagger>js-yaml": "4.3.0"
+    },
     "onlyBuiltDependencies": [
       "@prisma/engines",
       "@swc/core",

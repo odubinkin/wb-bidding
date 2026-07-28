@@ -23,6 +23,12 @@ interface PreDispatchRow {
   readonly campaignStatus: number;
   /** Target capability from the latest normalized state. */
   readonly capability: string;
+  /** Durable pre-bidder baseline state for cluster restore safety. */
+  readonly clusterBaselineBidState: string | null;
+  /** Whether the current cluster override was written by this bidder. */
+  readonly clusterOverrideOwned: boolean;
+  /** Current persisted cluster state. */
+  readonly clusterBidState: string | null;
   /** Current decision input bid. */
   readonly currentBidMinor: string | null;
   /** Decision creation time. */
@@ -97,7 +103,8 @@ export class DatabasePreDispatchValidator implements PreDispatchValidator {
     const result = await this.pool.query<PreDispatchRow>(
       `SELECT c."status" AS "campaignStatus",
               t."targetKind"::text AS "targetKind", t."capability",
-              t."minimumBidMinor",
+              t."minimumBidMinor", t."clusterBaselineBidState"::text,
+              t."clusterOverrideOwned", t."clusterBidState"::text,
               d."action"::text AS "decisionAction", d."currentBidMinor",
               d."createdAt" AS "decisionCreatedAt", d."policyVersion",
               ms."productEconomicsVersion" AS "decisionEconomicsVersion",
@@ -162,13 +169,40 @@ export class DatabasePreDispatchValidator implements PreDispatchValidator {
     }
     if (row.snapshotApplyEligible !== true) return invalid('SNAPSHOT_NOT_APPLY_ELIGIBLE');
     if (row.campaignStatus === 4) return invalid('CAMPAIGN_NOT_RUNNING');
-    if (row.capability !== 'CARD_WRITE_READY' || row.targetKind !== 'CARD') {
-      return invalid('UNSUPPORTED_WRITE_CAPABILITY');
+    const cardWrite = row.capability === 'CARD_WRITE_READY' && row.targetKind === 'CARD';
+    const clusterWrite =
+      this.configuration.wb.mode === 'mock' &&
+      row.capability === 'CLUSTER_WRITE_READY' &&
+      row.targetKind === 'CLUSTER' &&
+      item.campaignBidType === 'MANUAL' &&
+      item.campaignPaymentType === 'CPM' &&
+      item.normQueryWire !== null;
+    if (!cardWrite && !clusterWrite) return invalid('UNSUPPORTED_WRITE_CAPABILITY');
+    if (item.action === 'DELETE') {
+      if (
+        !clusterWrite ||
+        row.decisionAction !== 'RESTORE_ABSENT_OVERRIDE' ||
+        row.clusterBaselineBidState !== 'ABSENT' ||
+        !row.clusterOverrideOwned ||
+        row.clusterBidState !== 'EXPLICIT' ||
+        row.currentBidMinor === null ||
+        !liveState.explicit ||
+        liveState.bidMinor === null ||
+        BigInt(row.currentBidMinor) !== liveState.bidMinor
+      ) {
+        return invalid('CLUSTER_RESTORE_PROOF_MISSING');
+      }
+      if (item.bidMinor !== null) return invalid('DELETE_DESIRED_BID_MUST_BE_ABSENT');
+      return { valid: true };
     }
     if (
-      row.currentBidMinor === null ||
-      liveState.bidMinor === null ||
-      BigInt(row.currentBidMinor) !== liveState.bidMinor
+      (row.currentBidMinor === null) !== (liveState.bidMinor === null) ||
+      (row.currentBidMinor !== null &&
+        liveState.bidMinor !== null &&
+        BigInt(row.currentBidMinor) !== liveState.bidMinor) ||
+      (clusterWrite &&
+        ((row.clusterBidState === 'EXPLICIT') !== liveState.explicit ||
+          (row.clusterBidState !== 'EXPLICIT' && row.clusterBidState !== 'ABSENT')))
     ) {
       return invalid('LIVE_BID_CHANGED');
     }

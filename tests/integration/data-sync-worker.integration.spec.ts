@@ -13,6 +13,7 @@ import { RuntimeClockService } from '../../apps/bidder/src/runtime-clock.service
 import { RuntimeSafetyState } from '../../apps/bidder/src/runtime-state.js';
 import { decisionPolicy } from '../helpers/decision-fixtures.js';
 import { loadConfiguration } from '@wb-bidder/config';
+import { MOCK_ENDPOINT_PROFILE } from '@wb-bidder/contracts';
 import { MockAppModule } from '../../apps/wb-mock/src/app.module.js';
 import { DataSyncRepository, WbDataSyncWorker } from '@wb-bidder/data-sync';
 import { DecisionRepository } from '@wb-bidder/decision-engine';
@@ -40,6 +41,7 @@ const MIGRATIONS = Object.freeze([
   '202607281600_stage3_decision_engine',
   '202607281700_stage4_write_pipeline',
   '202607291000_stage5_production_runtime',
+  '202607291200_stage5_cluster_contract',
 ]);
 
 describeWithDatabase('WB mock to PostgreSQL synchronization', () => {
@@ -121,7 +123,7 @@ describeWithDatabase('WB mock to PostgreSQL synchronization', () => {
       () => new Date('2026-07-28T12:00:00.000Z'),
     );
     verifiedMockWorker = new WbDataSyncWorker(
-      createClient(mockBaseUrl, 'stage2-verified-mock-worker'),
+      createClient(mockBaseUrl, 'stage2-verified-mock-worker', false, 'verified-mock'),
       repository,
       {
         bidStateMaxObservationGapMinutes: 20,
@@ -139,7 +141,7 @@ describeWithDatabase('WB mock to PostgreSQL synchronization', () => {
         statisticsBeginDate: () => '2026-07-27',
         statisticsEndDate: () => '2026-07-28',
       },
-      undefined,
+      MOCK_ENDPOINT_PROFILE,
       () => new Date('2026-07-28T12:00:00.000Z'),
     );
   });
@@ -265,6 +267,92 @@ describeWithDatabase('WB mock to PostgreSQL synchronization', () => {
           row.statisticalDate === '2026-07-28',
       ),
     ).toBe(true);
+    const clusters = await pool.query<{
+      baseline: string;
+      baselineBidMinor: string | null;
+      capability: string;
+      currentBidMinor: string | null;
+      minimumBidMinor: string;
+      normQueryWire: string;
+      state: string;
+    }>(
+      `SELECT target."normQueryWire", target."currentBidMinor", target."minimumBidMinor",
+              target."clusterBidState"::text AS "state",
+              target."clusterBaselineBidState"::text AS "baseline",
+              target."clusterBaselineBidMinor" AS "baselineBidMinor",
+              target."capability"
+         FROM "CampaignTarget" target
+         JOIN "Campaign" campaign ON campaign."id" = target."campaignId"
+        WHERE campaign."wbCampaignId" = 10001
+          AND target."targetKind" = 'CLUSTER'
+        ORDER BY target."normQueryWire"`,
+    );
+    expect(clusters.rows).toEqual([
+      {
+        baseline: 'EXPLICIT',
+        baselineBidMinor: '700',
+        capability: 'CLUSTER_WRITE_READY',
+        currentBidMinor: '700',
+        minimumBidMinor: '500',
+        normQueryWire: 'synthetic cluster one',
+        state: 'EXPLICIT',
+      },
+      {
+        baseline: 'ABSENT',
+        baselineBidMinor: null,
+        capability: 'CLUSTER_WRITE_READY',
+        currentBidMinor: null,
+        minimumBidMinor: '500',
+        normQueryWire: 'synthetic cluster two',
+        state: 'ABSENT',
+      },
+    ]);
+    const clusterDays = await pool.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count
+         FROM "CampaignStatDaily" statistic
+         JOIN "CampaignTarget" target
+           ON target."campaignId" = statistic."campaignId"
+          AND target."nmId" = statistic."nmId"
+          AND target."normQueryCanonical" = statistic."normQueryCanonical"
+        WHERE statistic."normalizedAggregationKind" = 'CLUSTER_DAILY'
+          AND target."targetKind" = 'CLUSTER'`,
+    );
+    expect(Number(clusterDays.rows[0]?.count ?? '0')).toBeGreaterThan(0);
+    const clusterPerformanceDays = await pool.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count
+         FROM "BidPerformanceDay" day
+         JOIN "CampaignTarget" target ON target."id" = day."targetId"
+        WHERE target."targetKind" = 'CLUSTER'`,
+    );
+    expect(Number(clusterPerformanceDays.rows[0]?.count ?? '0')).toBeGreaterThan(0);
+    const externalClusterWrite = await fetch(new URL('/adv/v0/normquery/bids', mockBaseUrl), {
+      body: JSON.stringify({
+        bids: [
+          {
+            advert_id: 10_001,
+            bid: 800,
+            nm_id: 20_001,
+            norm_query: 'synthetic cluster one',
+          },
+        ],
+      }),
+      headers: {
+        authorization: 'mock-test-token',
+        'content-type': 'application/json',
+      },
+      method: 'POST',
+    });
+    expect(externalClusterWrite.ok).toBe(true);
+    await verifiedMockWorker.synchronizeCurrentState();
+    const refreshed = await pool.query<{ currentBidMinor: string }>(
+      `SELECT target."currentBidMinor"
+         FROM "CampaignTarget" target
+         JOIN "Campaign" campaign ON campaign."id" = target."campaignId"
+        WHERE campaign."wbCampaignId" = 10001
+          AND target."targetKind" = 'CLUSTER'
+          AND target."normQueryWire" = 'synthetic cluster one'`,
+    );
+    expect(refreshed.rows[0]?.currentBidMinor).toBe('800');
   });
 
   it('runs synchronized evidence through decision, durable dispatch, and verified APPLIED', async () => {
@@ -473,6 +561,7 @@ describeWithDatabase('WB mock to PostgreSQL synchronization', () => {
       desiredBidState: 'EXPLICIT',
       metricSnapshotId: '',
       nmId: BigInt(selected.nmId),
+      normQueryWire: null,
       placement: 'SEARCH',
       policyVersion: 1n,
       priority: 100,
@@ -514,13 +603,20 @@ describeWithDatabase('WB mock to PostgreSQL synchronization', () => {
  * @param baseUrl - Bound in-process mock origin.
  * @param accountKey - Isolated limiter identity.
  * @param writesEnabled - Whether the adapter may invoke synthetic write methods.
+ * @param contractMode - Production fail-closed or verified local mock contract.
  * @returns Runtime-validating WB adapter.
  */
-function createClient(baseUrl: URL, accountKey: string, writesEnabled = false): WbApiClient {
+function createClient(
+  baseUrl: URL,
+  accountKey: string,
+  writesEnabled = false,
+  contractMode: 'production' | 'verified-mock' = 'production',
+): WbApiClient {
   return new WbApiClient({
     baseUrl,
     breakers: new CircuitBreakerRegistry(),
     commonBaseUrl: baseUrl,
+    contractMode,
     fetch,
     maxInFlight: 5,
     rateLimiter: new WbRateLimiter(

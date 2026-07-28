@@ -1,7 +1,11 @@
 import { HttpException, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 
-import { CURRENT_ENDPOINT_PROFILE, type EndpointKey } from '@wb-bidder/contracts';
+import {
+  CURRENT_ENDPOINT_PROFILE,
+  MOCK_CLUSTER_BID_CONTRACT,
+  type EndpointKey,
+} from '@wb-bidder/contracts';
 import {
   cardWriteBidsSchema,
   clusterPairsRequestSchema,
@@ -541,12 +545,19 @@ export class MockStateService {
   public getClusterBids(input: ClusterPairsRequest): unknown {
     return {
       bids: input.items.flatMap((item) =>
-        ['synthetic cluster one', 'synthetic cluster two'].map((normQuery) => ({
-          advert_id: item.advert_id,
-          bid: this.clusterBids.get(clusterKey(item.advert_id, item.nm_id, normQuery)) ?? 700,
-          nm_id: item.nm_id,
-          norm_query: normQuery,
-        })),
+        ['synthetic cluster one', 'synthetic cluster two'].flatMap((normQuery) => {
+          const bid = this.clusterBids.get(clusterKey(item.advert_id, item.nm_id, normQuery));
+          return bid === undefined
+            ? []
+            : [
+                {
+                  advert_id: item.advert_id,
+                  bid,
+                  nm_id: item.nm_id,
+                  norm_query: normQuery,
+                },
+              ];
+        }),
       ),
     };
   }
@@ -574,6 +585,12 @@ export class MockStateService {
    */
   public writeClusterBids(input: ClusterWriteRequest): unknown {
     for (const bid of input.bids) {
+      if (BigInt(bid.bid) < MOCK_CLUSTER_BID_CONTRACT.minimumBidMinor) {
+        throw new HttpException(
+          { detail: 'cluster bid is below verified mock minimum', status: 400 },
+          400,
+        );
+      }
       this.clusterBids.set(clusterKey(bid.advert_id, bid.nm_id, bid.norm_query), bid.bid);
     }
     return structuredClone(input);
@@ -767,7 +784,7 @@ export class MockStateService {
         },
       ],
     ]);
-    this.clusterBids = new Map();
+    this.clusterBids = new Map([[clusterKey(10_001, 20_001, 'synthetic cluster one'), 700]]);
     this.dailyDates = new Set();
     if (scenario === 'multi-day') {
       this.dailyDates = new Set(['2026-07-25', '2026-07-26', '2026-07-27']);

@@ -14,6 +14,7 @@ const MIGRATIONS = Object.freeze([
   '202607281600_stage3_decision_engine',
   '202607281700_stage4_write_pipeline',
   '202607291000_stage5_production_runtime',
+  '202607291200_stage5_cluster_contract',
 ]);
 
 describeWithDatabase('PostgreSQL account-scale capacity', () => {

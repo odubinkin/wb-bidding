@@ -34,7 +34,7 @@ health/readiness и HTTP smoke в `scripts/compose-smoke.mjs`. Это расхо
 | E2E-21 | AUTOMATED | golden fixture: максимум прибыли по нескольким bid buckets                              |
 | E2E-22 | AUTOMATED | estimator unit/property: PAVA, interpolation, no extrapolation                          |
 | E2E-23 | AUTOMATED | decision capability tests: dual-placement attribution blocker                           |
-| E2E-24 | PARTIAL   | unverified CPM/CPC cluster fail closed доказан; verified mock APPLY отсутствует         |
+| E2E-24 | AUTOMATED | verified mock cluster sync/stats/optimizer; production unverified и CPC fail closed     |
 | E2E-25 | AUTOMATED | recommendation tests: hint добавляет только обеспеченный CPM candidate                  |
 | E2E-26 | AUTOMATED | experiment unit/integration/runtime: lower-only и безопасный revert                     |
 | E2E-27 | AUTOMATED | mock contract: multi-day `/__mock/time/advance` и conversion lag                        |
@@ -59,13 +59,13 @@ health/readiness и HTTP smoke в `scripts/compose-smoke.mjs`. Это расхо
 | E2E-46 | AUTOMATED | decision tests: UNVERIFIED same-day блокирует только increase                           |
 | E2E-47 | AUTOMATED | write integration: PREPARED и DISPATCHING crash windows                                 |
 | E2E-48 | AUTOMATED | pre-dispatch integration: changed/stale live read                                       |
-| E2E-49 | PARTIAL   | ABSENT/wire mapping существует, но verified mock cluster DELETE E2E отсутствует         |
+| E2E-49 | AUTOMATED | `write-flow.e2e.spec.ts`: POST → APPLIED → DELETE/ABSENT, точный live `wireBidRaw`      |
 | E2E-50 | AUTOMATED | data-sync/WB schema tests: NFC-only, case/whitespace, collision blocker                 |
 | E2E-51 | AUTOMATED | executor/WB tests: post-dispatch ambiguity против pre-byte retry                        |
 
 ## Итог
 
-Локально автоматизированы 49 из 51 обязательных поведенческих строк полностью. E2E-24 и E2E-49
-не закрыты: production contract обязан оставаться `UNVERIFIED`, а отдельный verified
-mock-only cluster profile и cluster executor пока отсутствуют. Поэтому AC-14, AC-24 и общий
-Definition of Done не могут считаться завершёнными.
+Локально автоматизированы все 51 обязательная поведенческая строка. Production cluster contract
+по-прежнему обязан оставаться `UNVERIFIED`; положительная ветвь изолирована immutable
+verified-mock profile и не может быть выбрана для WB origin. Буквальная Compose-топология и
+внешние release gates учитываются отдельно и не скрываются этим статусом.

@@ -22,7 +22,7 @@
 | AC-11    | AUTOMATED     | append-only triggers, decision/attempt/audit integration                      |
 | AC-12    | AUTOMATED     | observability service, runbook readiness tests, real built smoke              |
 | AC-13    | AUTOMATED     | mock contract/OpenAPI/virtual-time/fault suites                               |
-| AC-14    | PARTIAL       | 49/51 сценариев; E2E-24/49 и compose topology не закрыты                      |
+| AC-14    | AUTOMATED+CI  | 51/51 сценариев автоматизированы; Compose runtime остаётся CI gate            |
 | AC-15    | AUTOMATED     | ESLint JSDoc и `docs:check`                                                   |
 | AC-16    | AUTOMATED     | `tests/load/account-scale-postgres.load.spec.ts`                              |
 | AC-17    | AUTOMATED     | Admin contract и economics PostgreSQL integration                             |
@@ -32,7 +32,7 @@
 | AC-21    | AUTOMATED     | capability matrix и unverified cluster fail-closed tests                      |
 | AC-22    | AUTOMATED     | experiment state machine/planning/runtime queue lifecycle tests               |
 | AC-23    | AUTOMATED     | JWT matrix и singleton binding transitions                                    |
-| AC-24    | PARTIAL       | UNVERIFIED gate зелёный; verified mock cluster write/delete отсутствует       |
+| AC-24    | AUTOMATED     | verified mock unit/min/absence/POST/DELETE/reconciliation; prod fail-closed   |
 | AC-25    | AUTOMATED     | per-item attempt/partial/timeout/reconciliation integration                   |
 | AC-26    | AUTOMATED     | finalization, coverage, `shks`, `canceled`, late attribution                  |
 | AC-27    | AUTOMATED     | WB fixtures/profile checksum/fullstats leaf aggregation                       |
@@ -44,7 +44,7 @@
 
 | Пункт     | Статус               | Evidence / условие закрытия                                                  |
 | --------- | -------------------- | ---------------------------------------------------------------------------- |
-| DoD-31.1  | BLOCKED              | AC-14/24 имеют cluster mock gaps; AC-30 требует external evidence            |
+| DoD-31.1  | EXTERNAL GATE        | все 51 сценарий автоматизированы; AC-30 требует внешний sandbox evidence     |
 | DoD-31.2  | AUTOMATED            | money/golden/property и versioned rate profile/limiter tests                 |
 | DoD-31.3  | CI GATE              | все команды из `docs/testing.md`, dependency/container scans и CI run        |
 | DoD-31.4  | EXTERNAL GATE        | `SANDBOX_FIXTURE_MANIFEST`, Test token, явное разрешение и redacted evidence |
@@ -74,18 +74,23 @@
 
 ## Локальный verification snapshot 2026-07-29
 
-На чистой PostgreSQL 18 database с применёнными шестью migrations подтверждено:
+На чистой PostgreSQL 18 database с применёнными семью migrations подтверждено:
 
-- `pnpm run quality`: 97 unit, 1 golden, 2 OpenAPI и 10 contract tests; coverage
-  98.04% statements, 90.33% branches, 99.09% functions, 97.99% lines;
+- `pnpm run quality`: 99 unit, 1 golden, 2 OpenAPI и 11 contract tests; coverage
+  98.04% statements, 90.40% branches, 99.09% functions, 98.00% lines;
 - `test:integration`: 25 tests, включая единый card lifecycle
-  sync → decision → durable dispatch → reconciliation → `APPLIED`;
-- `test:e2e`: 2 tests; `test:load`: 4 tests; `test:runbook`: 23 tests;
+  sync → decision → durable dispatch → reconciliation → `APPLIED`, а также cluster
+  discovery/current state/statistics/performance-day;
+- `test:e2e`: 3 tests, включая cluster `POST → APPLIED → DELETE → ABSENT`;
+  `test:load`: 4 tests; `test:runbook`: 23 tests;
 - property suite: 3 tests; source mutation score: 100% (9/9 killed);
 - frozen offline install, workspace build, built bidder/mock smoke, docs, profile/checksum,
   deprecated endpoint, secret и container policy gates;
 - `docker compose config` для production, full mock и mock-only;
 - Agentplane routing check и `ap doctor` без ошибок.
 
-Локально не подтверждены Docker runtime/image scan, dependency audit, sandbox smoke и внешние
-release decisions. Они остаются CI/external gates; Docker daemon в локальной среде недоступен.
+Локально не подтверждены Docker runtime/image scan, зелёный all-dependencies audit, sandbox smoke
+и внешние release decisions. Production dependency graph очищен от найденных vulnerable
+`lodash`/`js-yaml`; remaining high advisory относится к не публикуемому dev-графу
+ESLint/Testcontainers и требует registry-обновления родительских tools в CI. Docker daemon в
+локальной среде недоступен.

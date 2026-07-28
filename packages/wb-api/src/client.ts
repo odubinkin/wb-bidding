@@ -70,6 +70,8 @@ export interface WbClientConfiguration {
   readonly breakers: CircuitBreakerRegistry;
   /** Common API origin used only for seller identity. */
   readonly commonBaseUrl: URL;
+  /** Contract contour; verified-mock is accepted only for a loopback/local mock origin. */
+  readonly contractMode?: 'production' | 'verified-mock';
   /** HTTP transport. */
   readonly fetch: WbFetch;
   /** Maximum simultaneous requests. */
@@ -97,6 +99,14 @@ export interface ReservedCardBidWrite {
 }
 
 /**
+ * One admitted cluster write/delete slot. The reservation is single-use.
+ */
+export interface ReservedClusterBidWrite {
+  dispatch(request: ClusterWriteRequest): Promise<z.infer<typeof clusterBidsResponseSchema>>;
+  release(): void;
+}
+
+/**
  * Validated WB API adapter with exact current paths and fail-closed write gates.
  */
 export class WbApiClient {
@@ -110,6 +120,12 @@ export class WbApiClient {
   public constructor(private readonly configuration: WbClientConfiguration) {
     assertSafeOrigin(configuration.baseUrl, false);
     assertSafeOrigin(configuration.commonBaseUrl, true);
+    if (
+      configuration.contractMode === 'verified-mock' &&
+      !isVerifiedMockOrigin(configuration.baseUrl)
+    ) {
+      throw new Error('Verified mock contract requires a loopback or wb-mock HTTP origin');
+    }
     this.semaphore = new Semaphore(configuration.maxInFlight);
   }
 
@@ -299,6 +315,57 @@ export class WbApiClient {
       clusterBidsResponseSchema,
       clusterWriteRequestSchema.parse(request),
     );
+  }
+
+  /**
+   * Reserves one exact cluster POST or DELETE admission for the durable write pipeline.
+   *
+   * @param endpointKey - Verified mock cluster mutation.
+   * @returns Single-use admitted dispatch.
+   */
+  public async reserveClusterBidWrite(
+    endpointKey: 'clusterDeleteBids' | 'clusterWriteBids',
+  ): Promise<ReservedClusterBidWrite> {
+    this.assertOperationAllowed(endpointKey, true, false);
+    const limiterWaitMs = await this.configuration.rateLimiter.acquire(endpointKey);
+    const releaseSemaphore = await this.semaphore.acquire();
+    let active = true;
+    /** Releases this reservation without dispatch. */
+    const release = (): void => {
+      if (!active) return;
+      active = false;
+      releaseSemaphore();
+    };
+    return Object.freeze({
+      /**
+       * Dispatches exactly once through the already-admitted cluster slot.
+       *
+       * @param request - Validated cluster write/delete payload.
+       * @returns Validated per-item echo.
+       */
+      dispatch: async (
+        request: ClusterWriteRequest,
+      ): Promise<z.infer<typeof clusterBidsResponseSchema>> => {
+        if (!active) {
+          throw new WbApiError('CONTRACT', 'WB write admission was already consumed', null, false);
+        }
+        active = false;
+        try {
+          return await this.request(
+            endpointKey,
+            clusterBidsResponseSchema,
+            undefined,
+            clusterWriteRequestSchema.parse(request),
+            true,
+            false,
+            limiterWaitMs,
+          );
+        } finally {
+          releaseSemaphore();
+        }
+      },
+      release,
+    });
   }
 
   /**
@@ -613,7 +680,16 @@ export class WbApiClient {
     allowUnverifiedRead: boolean,
   ): { readonly breaker: CircuitBreaker; readonly definition: WbEndpointDefinition } {
     const definition = endpointDefinition(endpointKey);
-    if (definition.status !== 'VERIFIED' && !(allowUnverifiedRead && !definition.isWrite)) {
+    const verifiedByMockProfile =
+      this.configuration.contractMode === 'verified-mock' &&
+      (endpointKey === 'clusterCurrentBids' ||
+        endpointKey === 'clusterWriteBids' ||
+        endpointKey === 'clusterDeleteBids');
+    if (
+      definition.status !== 'VERIFIED' &&
+      !verifiedByMockProfile &&
+      !(allowUnverifiedRead && !definition.isWrite)
+    ) {
       throw new WbApiError(
         'CONTRACT',
         `WB endpoint contract is ${definition.status}: ${endpointKey}`,
@@ -700,6 +776,22 @@ function assertSafeOrigin(url: URL, common: boolean): void {
   } else if (url.protocol !== 'http:') {
     throw new Error('WB base URL protocol is not allowed');
   }
+}
+
+/**
+ * Restricts synthetic verified semantics to a local plain-HTTP mock boundary.
+ *
+ * @param url - Configured promotion origin.
+ * @returns Whether the host is an allowed deterministic mock target.
+ */
+function isVerifiedMockOrigin(url: URL): boolean {
+  if (url.protocol !== 'http:') return false;
+  return (
+    url.hostname === '127.0.0.1' ||
+    url.hostname === '::1' ||
+    url.hostname === 'localhost' ||
+    url.hostname === 'wb-mock'
+  );
 }
 
 /**

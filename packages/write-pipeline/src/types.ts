@@ -23,6 +23,7 @@ export interface ClaimedQueueItem {
   readonly campaignPaymentType: 'CPC' | 'CPM' | 'UNKNOWN';
   readonly wbCampaignId: bigint;
   readonly nmId: bigint;
+  readonly normQueryWire: string | null;
   readonly placement: 'COMBINED' | 'RECOMMENDATIONS' | 'SEARCH';
   readonly targetKind: 'CARD' | 'CLUSTER';
   readonly priority: number;
@@ -77,10 +78,12 @@ export interface DispatchReservation {
       decisionId: string;
       action: 'SET' | 'DELETE';
       bidMinor: bigint | null;
+      normQueryWire: string | null;
       wbCampaignId: bigint;
       nmId: bigint;
       placement: 'COMBINED' | 'RECOMMENDATIONS' | 'SEARCH';
       targetKind: 'CARD' | 'CLUSTER';
+      wireBidRaw: bigint | null;
     }[],
     correlationId: string,
   ): Promise<DispatchResult>;
@@ -96,10 +99,12 @@ export interface WriteGateway {
       decisionId: string;
       action: 'SET' | 'DELETE';
       bidMinor: bigint | null;
+      normQueryWire: string | null;
       wbCampaignId: bigint;
       nmId: bigint;
       placement: 'COMBINED' | 'RECOMMENDATIONS' | 'SEARCH';
       targetKind: 'CARD' | 'CLUSTER';
+      wireBidRaw: bigint | null;
     }[],
     correlationId: string,
   ): Promise<DispatchResult>;

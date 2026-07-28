@@ -186,6 +186,38 @@ describe('rules-v1 decisions', () => {
     expect(decision.outcomeReasonCode).toBe('UNVERIFIED_CLUSTER_BID_CONTRACT');
   });
 
+  it('optimizes only verified manual CPM clusters and blocks cluster CPC', () => {
+    const targetKey = {
+      ...decisionInput().targetKey,
+      normQueryCanonical: 'synthetic cluster one',
+      targetKind: 'CLUSTER' as const,
+    };
+    const cpm = decideBid(
+      decisionInput({
+        capability: 'CLUSTER_WRITE_READY',
+        paymentType: 'CPM',
+        targetKey,
+      }),
+    );
+    expect(cpm).toMatchObject({
+      action: 'DECREASE',
+      boundedBidMinor: 80n,
+      queueEligible: true,
+    });
+    const cpc = decideBid(
+      decisionInput({
+        capability: 'CLUSTER_WRITE_READY',
+        paymentType: 'CPC',
+        targetKey,
+      }),
+    );
+    expect(cpc).toMatchObject({
+      action: 'BLOCKED',
+      outcomeReasonCode: 'UNSUPPORTED_CAMPAIGN',
+      queueEligible: false,
+    });
+  });
+
   it('uses signed non-positive contribution only for a capped protective decrease', () => {
     const decision = decideBid(decisionInput({ expectedContributionBeforeAdsMinor: -10n }));
     expect(decision.strategyReasonCode).toBe('NEGATIVE_CONTRIBUTION_BEFORE_ADS');

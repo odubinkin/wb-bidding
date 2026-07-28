@@ -8,7 +8,7 @@ import { ObservabilityService } from './observability.service.js';
 import { DECISION_REPOSITORY } from './runtime.providers.js';
 import { RuntimeClockService } from './runtime-clock.service.js';
 import { RuntimeSafetyState } from './runtime-state.js';
-import { CURRENT_ENDPOINT_PROFILE } from '@wb-bidder/contracts';
+import { CURRENT_ENDPOINT_PROFILE, MOCK_ENDPOINT_PROFILE } from '@wb-bidder/contracts';
 import { formatAccountLocalDate, type AppConfiguration } from '@wb-bidder/config';
 import {
   DecisionRepository,
@@ -315,7 +315,9 @@ export class DecisionJobService {
         targetIds,
         decisionAt,
         this.configuration.accountTimezone,
-        CURRENT_ENDPOINT_PROFILE.profileId,
+        this.configuration.wb.mode === 'mock'
+          ? MOCK_ENDPOINT_PROFILE.profileId
+          : CURRENT_ENDPOINT_PROFILE.profileId,
         DECISION_PAGE_SIZE,
       ],
     );

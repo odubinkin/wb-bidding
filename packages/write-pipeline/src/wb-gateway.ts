@@ -118,7 +118,132 @@ export class WbCardBidGateway implements WriteGateway {
   }
 }
 
+/**
+ * Verified-mock cluster gateway preserving the exact normQuery wire spelling.
+ */
+export class WbClusterBidGateway implements WriteGateway {
+  public constructor(private readonly client: WbApiClient) {}
+
+  public async readLiveState(item: ClaimedQueueItem): Promise<LiveBidState> {
+    if (item.targetKind !== 'CLUSTER' || item.normQueryWire === null) {
+      throw new Error('CLUSTER_TARGET_REQUIRED');
+    }
+    const campaignId = safeWbNumber(item.wbCampaignId);
+    const nmId = safeWbNumber(item.nmId);
+    const response = await this.client.getClusterBids({
+      items: [{ advert_id: campaignId, nm_id: nmId }],
+    });
+    const match = response.bids.find(
+      (bid) =>
+        bid.advert_id === campaignId && bid.nm_id === nmId && bid.norm_query === item.normQueryWire,
+    );
+    return Object.freeze({
+      bidMinor: match === undefined ? null : BigInt(match.bid),
+      explicit: match !== undefined,
+      observedAt: new Date(),
+      sourceMarker:
+        match === undefined
+          ? `cluster-current-bids:${String(campaignId)}:${String(nmId)}:${item.normQueryWire}:ABSENT`
+          : `cluster-current-bids:${String(campaignId)}:${String(nmId)}:${item.normQueryWire}:${String(match.bid)}`,
+    });
+  }
+
+  public async dispatch(
+    endpointKey: string,
+    items: readonly DispatchInput[],
+    correlationId: string,
+  ): Promise<DispatchResult> {
+    assertClusterEndpoint(endpointKey);
+    return this.dispatchWith(endpointKey, items, correlationId, (payload) =>
+      endpointKey === 'clusterDeleteBids'
+        ? this.client.deleteClusterBids(payload)
+        : this.client.writeClusterBids(payload),
+    );
+  }
+
+  public async reserveDispatch(endpointKey: string): Promise<DispatchReservation> {
+    assertClusterEndpoint(endpointKey);
+    const reserved = await this.client.reserveClusterBidWrite(endpointKey);
+    return Object.freeze({
+      dispatch: (items: readonly DispatchInput[], correlationId: string) =>
+        this.dispatchWith(endpointKey, items, correlationId, (payload) =>
+          reserved.dispatch(payload),
+        ),
+      release: () => {
+        reserved.release();
+      },
+    });
+  }
+
+  private async dispatchWith(
+    endpointKey: 'clusterDeleteBids' | 'clusterWriteBids',
+    items: readonly DispatchInput[],
+    correlationId: string,
+    write: (
+      payload: ClusterWritePayload,
+    ) => ReturnType<WbApiClient['writeClusterBids'] | WbApiClient['deleteClusterBids']>,
+  ): Promise<DispatchResult> {
+    const expectedAction = endpointKey === 'clusterDeleteBids' ? 'DELETE' : 'SET';
+    if (
+      items.some(
+        (item) =>
+          item.targetKind !== 'CLUSTER' ||
+          item.action !== expectedAction ||
+          item.normQueryWire === null,
+      )
+    ) {
+      throw new Error('UNSUPPORTED_CLUSTER_WRITE_ACTION');
+    }
+    const payload: ClusterWritePayload = {
+      bids: items.map((item) => ({
+        advert_id: safeWbNumber(item.wbCampaignId),
+        bid: safePositiveBid(item.wireBidRaw),
+        nm_id: safeWbNumber(item.nmId),
+        norm_query: requiredNormQuery(item.normQueryWire),
+      })),
+    };
+    const response = await write(payload);
+    const echoed = new Set(
+      response.bids.map(
+        (item) =>
+          `${String(item.advert_id)}:${String(item.nm_id)}:${item.norm_query}:${String(item.bid)}`,
+      ),
+    );
+    return Object.freeze({
+      httpStatus: 200,
+      items: Object.freeze(
+        payload.bids.map((item, requestIndex) => {
+          const key = `${String(item.advert_id)}:${String(item.nm_id)}:${item.norm_query}:${String(item.bid)}`;
+          const accepted = echoed.has(key);
+          return Object.freeze({
+            accepted,
+            ...(accepted ? {} : { errorCode: 'WB_ITEM_NOT_ECHOED' }),
+            httpStatus: 200,
+            requestIndex,
+            responseFragment: { echoed: accepted },
+          });
+        }),
+      ),
+      wbRequestId: correlationId,
+    });
+  }
+}
+
 type CardWritePayload = Parameters<WbApiClient['writeCardBids']>[0];
+type ClusterWritePayload = Parameters<WbApiClient['writeClusterBids']>[0];
+
+function assertClusterEndpoint(
+  endpointKey: string,
+): asserts endpointKey is 'clusterDeleteBids' | 'clusterWriteBids' {
+  if (endpointKey !== 'clusterDeleteBids' && endpointKey !== 'clusterWriteBids') {
+    throw new Error('UNSUPPORTED_WRITE_ENDPOINT');
+  }
+}
+
+function requiredNormQuery(value: string | null): string {
+  if (value === null || value.length === 0) throw new Error('CLUSTER_NORM_QUERY_REQUIRED');
+  return value;
+}
 
 function assertCard(targetKind: 'CARD' | 'CLUSTER'): void {
   if (targetKind !== 'CARD') throw new Error('CLUSTER_GATEWAY_REQUIRED');

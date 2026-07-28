@@ -109,7 +109,7 @@ try {
     bidderReady.status !== 200 ||
     mockLive.status !== 200 ||
     info.writesEnabled !== false ||
-    info.endpointProfileId !== 'wb-promotion-2026-07-28-v1' ||
+    info.endpointProfileId !== 'wb-deterministic-mock-verified-v1' ||
     state.virtualTime !== '2026-07-28T00:00:00.000Z' ||
     bidderOpenApi.openapi !== '3.0.0' ||
     mockOpenApi.openapi !== '3.0.0'

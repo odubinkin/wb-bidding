@@ -250,6 +250,10 @@ model CampaignTarget {
   minimumBidMinor           BigInt?
   clusterBidState           ClusterBidState?
   clusterBidContractVersion String?
+  clusterBaselineBidState   ClusterBidState?
+  clusterBaselineBidMinor   BigInt?
+  clusterBaselineChecksum   String?               @db.Char(64)
+  clusterOverrideOwned      Boolean               @default(false)
   lastConfirmedAt           DateTime?             @db.Timestamptz(3)
   currentBidChecksum        String?               @db.Char(64)
   currentBidSyncRunId       String?               @db.Uuid

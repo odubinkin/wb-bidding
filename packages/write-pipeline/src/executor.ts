@@ -37,17 +37,12 @@ export class WriteExecutor {
       workerId,
       this.options.maximumBatchSize,
       this.options.leaseSeconds,
+      selectorForEndpoint(this.options.endpointKey),
     );
     if (claimed.length === 0) return 0;
     const supported: ClaimedQueueItem[] = [];
     for (const item of claimed) {
-      if (
-        this.options.endpointKey !== 'cardBidsWrite' ||
-        item.targetKind !== 'CARD' ||
-        item.action !== 'SET' ||
-        item.campaignBidType === 'UNKNOWN' ||
-        item.campaignPaymentType === 'UNKNOWN'
-      ) {
+      if (!supportsEndpoint(this.options.endpointKey, item)) {
         await this.repository.failLeased(
           item.queueItemId,
           workerId,
@@ -129,7 +124,7 @@ export class WriteExecutor {
       prepared = await this.repository.prepare({
         endpointKey: this.options.endpointKey,
         items: valid,
-        method: 'PATCH',
+        method: methodForEndpoint(this.options.endpointKey),
         reconciliationDeadlineMs: this.options.reconciliationDeadlineMs,
         visibilityDelayMs: this.options.visibilityDelayMs,
         workerId,
@@ -154,13 +149,15 @@ export class WriteExecutor {
       throw error;
     }
     const started = performance.now();
-    const dispatchItems = valid.map(({ item }) => ({
+    const dispatchItems = valid.map(({ item, live }) => ({
       action: item.action,
       bidMinor: item.bidMinor,
       decisionId: item.decisionId,
       nmId: item.nmId,
+      normQueryWire: item.normQueryWire,
       placement: item.placement,
       targetKind: item.targetKind,
+      wireBidRaw: item.action === 'DELETE' ? live.bidMinor : item.bidMinor,
       wbCampaignId: item.wbCampaignId,
     }));
     for (let retry = 0; ; retry += 1) {
@@ -208,6 +205,40 @@ export class WriteExecutor {
     }
     return claimed.length;
   }
+}
+
+function selectorForEndpoint(endpointKey: string): {
+  readonly action: 'DELETE' | 'SET';
+  readonly targetKind: 'CARD' | 'CLUSTER';
+} {
+  if (endpointKey === 'cardBidsWrite') return { action: 'SET', targetKind: 'CARD' };
+  if (endpointKey === 'clusterWriteBids') return { action: 'SET', targetKind: 'CLUSTER' };
+  if (endpointKey === 'clusterDeleteBids') return { action: 'DELETE', targetKind: 'CLUSTER' };
+  throw new Error('UNSUPPORTED_WRITE_ENDPOINT');
+}
+
+function supportsEndpoint(endpointKey: string, item: ClaimedQueueItem): boolean {
+  if (item.campaignBidType === 'UNKNOWN' || item.campaignPaymentType === 'UNKNOWN') return false;
+  if (endpointKey === 'cardBidsWrite') {
+    return item.targetKind === 'CARD' && item.action === 'SET';
+  }
+  if (endpointKey === 'clusterWriteBids' || endpointKey === 'clusterDeleteBids') {
+    return (
+      item.targetKind === 'CLUSTER' &&
+      item.campaignBidType === 'MANUAL' &&
+      item.campaignPaymentType === 'CPM' &&
+      item.action === (endpointKey === 'clusterDeleteBids' ? 'DELETE' : 'SET') &&
+      item.normQueryWire !== null
+    );
+  }
+  return false;
+}
+
+function methodForEndpoint(endpointKey: string): 'DELETE' | 'PATCH' | 'POST' {
+  if (endpointKey === 'cardBidsWrite') return 'PATCH';
+  if (endpointKey === 'clusterWriteBids') return 'POST';
+  if (endpointKey === 'clusterDeleteBids') return 'DELETE';
+  throw new Error('UNSUPPORTED_WRITE_ENDPOINT');
 }
 
 function oldestStateAgeMs(

@@ -11,6 +11,7 @@ import { DecisionRepository } from '@wb-bidder/decision-engine';
 import { formatAccountLocalDate, type AppConfiguration } from '@wb-bidder/config';
 import {
   CURRENT_ENDPOINT_PROFILE,
+  MOCK_ENDPOINT_PROFILE,
   type EndpointKey,
   type RateLimitProfile,
 } from '@wb-bidder/contracts';
@@ -26,7 +27,11 @@ import {
   type ValidatedTokenProfile,
   type WbRequestObservation,
 } from '@wb-bidder/wb-api';
-import { WbCardBidGateway, WritePipelineRepository } from '@wb-bidder/write-pipeline';
+import {
+  WbCardBidGateway,
+  WbClusterBidGateway,
+  WritePipelineRepository,
+} from '@wb-bidder/write-pipeline';
 
 /** Nest token for the shared circuit-breaker registry. */
 export const WB_BREAKERS = Symbol('WB_BREAKERS');
@@ -42,6 +47,8 @@ export const DECISION_REPOSITORY = Symbol('DECISION_REPOSITORY');
 export const WRITE_PIPELINE_REPOSITORY = Symbol('WRITE_PIPELINE_REPOSITORY');
 /** Nest token for the card-bid gateway. */
 export const CARD_BID_GATEWAY = Symbol('CARD_BID_GATEWAY');
+/** Nest token for the verified-mock cluster-bid gateway. */
+export const CLUSTER_BID_GATEWAY = Symbol('CLUSTER_BID_GATEWAY');
 
 /**
  * Production runtime providers sharing one pool, limiter, breakers, and WB client.
@@ -80,6 +87,11 @@ export const runtimeProviders: readonly Provider[] = [
     inject: [WB_API_CLIENT],
     provide: CARD_BID_GATEWAY,
     useFactory: createCardBidGateway,
+  },
+  {
+    inject: [WB_API_CLIENT],
+    provide: CLUSTER_BID_GATEWAY,
+    useFactory: createClusterBidGateway,
   },
 ] as const;
 
@@ -133,6 +145,16 @@ function createCardBidGateway(client: WbApiClient): WbCardBidGateway {
 }
 
 /**
+ * Creates the verified-mock cluster-bid WB gateway.
+ *
+ * @param client - Shared WB client.
+ * @returns Gateway whose client still enforces the selected contract contour.
+ */
+function createClusterBidGateway(client: WbApiClient): WbClusterBidGateway {
+  return new WbClusterBidGateway(client);
+}
+
+/**
  * Creates one runtime WB adapter over a cross-replica PostgreSQL limiter.
  *
  * @param configuration - Validated environment.
@@ -161,6 +183,7 @@ function createWbApiClient(
       configuration.wb.mode === 'mock'
         ? configuration.wb.baseUrl
         : new URL('https://common-api.wildberries.ru'),
+    contractMode: configuration.wb.mode === 'mock' ? 'verified-mock' : 'production',
     fetch: createNodeWbFetch(configuration.wb.connectTimeoutMs),
     maxInFlight: configuration.wb.maxInFlight,
     observeRequest: recordWbObservation.bind(null, observability),
@@ -234,7 +257,7 @@ function createDataSyncWorker(
        */
       statisticsEndDate: () => statisticsEndDate(configuration.accountTimezone, clock.now()),
     },
-    CURRENT_ENDPOINT_PROFILE,
+    configuration.wb.mode === 'mock' ? MOCK_ENDPOINT_PROFILE : CURRENT_ENDPOINT_PROFILE,
     () => clock.now(),
   );
 }

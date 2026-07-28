@@ -25,6 +25,7 @@ const claimed: ClaimedQueueItem = {
   desiredBidState: 'EXPLICIT',
   metricSnapshotId: '00000000-0000-4000-8000-000000000013',
   nmId: 20001n,
+  normQueryWire: null,
   placement: 'SEARCH',
   policyVersion: 1n,
   priority: 100,

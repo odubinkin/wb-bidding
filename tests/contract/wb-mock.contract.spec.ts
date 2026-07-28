@@ -264,7 +264,7 @@ describe('WB deterministic mock consumer contract', () => {
           items: [{ advert_id: 10_001, nm_id: 20_001 }],
         })
       ).bids,
-    ).toHaveLength(2);
+    ).toHaveLength(1);
     expect(
       (
         await client.listClusters({
@@ -306,6 +306,56 @@ describe('WB deterministic mock consumer contract', () => {
       .send({ rules: [{ endpointKey: 'campaignCount', remaining: 1, status: 503 }] })
       .expect(201);
     expect((await client.getCampaignCount()).all).toBe(2);
+  });
+
+  it('proves verified-mock cluster minor unit, minimum, absence and delete semantics', async () => {
+    const server = application.getHttpServer() as unknown as Server;
+    await request(server).post('/__mock/reset').expect(201);
+    const client = createMockClient(baseUrl, 'verified-mock');
+    const pair = { advert_id: 10_001, nm_id: 20_001 };
+    const initial = await client.getClusterBids({ items: [pair] });
+    expect(initial.bids).toEqual([
+      {
+        ...pair,
+        bid: 700,
+        norm_query: 'synthetic cluster one',
+      },
+    ]);
+    await expect(
+      client.writeClusterBids({
+        bids: [
+          {
+            ...pair,
+            bid: 499,
+            norm_query: 'synthetic cluster two',
+          },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: 'PAYLOAD' });
+    await expect(
+      client.writeClusterBids({
+        bids: [
+          {
+            ...pair,
+            bid: 900,
+            norm_query: 'synthetic cluster two',
+          },
+        ],
+      }),
+    ).resolves.toMatchObject({ bids: [{ bid: 900 }] });
+    expect((await client.getClusterBids({ items: [pair] })).bids).toHaveLength(2);
+    await expect(
+      client.deleteClusterBids({
+        bids: [
+          {
+            ...pair,
+            bid: 900,
+            norm_query: 'synthetic cluster two',
+          },
+        ],
+      }),
+    ).resolves.toMatchObject({ bids: [{ bid: 900 }] });
+    expect((await client.getClusterBids({ items: [pair] })).bids).toEqual(initial.bids);
   });
 
   it('exposes 429 headers, partial dispatch and ambiguous write outcomes deterministically', async () => {
@@ -420,11 +470,15 @@ describe('WB deterministic mock consumer contract', () => {
   });
 });
 
-function createMockClient(baseUrl: URL): WbApiClient {
+function createMockClient(
+  baseUrl: URL,
+  contractMode: 'production' | 'verified-mock' = 'production',
+): WbApiClient {
   return new WbApiClient({
     baseUrl,
     breakers: new CircuitBreakerRegistry(),
     commonBaseUrl: baseUrl,
+    contractMode,
     fetch,
     maxInFlight: 5,
     rateLimiter: new WbRateLimiter(

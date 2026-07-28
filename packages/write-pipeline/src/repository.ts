@@ -26,6 +26,10 @@ export class WritePipelineRepository {
     workerId: string,
     limit: number,
     leaseSeconds: number,
+    selector?: {
+      readonly action: 'DELETE' | 'SET';
+      readonly targetKind: 'CARD' | 'CLUSTER';
+    },
   ): Promise<readonly ClaimedQueueItem[]> {
     if (limit < 1 || limit > 500 || leaseSeconds < 5 || leaseSeconds > 900) {
       throw new Error('INVALID_CLAIM_BOUNDS');
@@ -38,9 +42,16 @@ export class WritePipelineRepository {
            SELECT q."id"
              FROM "DecisionQueueItem" q
              JOIN "BidDecision" d ON d."id" = q."decisionId"
+             JOIN "CampaignTarget" candidate_target ON candidate_target."id" = d."targetId"
             WHERE q."status" IN ('QUEUED', 'RETRY_WAIT')
               AND q."availableAt" <= clock_timestamp()
               AND (q."leaseUntil" IS NULL OR q."leaseUntil" < clock_timestamp())
+              AND ($4::text IS NULL OR candidate_target."targetKind"::text = $4)
+              AND (
+                $5::text IS NULL
+                OR ($5 = 'DELETE' AND d."action" = 'RESTORE_ABSENT_OVERRIDE')
+                OR ($5 = 'SET' AND d."action" IN ('INCREASE', 'DECREASE'))
+              )
               AND NOT EXISTS (
                 SELECT 1
                   FROM "DecisionQueueItem" active_q
@@ -64,13 +75,14 @@ export class WritePipelineRepository {
             AND t."id" = d."targetId"
             AND campaign."id" = t."campaignId"
          RETURNING q."id" AS "queueItemId", q."decisionId", d."targetId",
-                   t."campaignId", t."nmId", t."placement"::text, t."targetKind"::text,
+                   t."campaignId", t."nmId", t."normQueryWire",
+                   t."placement"::text, t."targetKind"::text,
                    campaign."wbCampaignId", campaign."bidType"::text AS "campaignBidType",
                    campaign."paymentType"::text AS "campaignPaymentType",
                    q."priority", d."action"::text,
                    d."boundedBidMinor", q."attemptCount", d."policyVersion",
                    d."metricSnapshotId"`,
-        [limit, workerId, leaseSeconds],
+        [limit, workerId, leaseSeconds, selector?.targetKind ?? null, selector?.action ?? null],
       );
       await client.query('COMMIT');
       return Object.freeze(result.rows.map(toClaimed));
@@ -196,7 +208,9 @@ export class WritePipelineRepository {
             entry.item.action,
             entry.item.desiredBidState,
             entry.item.bidMinor?.toString() ?? null,
-            entry.item.bidMinor?.toString() ?? '',
+            entry.item.action === 'DELETE'
+              ? (entry.live.bidMinor?.toString() ?? '')
+              : (entry.item.bidMinor?.toString() ?? ''),
             attemptNumber,
             entry.live.observedAt,
             stateChecksum(entry.live),
@@ -557,7 +571,7 @@ export class WritePipelineRepository {
               q."id" AS "queueItemId", q."priority", q."attemptCount",
               d."targetId", d."action"::text, d."boundedBidMinor",
               d."policyVersion", d."metricSnapshotId",
-              t."campaignId", t."nmId", t."placement"::text,
+              t."campaignId", t."nmId", t."normQueryWire", t."placement"::text,
               t."targetKind"::text, c."wbCampaignId",
               c."bidType"::text AS "campaignBidType",
               c."paymentType"::text AS "campaignPaymentType"
@@ -914,6 +928,7 @@ interface ClaimRow {
   readonly campaignPaymentType: 'CPC' | 'CPM' | 'UNKNOWN';
   readonly wbCampaignId: string;
   readonly nmId: string;
+  readonly normQueryWire: string | null;
   readonly placement: 'COMBINED' | 'RECOMMENDATIONS' | 'SEARCH';
   readonly targetKind: 'CARD' | 'CLUSTER';
   readonly priority: number;
@@ -968,6 +983,7 @@ function toClaimed(row: ClaimRow): ClaimedQueueItem {
     desiredBidState: deleteAction ? 'ABSENT' : 'EXPLICIT',
     metricSnapshotId: row.metricSnapshotId,
     nmId: BigInt(row.nmId),
+    normQueryWire: row.normQueryWire,
     placement: row.placement,
     policyVersion: BigInt(row.policyVersion),
     priority: row.priority,
@@ -1086,6 +1102,7 @@ async function applyReconciliationOutcome(
   input: {
     readonly attemptItemId: string;
     readonly decisionId: string;
+    readonly targetId: string;
     readonly observation: ReconciliationObservation;
     readonly observedAt: Date;
   },
@@ -1147,6 +1164,28 @@ async function applyReconciliationOutcome(
       input.observedAt,
     ],
   );
+  if (outcome === 'APPLIED') {
+    await client.query(
+      `UPDATE "CampaignTarget" t
+          SET "currentBidMinor" = $3,
+              "clusterBidState" = CASE WHEN $4 THEN 'EXPLICIT'::"ClusterBidState"
+                                       ELSE 'ABSENT'::"ClusterBidState" END,
+              "clusterOverrideOwned" = $4,
+              "lastConfirmedAt" = $5
+         FROM "BidDecision" d
+        WHERE t."id" = $1
+          AND d."id" = $2
+          AND d."targetId" = t."id"
+          AND t."targetKind" = 'CLUSTER'`,
+      [
+        input.targetId,
+        input.decisionId,
+        input.observation.state.bidMinor?.toString() ?? null,
+        input.observation.state.explicit,
+        input.observedAt,
+      ],
+    );
+  }
 }
 
 function classifyRejected(code: string | undefined): string {

@@ -52,6 +52,8 @@ export interface WireContractProfile {
 export interface EndpointProfile {
   /** ISO timestamp of the official-documentation check. */
   readonly checkedAt: string;
+  /** Exact cluster semantics only when clusterBid status is VERIFIED. */
+  readonly clusterBidSemantics: MockClusterBidContract | null;
   /** Endpoint-level request limits for the Personal production token profile. */
   readonly personalProductionLimits: Readonly<Record<EndpointKey, RateLimitProfile>>;
   /** Conservative read-only Base-token limits, never used to enable APPLY. */
@@ -70,6 +72,26 @@ export interface EndpointProfile {
     readonly fullstatsMoneyAndAggregation: WireContractProfile;
     readonly sameDaySpend: WireContractProfile;
   };
+}
+
+/**
+ * Synthetic cluster-bid semantics proven by the deterministic local mock contract suite.
+ *
+ * This contract must never be selected for a Wildberries origin.
+ */
+export interface MockClusterBidContract {
+  /** Exact state represented by an omitted row in get-bids. */
+  readonly absenceState: 'ABSENT';
+  /** Required domain/wire unit. */
+  readonly bidUnit: 'MINOR';
+  /** Delete must remove the explicit row rather than writing a zero/default. */
+  readonly deleteEffect: 'REMOVE_EXPLICIT_OVERRIDE';
+  /** Exact minimum accepted by the mock cluster write contour. */
+  readonly minimumBidMinor: bigint;
+  /** Exact rounding quantum. */
+  readonly quantumMinor: bigint;
+  /** Fixture checksum/version revoking APPLY whenever semantics change. */
+  readonly version: string;
 }
 
 const PER_SECOND_5: RateLimitProfile = Object.freeze({
@@ -123,6 +145,7 @@ const CONSERVATIVE_AUXILIARY_LIMITS: Readonly<Record<EndpointKey, RateLimitProfi
 export const CURRENT_ENDPOINT_PROFILE: EndpointProfile = Object.freeze({
   baseProductionLimits: CONSERVATIVE_AUXILIARY_LIMITS,
   checkedAt: '2026-07-28T00:00:00.000Z',
+  clusterBidSemantics: null,
   personalProductionLimits: Object.freeze({
     bidRecommendations: Object.freeze({ burst: 5, intervalMs: 60_000, requests: 5 }),
     campaignBudget: Object.freeze({ burst: 4, intervalMs: 1_000, requests: 4 }),
@@ -174,6 +197,56 @@ export const CURRENT_ENDPOINT_PROFILE: EndpointProfile = Object.freeze({
       note: 'Current-day coverage and reporting-lag semantics are not proven by documentation alone.',
       status: 'UNVERIFIED',
       version: 'same-day-spend-unverified-v1',
+    }),
+  }),
+});
+
+/**
+ * Verified synthetic cluster contract used exclusively by the deterministic local mock.
+ */
+export const MOCK_CLUSTER_BID_CONTRACT: MockClusterBidContract = Object.freeze({
+  absenceState: 'ABSENT',
+  bidUnit: 'MINOR',
+  deleteEffect: 'REMOVE_EXPLICIT_OVERRIDE',
+  minimumBidMinor: 500n,
+  quantumMinor: 1n,
+  version: 'mock-cluster-bid-minor-absence-delete-v1',
+});
+
+/**
+ * Immutable mock-only profile. Production and sandbox always use CURRENT_ENDPOINT_PROFILE.
+ */
+export const MOCK_ENDPOINT_PROFILE: EndpointProfile = Object.freeze({
+  ...CURRENT_ENDPOINT_PROFILE,
+  checkedAt: '2026-07-29T00:00:00.000Z',
+  clusterBidSemantics: MOCK_CLUSTER_BID_CONTRACT,
+  profileId: 'wb-deterministic-mock-verified-v1',
+  sources: Object.freeze(['synthetic://wb-mock/contract/wb-deterministic-mock-verified-v1']),
+  wireContracts: Object.freeze({
+    budgetSemantics: Object.freeze({
+      note: 'Deterministic mock budget is diagnostic; remaining-balance semantics stay disabled.',
+      status: 'UNVERIFIED',
+      version: 'mock-budget-diagnostic-v1',
+    }),
+    cardBidMinorUnits: Object.freeze({
+      note: 'Deterministic mock card bids use exact integer minor units.',
+      status: 'VERIFIED',
+      version: 'mock-card-bid-minor-v1',
+    }),
+    clusterBid: Object.freeze({
+      note: 'Mock fixtures prove minor unit, minimum, explicit/absence and delete semantics.',
+      status: 'VERIFIED',
+      version: MOCK_CLUSTER_BID_CONTRACT.version,
+    }),
+    fullstatsMoneyAndAggregation: Object.freeze({
+      note: 'Mock fixtures prove exact decimal-to-minor conversion and leaf/day aggregation.',
+      status: 'VERIFIED',
+      version: 'mock-statistics-minor-leaf-v1',
+    }),
+    sameDaySpend: Object.freeze({
+      note: 'Mock virtual clock proves current-day coverage and reporting-lag semantics.',
+      status: 'VERIFIED',
+      version: 'mock-same-day-spend-v1',
     }),
   }),
 });

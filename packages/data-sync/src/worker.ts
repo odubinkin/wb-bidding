@@ -7,6 +7,7 @@ import {
   canonicalizeNormQuery,
   findNormQueryNfcCollisions,
   normalizeCampaignStatisticDay,
+  normalizeClusterStatisticDay,
 } from './evidence.js';
 import type { CampaignWorkItem, CampaignWorkScope, DataSyncRepository } from './repository.js';
 import type { SyncDataKind } from './types.js';
@@ -130,6 +131,32 @@ export class WbDataSyncWorker {
             this.configuration.externalWriteControlMode,
           );
           targets += result.targets;
+        }
+        if (
+          this.profile.wireContracts.clusterBid.status === 'VERIFIED' &&
+          this.profile.clusterBidSemantics !== null
+        ) {
+          const clusterWork = await this.repository.loadClusterCurrentWork(selected);
+          for (const campaign of clusterWork) {
+            for (const nmIds of chunks(campaign.nmIds, 100)) {
+              const currentBids = await this.api.getClusterBids({
+                items: nmIds.map((nmId) => ({
+                  advert_id: Number(campaign.wbCampaignId),
+                  nm_id: Number(nmId),
+                })),
+              });
+              targets += await this.repository.applyClusterBidStates({
+                bids: currentBids.bids,
+                campaignId: campaign.campaignId,
+                contractVersion: this.profile.wireContracts.clusterBid.version,
+                externalWriteControlMode: this.configuration.externalWriteControlMode,
+                fetchedAt: this.now(),
+                minimumBidMinor: this.profile.clusterBidSemantics.minimumBidMinor,
+                profileId: this.profile.profileId,
+                runId,
+              });
+            }
+          }
         }
         const nextCursor = selected.at(-1) ?? 0n;
         await this.repository.saveCheckpoint(
@@ -542,7 +569,8 @@ export class WbDataSyncWorker {
    * @returns Updated target count.
    */
   private async synchronizeMinimumBids(campaign: CampaignWorkItem, runId: string): Promise<number> {
-    const nmIds = [...new Set(campaign.targets.map((target) => target.nmId.toString()))]
+    const cardTargets = campaign.targets.filter((target) => target.targetKind === 'CARD');
+    const nmIds = [...new Set(cardTargets.map((target) => target.nmId.toString()))]
       .slice(0, 100)
       .map(Number);
     if (nmIds.length === 0 || (campaign.paymentType !== 'CPM' && campaign.paymentType !== 'CPC')) {
@@ -550,7 +578,7 @@ export class WbDataSyncWorker {
     }
     const placements = [
       ...new Set(
-        campaign.targets.map((target) =>
+        cardTargets.map((target) =>
           target.placement === 'RECOMMENDATIONS'
             ? ('recommendation' as const)
             : (target.placement.toLowerCase() as 'combined' | 'search'),
@@ -564,7 +592,7 @@ export class WbDataSyncWorker {
       placement_types: placements,
     });
     let updated = 0;
-    for (const placement of campaign.targets.map((target) => target.placement)) {
+    for (const placement of cardTargets.map((target) => target.placement)) {
       updated += await this.repository.applyMinimumBids(
         campaign.campaignId,
         response,
@@ -590,10 +618,12 @@ export class WbDataSyncWorker {
     selectedKinds: ReadonlySet<SyncDataKind> = selectedDataKinds(),
   ): Promise<number> {
     let invalidSources = 0;
-    const pairs = campaign.targets.slice(0, 100).map((target) => ({
-      advert_id: Number(campaign.wbCampaignId),
-      nm_id: Number(target.nmId),
-    }));
+    const pairs = [...new Set(campaign.targets.map((target) => target.nmId.toString()))]
+      .slice(0, 100)
+      .map((nmId) => ({
+        advert_id: Number(campaign.wbCampaignId),
+        nm_id: Number(nmId),
+      }));
     if (pairs.length > 0 && campaign.bidType === 'MANUAL' && selectedKinds.has('CLUSTER_LIST')) {
       const clusters = await this.api.listClusters({ items: pairs });
       for (const item of clusters.items) {
@@ -628,9 +658,30 @@ export class WbDataSyncWorker {
           invalidSources += 1;
         }
       }
+      if (
+        campaign.paymentType === 'CPM' &&
+        this.profile.wireContracts.clusterBid.status === 'VERIFIED' &&
+        this.profile.clusterBidSemantics !== null
+      ) {
+        const currentBids = await this.api.getClusterBids({ items: pairs });
+        await this.repository.applyClusterBidStates({
+          bids: currentBids.bids,
+          campaignId: campaign.campaignId,
+          contractVersion: this.profile.wireContracts.clusterBid.version,
+          externalWriteControlMode: this.configuration.externalWriteControlMode,
+          fetchedAt: this.now(),
+          minimumBidMinor: this.profile.clusterBidSemantics.minimumBidMinor,
+          profileId: this.profile.profileId,
+          runId,
+        });
+      }
     }
     const recommendationTarget =
-      campaign.paymentType === 'CPM' ? oldestRecommendationTarget(campaign.targets) : undefined;
+      campaign.paymentType === 'CPM'
+        ? oldestRecommendationTarget(
+            campaign.targets.filter((target) => target.targetKind === 'CARD'),
+          )
+        : undefined;
     if (recommendationTarget !== undefined && selectedKinds.has('BID_RECOMMENDATION')) {
       const recommendation = await this.api.getBidRecommendations(
         Number(campaign.wbCampaignId),
@@ -648,24 +699,60 @@ export class WbDataSyncWorker {
         valid: true,
       });
     }
-    if (selectedKinds.has('CLUSTER_STATISTICS') && pairs.length > 0) {
+    if (
+      selectedKinds.has('CLUSTER_STATISTICS') &&
+      pairs.length > 0 &&
+      campaign.bidType === 'MANUAL'
+    ) {
       const clusterStatistics = await this.api.getClusterStatistics({
         from: this.configuration.statisticsBeginDate(),
         items: pairs,
         to: this.configuration.statisticsEndDate(),
       });
-      await this.repository.recordSourceSnapshot({
-        campaignId: campaign.campaignId,
-        dataKind: 'CLUSTER_STATISTICS',
-        endpointProfile: this.profile.profileId,
-        fetchedAt: this.now(),
-        invalidReason: 'CLUSTER_STATISTICS_SEMANTICS_UNVERIFIED',
-        normalizedData: clusterStatistics,
-        sourceChecksum: evidenceChecksum(clusterStatistics),
-        syncRunId: runId,
-        valid: false,
-      });
-      invalidSources += 1;
+      if (this.fullstatsContractVerified()) {
+        const fetchedAt = this.now();
+        for (const item of clusterStatistics.items) {
+          for (const day of item.dailyStats) {
+            const normalized = normalizeClusterStatisticDay(
+              {
+                atbs: day.stat.atbs,
+                clicks: day.stat.clicks,
+                date: day.date,
+                normQuery: day.stat.normQuery,
+                orders: day.stat.orders,
+                ...(day.stat.shks === undefined ? {} : { shks: day.stat.shks }),
+                spend: day.stat.spend,
+                ...(day.stat.views === undefined ? {} : { views: day.stat.views }),
+              },
+              'VERIFIED',
+            );
+            await this.repository.upsertClusterStatisticDay({
+              campaignId: campaign.campaignId,
+              fetchedAt,
+              nmId: BigInt(item.nmId),
+              normQueryCanonical: canonicalizeNormQuery(day.stat.normQuery),
+              normQueryWire: day.stat.normQuery,
+              normalized,
+              profileId: this.profile.profileId,
+              runId,
+              wbCampaignId: BigInt(item.advertId),
+            });
+          }
+        }
+      } else {
+        await this.repository.recordSourceSnapshot({
+          campaignId: campaign.campaignId,
+          dataKind: 'CLUSTER_STATISTICS',
+          endpointProfile: this.profile.profileId,
+          fetchedAt: this.now(),
+          invalidReason: 'CLUSTER_STATISTICS_SEMANTICS_UNVERIFIED',
+          normalizedData: clusterStatistics,
+          sourceChecksum: evidenceChecksum(clusterStatistics),
+          syncRunId: runId,
+          valid: false,
+        });
+        invalidSources += 1;
+      }
     }
     if (selectedKinds.has('BUDGET_DIAGNOSTIC')) {
       const budget = await this.api.getCampaignBudget(Number(campaign.wbCampaignId));
@@ -698,6 +785,10 @@ export class WbDataSyncWorker {
       campaign.campaignId,
     );
     for (const target of campaign.targets) {
+      const targetStatistics =
+        target.targetKind === 'CLUSTER'
+          ? await this.repository.loadLatestClusterStatisticsEvidence(target.targetId)
+          : statistics;
       const sameDaySpend = await this.repository.loadLatestSameDaySpendEvidence(target.targetId);
       const evidence = [
         {
@@ -728,13 +819,16 @@ export class WbDataSyncWorker {
           valid: target.minimumBidChecksum !== null && target.minimumBidConfirmedAt !== null,
         },
         {
-          dataKind: 'CAMPAIGN_STATISTICS' as const,
-          fetchedAt: statistics?.fetchedAt ?? new Date(0),
+          dataKind:
+            target.targetKind === 'CLUSTER'
+              ? ('CLUSTER_STATISTICS' as const)
+              : ('CAMPAIGN_STATISTICS' as const),
+          fetchedAt: targetStatistics?.fetchedAt ?? new Date(0),
           freshnessMinutes: this.configuration.campaignStatisticsFreshnessMinutes,
           regimeChecksum: campaign.detailsChecksum,
           required: true,
-          sourceChecksum: statistics?.sourceChecksum ?? 'missing',
-          valid: statistics?.valid === true && this.fullstatsContractVerified(),
+          sourceChecksum: targetStatistics?.sourceChecksum ?? 'missing',
+          valid: targetStatistics?.valid === true && this.fullstatsContractVerified(),
         },
         {
           dataKind: 'SAME_DAY_SPEND' as const,

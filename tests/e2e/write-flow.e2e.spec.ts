@@ -11,6 +11,7 @@ import type { INestApplication } from '@nestjs/common';
 import { MockAppModule } from '../../apps/wb-mock/src/app.module.js';
 import {
   WbCardBidGateway,
+  WbClusterBidGateway,
   WriteExecutor,
   WritePipelineRepository,
   classifyReconciliation,
@@ -34,6 +35,9 @@ describeWithDatabase('mock HTTP to durable verified write flow', () => {
   let databaseName: string;
   let executor: WriteExecutor;
   let gateway: WbCardBidGateway;
+  let clusterDeleteExecutor: WriteExecutor;
+  let clusterGateway: WbClusterBidGateway;
+  let clusterSetExecutor: WriteExecutor;
   let pool: Pool;
   let repository: WritePipelineRepository;
   let server: Server;
@@ -71,6 +75,7 @@ describeWithDatabase('mock HTTP to durable verified write flow', () => {
       '202607281600_stage3_decision_engine',
       '202607281700_stage4_write_pipeline',
       '202607291000_stage5_production_runtime',
+      '202607291200_stage5_cluster_contract',
     ]) {
       await pool.query(
         await readFile(
@@ -85,6 +90,7 @@ describeWithDatabase('mock HTTP to durable verified write flow', () => {
       baseUrl,
       breakers: new CircuitBreakerRegistry(),
       commonBaseUrl: baseUrl,
+      contractMode: 'verified-mock',
       fetch,
       maxInFlight: 5,
       rateLimiter: new WbRateLimiter(
@@ -104,6 +110,7 @@ describeWithDatabase('mock HTTP to durable verified write flow', () => {
       writesEnabled: true,
     });
     gateway = new WbCardBidGateway(client);
+    clusterGateway = new WbClusterBidGateway(client);
     executor = new WriteExecutor(
       repository,
       gateway,
@@ -112,6 +119,36 @@ describeWithDatabase('mock HTTP to durable verified write flow', () => {
         endpointKey: 'cardBidsWrite',
         leaseSeconds: 30,
         maximumBatchSize: 50,
+        maximumWriteAttempts: 2,
+        preByteMaximumRetries: 1,
+        preWriteStateMaximumAgeMs: 10_000,
+        reconciliationDeadlineMs: 120_000,
+        visibilityDelayMs: 1,
+      },
+    );
+    clusterSetExecutor = new WriteExecutor(
+      repository,
+      clusterGateway,
+      { validate: () => Promise.resolve({ valid: true as const }) },
+      {
+        endpointKey: 'clusterWriteBids',
+        leaseSeconds: 30,
+        maximumBatchSize: 100,
+        maximumWriteAttempts: 2,
+        preByteMaximumRetries: 1,
+        preWriteStateMaximumAgeMs: 10_000,
+        reconciliationDeadlineMs: 120_000,
+        visibilityDelayMs: 1,
+      },
+    );
+    clusterDeleteExecutor = new WriteExecutor(
+      repository,
+      clusterGateway,
+      { validate: () => Promise.resolve({ valid: true as const }) },
+      {
+        endpointKey: 'clusterDeleteBids',
+        leaseSeconds: 30,
+        maximumBatchSize: 100,
         maximumWriteAttempts: 2,
         preByteMaximumRetries: 1,
         preWriteStateMaximumAgeMs: 10_000,
@@ -159,6 +196,7 @@ describeWithDatabase('mock HTTP to durable verified write flow', () => {
       desiredBidState: 'EXPLICIT',
       metricSnapshotId: '00000000-0000-4000-8000-000000000103',
       nmId: 20001n,
+      normQueryWire: null,
       placement: 'SEARCH',
       policyVersion: 1n,
       priority: 100,
@@ -219,6 +257,83 @@ describeWithDatabase('mock HTTP to durable verified write flow', () => {
       endpointKey: string;
     }[];
     expect(journal.filter((entry) => entry.endpointKey === 'cardWriteBids')).toHaveLength(2);
+  });
+
+  it('restores a bidder-owned cluster override to proven ABSENT with exact DELETE wire bid', async () => {
+    await request(server).post('/__mock/reset').expect(201);
+    const clusterTargetId = await createClusterTarget(pool, targetId);
+    const setDecisionId = await enqueueClusterDecision(
+      pool,
+      clusterTargetId,
+      'INCREASE',
+      null,
+      900n,
+    );
+    await expect(clusterSetExecutor.runOnce('e2e-cluster-set')).resolves.toBe(1);
+    const explicit = await clusterGateway.readLiveState(
+      clusterClaim(clusterTargetId, setDecisionId, 'SET', 900n),
+    );
+    expect(explicit).toMatchObject({ bidMinor: 900n, explicit: true });
+    await reconcileCluster(pool, repository, clusterTargetId, setDecisionId, explicit, {
+      bidMinor: null,
+      explicit: false,
+    });
+    const owned = await pool.query<{ clusterOverrideOwned: boolean }>(
+      `SELECT "clusterOverrideOwned" FROM "CampaignTarget" WHERE "id" = $1`,
+      [clusterTargetId],
+    );
+    expect(owned.rows[0]?.clusterOverrideOwned).toBe(true);
+
+    const deleteDecisionId = await enqueueClusterDecision(
+      pool,
+      clusterTargetId,
+      'RESTORE_ABSENT_OVERRIDE',
+      900n,
+      null,
+    );
+    await expect(clusterDeleteExecutor.runOnce('e2e-cluster-delete')).resolves.toBe(1);
+    const absent = await clusterGateway.readLiveState(
+      clusterClaim(clusterTargetId, deleteDecisionId, 'DELETE', null),
+    );
+    expect(absent).toMatchObject({ bidMinor: null, explicit: false });
+    await reconcileCluster(pool, repository, clusterTargetId, deleteDecisionId, absent, {
+      bidMinor: 900n,
+      explicit: true,
+    });
+
+    const audit = await pool.query<{
+      desiredBidState: string;
+      sentBidMinor: string | null;
+      status: string;
+      wireBidRaw: string;
+    }>(
+      `SELECT item."desiredBidState"::text, item."sentBidMinor", item."wireBidRaw",
+              queue."status"::text
+         FROM "WbWriteAttemptItem" item
+         JOIN "DecisionQueueItem" queue ON queue."decisionId" = item."decisionId"
+        WHERE item."decisionId" = $1`,
+      [deleteDecisionId],
+    );
+    expect(audit.rows[0]).toEqual({
+      desiredBidState: 'ABSENT',
+      sentBidMinor: null,
+      status: 'APPLIED',
+      wireBidRaw: '900',
+    });
+    const restored = await pool.query<{
+      clusterBidState: string;
+      clusterOverrideOwned: boolean;
+      currentBidMinor: string | null;
+    }>(
+      `SELECT "clusterBidState"::text, "clusterOverrideOwned", "currentBidMinor"
+         FROM "CampaignTarget" WHERE "id" = $1`,
+      [clusterTargetId],
+    );
+    expect(restored.rows[0]).toEqual({
+      clusterBidState: 'ABSENT',
+      clusterOverrideOwned: false,
+      currentBidMinor: null,
+    });
   });
 });
 
@@ -317,4 +432,145 @@ async function enqueueDecision(
 
 function hexChecksum(value: string): string {
   return Buffer.from(value).toString('hex').padEnd(64, '0').slice(0, 64);
+}
+
+async function createClusterTarget(pool: Pool, cardTargetId: string): Promise<string> {
+  const targetId = randomUUID();
+  const source = await pool.query<{ campaignId: string }>(
+    `SELECT "campaignId" FROM "CampaignTarget" WHERE "id" = $1`,
+    [cardTargetId],
+  );
+  const campaignId = source.rows[0]?.campaignId;
+  if (campaignId === undefined) throw new Error('Card fixture campaign missing.');
+  await pool.query(
+    `INSERT INTO "CampaignTarget"
+       ("id", "campaignId", "nmId", "targetKind", "placement", "normQueryWire",
+        "normQueryCanonical", "currentBidMinor", "minimumBidMinor", "clusterBidState",
+        "clusterBidContractVersion", "clusterBaselineBidState", "clusterBaselineChecksum",
+        "clusterOverrideOwned", "capability")
+     VALUES ($1, $2, 20001, 'CLUSTER', 'SEARCH', 'synthetic cluster two',
+             'synthetic cluster two', NULL, 500, 'ABSENT',
+             'mock-cluster-bid-minor-absence-delete-v1', 'ABSENT', $3, false,
+             'CLUSTER_WRITE_READY')`,
+    [targetId, campaignId, 'a'.repeat(64)],
+  );
+  return targetId;
+}
+
+async function enqueueClusterDecision(
+  pool: Pool,
+  targetId: string,
+  action: 'INCREASE' | 'RESTORE_ABSENT_OVERRIDE',
+  currentBidMinor: bigint | null,
+  boundedBidMinor: bigint | null,
+): Promise<string> {
+  const reference = await pool.query<{ economicsId: string; policyId: string }>(
+    `SELECT economics."id" AS "economicsId", policy."id" AS "policyId"
+       FROM "ProductEconomics" economics
+       JOIN "BiddingPolicy" policy ON policy."targetId" IS NOT NULL
+      WHERE economics."nmId" = 20001
+      ORDER BY economics."version" DESC
+      LIMIT 1`,
+  );
+  const row = reference.rows[0];
+  if (row === undefined) throw new Error('Cluster decision references missing.');
+  const metricId = randomUUID();
+  const decisionId = randomUUID();
+  await pool.query(
+    `INSERT INTO "MetricSnapshot"
+       ("id", "targetId", "productEconomicsId", "productEconomicsVersion",
+        "expectedContributionBeforeAdsMinor", "policyId", "periodStart", "periodEnd",
+        "metrics", "candidateEstimates", "completenessFlags", "inputSnapshotChecksum",
+        "inputSnapshotSchema", "algorithmVersion", "calculatedAt")
+     VALUES ($1, $2, $3, 1, 5000, $4, CURRENT_DATE - 1, CURRENT_DATE,
+             '{}'::jsonb, '{}'::jsonb, ARRAY[]::text[], $5,
+             'input-snapshot-v1', 'rules-v1', NOW())`,
+    [metricId, targetId, row.economicsId, row.policyId, hexChecksum(`metric-${decisionId}`)],
+  );
+  await pool.query(
+    `INSERT INTO "BidDecision"
+       ("id", "targetId", "action", "currentBidMinor", "proposedBidMinor", "boundedBidMinor",
+        "strategyReasonCode", "outcomeReasonCode", "guardrailCodes", "explanation",
+        "metricSnapshotId", "policyVersion", "algorithmVersion", "decisionInputChecksum")
+     VALUES ($1, $2, $3::"DecisionAction", $4, $5, $5, 'CLUSTER_E2E',
+             'CLUSTER_E2E', ARRAY[]::text[], '{}'::jsonb, $6, 1, 'rules-v1', $7)`,
+    [
+      decisionId,
+      targetId,
+      action,
+      currentBidMinor?.toString() ?? null,
+      boundedBidMinor?.toString() ?? null,
+      metricId,
+      hexChecksum(`decision-${decisionId}`),
+    ],
+  );
+  await pool.query(
+    `INSERT INTO "DecisionQueueItem"
+       ("id", "decisionId", "status", "priority", "availableAt")
+     VALUES ($1, $2, 'QUEUED', 100, NOW())`,
+    [randomUUID(), decisionId],
+  );
+  return decisionId;
+}
+
+function clusterClaim(
+  targetId: string,
+  decisionId: string,
+  action: 'DELETE' | 'SET',
+  bidMinor: bigint | null,
+) {
+  return {
+    action,
+    attemptCount: 1,
+    bidMinor,
+    campaignBidType: 'MANUAL' as const,
+    campaignId: '00000000-0000-4000-8000-000000000101',
+    campaignPaymentType: 'CPM' as const,
+    decisionId,
+    desiredBidState: action === 'DELETE' ? ('ABSENT' as const) : ('EXPLICIT' as const),
+    metricSnapshotId: '',
+    nmId: 20001n,
+    normQueryWire: 'synthetic cluster two',
+    placement: 'SEARCH' as const,
+    policyVersion: 1n,
+    priority: 100,
+    queueItemId: '',
+    targetId,
+    targetKind: 'CLUSTER' as const,
+    wbCampaignId: 10001n,
+  };
+}
+
+async function reconcileCluster(
+  pool: Pool,
+  repository: WritePipelineRepository,
+  targetId: string,
+  decisionId: string,
+  live: Awaited<ReturnType<WbClusterBidGateway['readLiveState']>>,
+  oldState: { readonly bidMinor: bigint | null; readonly explicit: boolean },
+): Promise<void> {
+  const attempt = await pool.query<{ attemptItemId: string }>(
+    `SELECT "id" AS "attemptItemId" FROM "WbWriteAttemptItem"
+      WHERE "decisionId" = $1 ORDER BY "attemptNumber" DESC LIMIT 1`,
+    [decisionId],
+  );
+  await expect(
+    repository.recordReconciliation({
+      attemptItemId: attempt.rows[0]?.attemptItemId ?? '',
+      decisionId,
+      maximumWriteAttempts: 2,
+      minimumReadIntervalMs: 10,
+      observation: {
+        classification: classifyReconciliation(live, { ...live, ...oldState }, live),
+        fresh: true,
+        prevalidationPassed: true,
+        sourceMarker: live.sourceMarker,
+        state: live,
+        stateChecksum: stateChecksum(live),
+      },
+      observedAt: live.observedAt,
+      requiredStableReadCount: 2,
+      targetId,
+    }),
+  ).resolves.toBe('APPLIED');
 }

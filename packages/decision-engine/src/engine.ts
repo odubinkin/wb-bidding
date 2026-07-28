@@ -238,6 +238,9 @@ function collectUnconditionalBlockers(input: DecisionInput): readonly string[] {
   if (input.capability === 'UNSUPPORTED') {
     blockers.add('UNSUPPORTED_CAMPAIGN');
   }
+  if (input.targetKey.targetKind === 'CLUSTER' && input.paymentType !== 'CPM') {
+    blockers.add('UNSUPPORTED_CAMPAIGN');
+  }
   if (input.targetKey.targetKind === 'CLUSTER' && input.capability !== 'CLUSTER_WRITE_READY') {
     blockers.add('UNVERIFIED_CLUSTER_BID_CONTRACT');
   }
