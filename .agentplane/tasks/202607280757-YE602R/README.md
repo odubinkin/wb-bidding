@@ -4,7 +4,7 @@ title: "Document every Decision Engine reason code"
 status: "DOING"
 priority: "med"
 owner: "DOCS"
-revision: 23
+revision: 25
 origin:
   system: "manual"
 depends_on: []
@@ -18,21 +18,29 @@ plan_approval:
   note: "User explicitly re-approved scope expansion to sections 9.5 and 9.10 and the documented MAX_PROFIT_CURRENT_BID versus NO_PROFIT_IMPROVEMENT precedence."
 verification:
   state: "ok"
-  updated_at: "2026-07-28T09:07:24.754Z"
+  updated_at: "2026-07-28T09:15:46.505Z"
   updated_by: "CODER"
-  note: "Evaluator correction applied: permitted section 9.7 exploration now bypasses the early insufficient bid-response return; all six Verify Steps pass on ap 0.6.24."
+  note: "Documented all 21 Decision Engine reason codes and clarified deterministic reason precedence with exploration handling."
   attempts: 0
 quality_review:
-  state: "rework"
-  updated_at: "2026-07-28T09:03:34.345Z"
+  state: "pass"
+  updated_at: "2026-07-28T09:15:27.465Z"
   updated_by: "EVALUATOR"
-  note: "Section 9.5 precedence is aligned, but the early insufficient-data return blocks the permitted exploration path."
-  evaluated_sha: "ecf7594a28e10b2a3ca1706145ae5f7c6bc56e4e"
+  note: "Reason-code semantics are complete and consistent across sections 9.5 and 9.10; all quality checks pass."
+  evaluated_sha: "eee7ca3ed580ae09977e57e20e5411e394ad8d0f"
   blueprint_digest: "95737304c5426e9c2a1b098c916ea942bdbbcb42a1f72cf1df22cb8a1ecb22d2"
   evidence_refs:
     - ".agentplane/tasks/202607280757-YE602R/README.md"
-    - "/Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607280757-YE602R/blueprint/resolved-snapshot.json"
-  findings: []
+    - ".agentplane/tasks/202607280757-YE602R/quality/20260728-091527465-recovery-context/quality-report.json"
+    - ".agentplane/tasks/202607280757-YE602R/quality/20260728-091527465-recovery-context/evaluator-prompt.md"
+    - ".agentplane/tasks/202607280757-YE602R/quality/20260728-091527465-recovery-context/evaluator-opinion.md"
+    - ".agentplane/tasks/202607280757-YE602R/blueprint/resolved-snapshot.json"
+    - "docs/technical-specification.md:639"
+    - "docs/technical-specification.md:717"
+    - ".agentplane/tasks/202607280757-YE602R/quality/20260728-091354645-recovery-context/quality-report.json"
+    - "git diff --check; node .agentplane/policy/check-routing.mjs; ap doctor"
+  findings:
+    - "MAX_PROFIT_CURRENT_BID and NO_PROFIT_IMPROVEMENT are mutually exclusive, permitted exploration bypasses the early insufficient bid-response return, and all 21 enum values retain unique documented semantics."
 commit: null
 comments:
   -
@@ -94,8 +102,14 @@ events:
     author: "CODER"
     state: "ok"
     note: "Evaluator correction applied: permitted section 9.7 exploration now bypasses the early insufficient bid-response return; all six Verify Steps pass on ap 0.6.24."
+  -
+    type: "verify"
+    at: "2026-07-28T09:15:46.505Z"
+    author: "CODER"
+    state: "ok"
+    note: "Documented all 21 Decision Engine reason codes and clarified deterministic reason precedence with exploration handling."
 doc_version: 3
-doc_updated_at: "2026-07-28T09:07:24.851Z"
+doc_updated_at: "2026-07-28T09:15:46.596Z"
 doc_updated_by: "DOCS"
 description: "Expand section 9.10 of docs/technical-specification.md so all 21 decision reason enum values have precise per-value explanations, expected action/result, and unambiguous distinctions consistent with sections 7-9."
 sections:
@@ -562,6 +576,36 @@ sections:
     - repeat_allowed: true
     - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
     - risks: none
+
+    ### 2026-07-28T09:15:46.505Z — VERIFY — ok
+
+    By: CODER
+
+    Note: Documented all 21 Decision Engine reason codes and clarified deterministic reason precedence with exploration handling.
+    Attempts: 0
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-28T09:07:24.851Z, excerpt_hash=sha256:c937cbf57bdfa786687cd5168298bc747208e7fdbf875cd6192a8bbfb638fc5d
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607280757-YE602R/blueprint/resolved-snapshot.json
+    - old_digest: 95737304c5426e9c2a1b098c916ea942bdbbcb42a1f72cf1df22cb8a1ecb22d2
+    - current_digest: 95737304c5426e9c2a1b098c916ea942bdbbcb42a1f72cf1df22cb8a1ecb22d2
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202607280757-YE602R
+
+    DecisionContextRef:
+    - operator_action: stop
+    - can_execute_now: false
+    - safe_command: none
+    - diagnostic_command: agentplane task next-action 202607280757-YE602R --explain
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: false
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: unsafe_shell_chain_route
 
     <!-- END VERIFICATION RESULTS -->
   Rollback Plan: "Revert only the task-specific section 9.10 documentation change in docs/technical-specification.md, restoring the prior bare enum list. Do not revert unrelated user changes. Re-run the required docs checks after rollback."
@@ -1058,6 +1102,36 @@ DecisionContextRef:
 - repeat_allowed: true
 - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
 - risks: none
+
+### 2026-07-28T09:15:46.505Z — VERIFY — ok
+
+By: CODER
+
+Note: Documented all 21 Decision Engine reason codes and clarified deterministic reason precedence with exploration handling.
+Attempts: 0
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-28T09:07:24.851Z, excerpt_hash=sha256:c937cbf57bdfa786687cd5168298bc747208e7fdbf875cd6192a8bbfb638fc5d
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607280757-YE602R/blueprint/resolved-snapshot.json
+- old_digest: 95737304c5426e9c2a1b098c916ea942bdbbcb42a1f72cf1df22cb8a1ecb22d2
+- current_digest: 95737304c5426e9c2a1b098c916ea942bdbbcb42a1f72cf1df22cb8a1ecb22d2
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202607280757-YE602R
+
+DecisionContextRef:
+- operator_action: stop
+- can_execute_now: false
+- safe_command: none
+- diagnostic_command: agentplane task next-action 202607280757-YE602R --explain
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: false
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: unsafe_shell_chain_route
 
 <!-- END VERIFICATION RESULTS -->
 

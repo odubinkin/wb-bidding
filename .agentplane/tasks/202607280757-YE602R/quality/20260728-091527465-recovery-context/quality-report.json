@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "task_id": "202607280757-YE602R",
+  "evaluator_id": "recovery-context",
+  "evaluator_profile": "EVALUATOR",
+  "generated_at": "2026-07-28T09:15:27.465Z",
+  "verdict": "pass",
+  "summary": "Reason-code semantics are complete and consistent across sections 9.5 and 9.10; all quality checks pass.",
+  "evaluated_sha": "eee7ca3ed580ae09977e57e20e5411e394ad8d0f",
+  "blueprint_digest": "95737304c5426e9c2a1b098c916ea942bdbbcb42a1f72cf1df22cb8a1ecb22d2",
+  "findings": [
+    "MAX_PROFIT_CURRENT_BID and NO_PROFIT_IMPROVEMENT are mutually exclusive, permitted exploration bypasses the early insufficient bid-response return, and all 21 enum values retain unique documented semantics."
+  ],
+  "evidence_refs": [
+    ".agentplane/tasks/202607280757-YE602R/README.md",
+    "docs/technical-specification.md:639",
+    "docs/technical-specification.md:717",
+    ".agentplane/tasks/202607280757-YE602R/quality/20260728-091354645-recovery-context/quality-report.json",
+    "git diff --check; node .agentplane/policy/check-routing.mjs; ap doctor"
+  ],
+  "missing_tests": [],
+  "hidden_assumptions": [],
+  "residual_risks": [
+    "No known semantic blocker remains; implementation must follow the documented precedence."
+  ]
+}
