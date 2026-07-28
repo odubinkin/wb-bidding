@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "task_id": "202607280628-MEEK6T",
+  "evaluator_id": "recovery-context",
+  "evaluator_profile": "EVALUATOR",
+  "generated_at": "2026-07-28T06:32:57.247Z",
+  "provenance": "evaluator_supplied",
+  "verdict": "pass",
+  "summary": "The specification consistently limits durable WB request records to outbound write attempts while preserving operational observability for reads.",
+  "evaluated_sha": "8145854af1dad6b9fc175bad2a7a5309280429d2",
+  "blueprint_digest": "26bb1815e094ca94211d181e62d27d66152880feffc6c4eb3071b6a85c305449",
+  "findings": [
+    "WbWriteAttempt has a clear decision link, attempt identity, transport and reconciliation states, redacted digests, safe retry behavior, and bounded terminal retention; related execution, logging, audit, testing, implementation, and production-decision sections are aligned without retaining ordinary read calls in PostgreSQL."
+  ],
+  "evidence_refs": [
+    ".agentplane/tasks/202607280628-MEEK6T/README.md",
+    "docs/technical-specification.md"
+  ],
+  "missing_tests": [],
+  "hidden_assumptions": [],
+  "residual_risks": []
+}
