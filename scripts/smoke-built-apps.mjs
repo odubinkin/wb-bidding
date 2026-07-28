@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 const repositoryRoot = new URL('../', import.meta.url);
 const bidderPort = 31_90;
 const mockPort = 31_91;
+const adminServiceToken = 'test-admin-token-with-32-characters';
 
 const mock = spawn('node', ['apps/wb-mock/dist/main.js'], {
   cwd: repositoryRoot,
@@ -22,7 +23,7 @@ const bidder = spawn('node', ['apps/bidder/dist/main.js'], {
     ...process.env,
     ACCOUNT_CURRENCY: 'RUB',
     ACCOUNT_TIMEZONE: 'Europe/Moscow',
-    ADMIN_API_SERVICE_TOKEN: 'test-admin-token-with-32-characters',
+    ADMIN_API_SERVICE_TOKEN: adminServiceToken,
     DATABASE_URL: 'postgresql://user:password@localhost:5432/database',
     METRICS_ENABLED: 'true',
     PORT: String(bidderPort),
@@ -51,13 +52,14 @@ for (const child of [mock, bidder]) {
  * Polls one local endpoint until it succeeds or its bounded deadline expires.
  *
  * @param {string} url - Synthetic local endpoint.
+ * @param {RequestInit} [init] - Optional local request options.
  * @returns {Promise<Response>} Successful HTTP response.
  */
-async function waitForResponse(url) {
+async function waitForResponse(url, init) {
   const deadline = Date.now() + 10_000;
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(url);
+      const response = await fetch(url, init);
       if (response.ok) {
         return response;
       }
@@ -75,7 +77,9 @@ try {
   const [bidderReady, bidderInfo, bidderDocs, mockLive, mockState, mockDocs] = await Promise.all([
     waitForResponse(`http://127.0.0.1:${bidderPort}/health/ready`),
     waitForResponse(`http://127.0.0.1:${bidderPort}/api/v1/service-info`),
-    waitForResponse(`http://127.0.0.1:${bidderPort}/docs-json`),
+    waitForResponse(`http://127.0.0.1:${bidderPort}/docs-json`, {
+      headers: { Authorization: `Bearer ${adminServiceToken}` },
+    }),
     waitForResponse(`http://127.0.0.1:${mockPort}/health/live`),
     waitForResponse(`http://127.0.0.1:${mockPort}/__mock/state`),
     waitForResponse(`http://127.0.0.1:${mockPort}/docs-json`),

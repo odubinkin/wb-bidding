@@ -97,12 +97,16 @@ export default defineConfig({
       '@wb-bidder/decision-engine': fileURLToPath(
         new URL('./packages/decision-engine/src/index.ts', import.meta.url),
       ),
+      '@wb-bidder/write-pipeline': fileURLToPath(
+        new URL('./packages/write-pipeline/src/index.ts', import.meta.url),
+      ),
       '@wb-bidder/wb-api': fileURLToPath(
         new URL('./packages/wb-api/src/index.ts', import.meta.url),
       ),
     },
   },
   test: {
+    fileParallelism: false,
     coverage: {
       exclude: ['**/main.ts', '**/*.module.ts', '**/*.spec.ts', '**/generated/**', '**/prisma/**'],
       include: [

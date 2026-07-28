@@ -74,5 +74,6 @@ corepack pnpm install --frozen-lockfile
 pnpm run quality
 ```
 
-Настройки приведены в `.env.example`. Не помещайте реальные WB/Admin токены в git, команды,
+Настройки приведены в `.env.example` и подробно описаны в
+[`docs/configuration.md`](docs/configuration.md). Не помещайте реальные WB/Admin токены в git, команды,
 скриншоты, Swagger examples или логи.

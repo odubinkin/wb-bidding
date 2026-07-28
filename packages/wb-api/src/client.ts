@@ -25,11 +25,12 @@ import {
   type MinimumBidsRequest,
   type MinimumBidsResponse,
 } from './schemas.js';
-import { endpointDefinition } from './endpoint-registry.js';
+import { endpointDefinition, type WbEndpointDefinition } from './endpoint-registry.js';
 import {
   WbApiError,
   classifyHttpFailure,
   withBoundedRetry,
+  type CircuitBreaker,
   type CircuitBreakerRegistry,
   type RetryPolicy,
 } from './resilience.js';
@@ -67,6 +68,14 @@ export interface WbClientConfiguration {
   readonly token: string;
   /** Effective integration write gate. */
   readonly writesEnabled: boolean;
+}
+
+/**
+ * One already-admitted card-write slot. A reservation is single-use and must be released.
+ */
+export interface ReservedCardBidWrite {
+  dispatch(request: CardWriteBids): Promise<CardWriteBids>;
+  release(): void;
 }
 
 /**
@@ -152,6 +161,53 @@ export class WbApiClient {
    */
   public async writeCardBids(request: CardWriteBids): Promise<CardWriteBids> {
     return this.write('cardWriteBids', cardWriteBidsSchema, cardWriteBidsSchema.parse(request));
+  }
+
+  /**
+   * Waits for write quota and an in-flight slot before the caller performs its final live read
+   * freshness check and durable DISPATCHING commit.
+   *
+   * @returns Single-use admission whose dispatch does not wait on the limiter again.
+   */
+  public async reserveCardBidWrite(): Promise<ReservedCardBidWrite> {
+    this.assertOperationAllowed('cardWriteBids', true, false);
+    await this.configuration.rateLimiter.acquire('cardWriteBids');
+    const releaseSemaphore = await this.semaphore.acquire();
+    let active = true;
+    /** Releases an unused reservation. */
+    const release = (): void => {
+      if (!active) return;
+      active = false;
+      releaseSemaphore();
+    };
+    return Object.freeze({
+      /**
+       * Dispatches exactly once using the admitted slot.
+       *
+       * @param request - Validated card-bid request.
+       * @returns Validated WB echo.
+       */
+      dispatch: async (request: CardWriteBids): Promise<CardWriteBids> => {
+        if (!active) {
+          throw new WbApiError('CONTRACT', 'WB write admission was already consumed', null, false);
+        }
+        active = false;
+        try {
+          return await this.request(
+            'cardWriteBids',
+            cardWriteBidsSchema,
+            undefined,
+            cardWriteBidsSchema.parse(request),
+            true,
+            false,
+            true,
+          );
+        } finally {
+          releaseSemaphore();
+        }
+      },
+      release,
+    });
   }
 
   /**
@@ -389,6 +445,7 @@ export class WbApiClient {
    * @param body - Optional validated body.
    * @param write - Whether dispatch can mutate remote state.
    * @param allowUnverifiedRead - Explicit observational access.
+   * @param admitted - Whether limiter and semaphore admission were reserved by the caller.
    * @returns Validated response.
    */
   private async request<T>(
@@ -398,32 +455,17 @@ export class WbApiClient {
     body: unknown,
     write: boolean,
     allowUnverifiedRead: boolean,
+    admitted = false,
   ): Promise<T> {
-    const definition = endpointDefinition(endpointKey);
-    if (definition.status !== 'VERIFIED' && !(allowUnverifiedRead && !definition.isWrite)) {
-      throw new WbApiError(
-        'CONTRACT',
-        `WB endpoint contract is ${definition.status}: ${endpointKey}`,
-        null,
-        false,
-      );
+    const { breaker, definition } = this.assertOperationAllowed(
+      endpointKey,
+      write,
+      allowUnverifiedRead,
+    );
+    if (!admitted) {
+      await this.configuration.rateLimiter.acquire(endpointKey);
     }
-    if (write !== definition.isWrite) {
-      throw new WbApiError(
-        'CONTRACT',
-        'Adapter operation kind does not match endpoint',
-        null,
-        false,
-      );
-    }
-    if (write && !this.configuration.writesEnabled) {
-      throw new WbApiError('CAPABILITY', 'WB write gate is closed', null, false);
-    }
-
-    const breaker = this.configuration.breakers.forGroup(definition.group);
-    breaker.assertRequestAllowed();
-    await this.configuration.rateLimiter.acquire(endpointKey);
-    const release = await this.semaphore.acquire();
+    const release = admitted ? undefined : await this.semaphore.acquire();
     try {
       const baseUrl =
         endpointKey === 'sellerInfo'
@@ -521,8 +563,46 @@ export class WbApiClient {
       breaker.recordSuccess();
       return parsed.data;
     } finally {
-      release();
+      release?.();
     }
+  }
+
+  /**
+   * Validates endpoint contract, operation kind, write gate, and circuit state.
+   *
+   * @param endpointKey - Endpoint registry key.
+   * @param write - Whether the requested operation mutates WB state.
+   * @param allowUnverifiedRead - Whether an observational unverified read is explicitly allowed.
+   * @returns Validated endpoint and its breaker.
+   */
+  private assertOperationAllowed(
+    endpointKey: EndpointKey,
+    write: boolean,
+    allowUnverifiedRead: boolean,
+  ): { readonly breaker: CircuitBreaker; readonly definition: WbEndpointDefinition } {
+    const definition = endpointDefinition(endpointKey);
+    if (definition.status !== 'VERIFIED' && !(allowUnverifiedRead && !definition.isWrite)) {
+      throw new WbApiError(
+        'CONTRACT',
+        `WB endpoint contract is ${definition.status}: ${endpointKey}`,
+        null,
+        false,
+      );
+    }
+    if (write !== definition.isWrite) {
+      throw new WbApiError(
+        'CONTRACT',
+        'Adapter operation kind does not match endpoint',
+        null,
+        false,
+      );
+    }
+    if (write && !this.configuration.writesEnabled) {
+      throw new WbApiError('CAPABILITY', 'WB write gate is closed', null, false);
+    }
+    const breaker = this.configuration.breakers.forGroup(definition.group);
+    breaker.assertRequestAllowed();
+    return { breaker, definition };
   }
 }
 

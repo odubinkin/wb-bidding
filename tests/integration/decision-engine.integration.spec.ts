@@ -99,6 +99,38 @@ describeWithDatabase('Decision Engine PostgreSQL invariants', () => {
       source: 'MANUAL',
     });
     expect(second.version).toBe(2n);
+    const finite = await repository.createEconomicsVersion({
+      actor: 'ADMIN:test',
+      contributionMinor: 700n,
+      correlationId,
+      effectiveFrom: new Date('2026-02-01T00:00:00.000Z'),
+      effectiveTo: new Date('2026-03-01T00:00:00.000Z'),
+      expectedCurrentVersion: 0n,
+      mutationKey: `economics-${correlationId}-finite`,
+      nmId: 126n,
+      source: 'MANUAL',
+    });
+    expect(
+      (
+        await pool.query<{ effectiveTo: Date | null }>(
+          `SELECT "effectiveTo" FROM "ProductEconomics" WHERE "id" = $1`,
+          [finite.id],
+        )
+      ).rows[0]?.effectiveTo?.toISOString(),
+    ).toBe('2026-03-01T00:00:00.000Z');
+    await expect(
+      repository.createEconomicsVersion({
+        actor: 'ADMIN:test',
+        contributionMinor: 600n,
+        correlationId,
+        effectiveFrom: new Date('2026-04-01T00:00:00.000Z'),
+        effectiveTo: new Date('2026-04-01T00:00:00.000Z'),
+        expectedCurrentVersion: 0n,
+        mutationKey: `economics-${correlationId}-invalid-period`,
+        nmId: 125n,
+        source: 'MANUAL',
+      }),
+    ).rejects.toThrow('INVALID_PRODUCT_ECONOMICS');
     await expect(
       repository.createEconomicsVersion({
         actor: 'ADMIN:test',

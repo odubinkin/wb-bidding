@@ -274,6 +274,27 @@ describe('WB errors, retries and breaker', () => {
         ],
       }),
     ).rejects.toMatchObject({ code: 'TRANSPORT_PRE_BYTE' });
+    const reserved = await client.reserveCardBidWrite();
+    await expect(
+      reserved.dispatch({
+        bids: [
+          {
+            advert_id: 1,
+            nm_bids: [{ bid_kopecks: 100, nm_id: 1, placement: 'search' }],
+          },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: 'TRANSPORT_PRE_BYTE' });
+    await expect(
+      reserved.dispatch({
+        bids: [
+          {
+            advert_id: 1,
+            nm_bids: [{ bid_kopecks: 100, nm_id: 1, placement: 'search' }],
+          },
+        ],
+      }),
+    ).rejects.toThrow('already consumed');
 
     const redirectingClient = new WbApiClient({
       baseUrl: new URL('http://wb-mock:3001'),

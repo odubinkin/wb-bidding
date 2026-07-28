@@ -29,9 +29,18 @@ describe('loadConfiguration', () => {
       currentBidFreshnessMinutes: 20,
       currentBidTargetSlaMinutes: 20,
       currentStateCron: '5 */15 * * * *',
-      currentStateDeadlineMinutes: 10,
+      currentStateDeadlineMs: 600_000,
       minimumBidTargetSlaMinutes: 720,
       pageSize: 500,
+    });
+    expect(configuration.writePipeline).toMatchObject({
+      campaignApplyCron: '*/10 * * * * *',
+      decisionCron: '45 */30 * * * *',
+      maximumWriteAttempts: 2,
+      reconciliationCron: '15 * * * * *',
+      stableOldStateReads: 2,
+      stableReadIntervalMs: 30_000,
+      verificationInitialDelayMs: 30_000,
     });
     expect(Object.isFrozen(configuration)).toBe(true);
     expect(Object.isFrozen(configuration.wb)).toBe(true);
@@ -168,7 +177,7 @@ describe('loadConfiguration', () => {
     expect(() =>
       loadConfiguration({
         ...BASE_ENVIRONMENT,
-        CURRENT_STATE_SYNC_RUN_DEADLINE_MINUTES: '15',
+        CURRENT_STATE_SYNC_RUN_DEADLINE_MS: '900000',
       }),
     ).toThrow('must be less than the cron interval');
     expect(() =>
@@ -207,6 +216,37 @@ describe('loadConfiguration', () => {
         WB_API_RATE_LIMITS_JSON: '[]',
       }),
     ).toThrow('must be a JSON object');
+  });
+
+  it('rejects unsafe retry, visibility, reconciliation, and retention windows', () => {
+    expect(() =>
+      loadConfiguration({
+        ...BASE_ENVIRONMENT,
+        WB_READ_RETRY_BASE_MS: '5001',
+        WB_READ_RETRY_CAP_MS: '5000',
+      }),
+    ).toThrow('WB_READ_RETRY_BASE_MS must not exceed WB_READ_RETRY_CAP_MS');
+    expect(() =>
+      loadConfiguration({
+        ...BASE_ENVIRONMENT,
+        BID_VERIFICATION_INITIAL_DELAY_MS: '600000',
+      }),
+    ).toThrow('must be less than BID_VERIFICATION_TIMEOUT_MS');
+    expect(() =>
+      loadConfiguration({
+        ...BASE_ENVIRONMENT,
+        BID_VERIFICATION_TIMEOUT_MS: '60000',
+        RECONCILIATION_STABLE_OLD_STATE_READS: '3',
+        RECONCILIATION_STABLE_READ_INTERVAL_MS: '30000',
+      }),
+    ).toThrow('must include the stable-read reconciliation window');
+    expect(() =>
+      loadConfiguration({
+        ...BASE_ENVIRONMENT,
+        BID_VERIFICATION_TIMEOUT_MS: '86400000',
+        WB_WRITE_ATTEMPT_RETENTION_DAYS: '1',
+      }),
+    ).toThrow('must exceed the verification/reconciliation window');
   });
 });
 

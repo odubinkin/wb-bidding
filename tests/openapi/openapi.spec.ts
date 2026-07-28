@@ -41,9 +41,29 @@ describe('generated OpenAPI contracts', () => {
 
     expect(document.openapi).toMatch(/^3\./u);
     expect(Object.keys(document.paths)).toEqual(
-      expect.arrayContaining(['/api/v1/service-info', '/health/live', '/health/ready', '/metrics']),
+      expect.arrayContaining([
+        '/api/v1/service-info',
+        '/api/v1/product-economics/{nmId}',
+        '/api/v1/product-economics/imports',
+        '/api/v1/policies',
+        '/api/v1/policy-assignments/{scopeType}/{scopeId}',
+        '/api/v1/automation/global-kill',
+        '/api/v1/jobs/resync',
+        '/api/v1/decisions/{decisionId}',
+        '/api/v1/queue/failures/{decisionId}/retry',
+        '/api/v1/audit-events',
+        '/health/live',
+        '/health/ready',
+        '/metrics',
+      ]),
     );
     expect(document.components?.securitySchemes).toHaveProperty('admin-service-token');
+    const retryOperation = document.paths['/api/v1/queue/failures/{decisionId}/retry']?.post as
+      Record<string, unknown> | undefined;
+    expect(retryOperation?.['x-required-permission']).toBe('queue:retry');
+    expect(document.paths['/api/v1/product-economics/{nmId}']?.put?.security).toContainEqual({
+      'admin-service-token': [],
+    });
     expect(serialized).not.toContain('mock-test-token');
     expect(serialized).not.toContain('test-admin-token');
   });

@@ -22,6 +22,10 @@ export interface AppConfiguration {
   readonly adminApiServiceToken: string;
   /** PostgreSQL connection string. */
   readonly databaseUrl: string;
+  /** Structured logger level. */
+  readonly logLevel: 'debug' | 'error' | 'fatal' | 'info' | 'silent' | 'trace' | 'warn';
+  /** Production log serialization format. */
+  readonly logFormat: 'json';
   /** Whether Prometheus metrics are exposed. */
   readonly metricsEnabled: boolean;
   /** HTTP port for the selected application. */
@@ -33,7 +37,7 @@ export interface AppConfiguration {
     /** Current-state six-field cron. */
     readonly currentStateCron: string;
     /** Maximum wall time for one current-state run. */
-    readonly currentStateDeadlineMinutes: number;
+    readonly currentStateDeadlineMs: number;
     /** Maximum current-bid observation age. */
     readonly currentBidFreshnessMinutes: number;
     /** Maximum full-pass SLA for current-bid observations. */
@@ -57,6 +61,22 @@ export interface AppConfiguration {
     /** Operator guarantee governing external bid provenance. */
     readonly externalWriteControlMode: 'EXCLUSIVE' | 'SHARED';
   };
+  /** Write execution, verification, reconciliation, and retention controls. */
+  readonly writePipeline: {
+    readonly decisionCron: string;
+    readonly campaignApplyCron: string;
+    readonly verificationPollIntervalMs: number;
+    readonly reconciliationCron: string;
+    readonly verificationInitialDelayMs: number;
+    readonly verificationTimeoutMs: number;
+    readonly stableOldStateReads: number;
+    readonly stableReadIntervalMs: number;
+    readonly maximumWriteAttempts: number;
+    readonly preByteMaximumRetries: number;
+    readonly preWriteStateMaximumAgeMs: number;
+    readonly maximumDecisionAgeMinutes: number;
+    readonly attemptRetentionDays: number;
+  };
   /** Validated WB integration settings. */
   readonly wb: {
     /** Base URL selected for the current mode. */
@@ -73,6 +93,12 @@ export interface AppConfiguration {
     readonly globalRateLimitRequests: number;
     /** Maximum simultaneous WB HTTP calls. */
     readonly maxInFlight: number;
+    /** Maximum transport attempts for ordinary reads. */
+    readonly readMaximumAttempts: number;
+    /** Initial ordinary-read retry delay. */
+    readonly readRetryBaseMs: number;
+    /** Maximum ordinary-read retry delay. */
+    readonly readRetryCapMs: number;
     /** Integration mode. */
     readonly mode: WbApiMode;
     /** Operator endpoint override JSON, checked again against the embedded profile. */
@@ -83,6 +109,10 @@ export interface AppConfiguration {
     readonly token: string;
     /** Expected decoded token type. */
     readonly tokenType: WbTokenType;
+    /** Advance warning window for token expiry. */
+    readonly tokenExpiryWarningDays: number;
+    /** Maximum transport attempts in one verification poll. */
+    readonly verificationHttpMaximumAttempts: number;
     /** Effective write gate after all startup invariants. */
     readonly writesEnabled: boolean;
   };
@@ -132,6 +162,8 @@ const rawSchema = z.object({
   DATABASE_URL: z
     .url()
     .refine((value) => ['postgres:', 'postgresql:'].includes(new URL(value).protocol)),
+  LOG_FORMAT: z.literal('json').default('json'),
+  LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent']).default('info'),
   METRICS_ENABLED: booleanFromString,
   PORT: z.coerce.number().int().min(1).max(65_535).default(3000),
   SCHEDULER_ENABLED: booleanFromString,
@@ -139,12 +171,40 @@ const rawSchema = z.object({
   CONVERSION_LAG_DAYS: z.coerce.number().int().min(0).max(30).default(1),
   CURRENT_BID_FRESHNESS_MINUTES: z.coerce.number().int().min(1).max(1_440).default(20),
   CURRENT_STATE_SYNC_CRON: z.string().trim().min(1).default('5 */15 * * * *'),
-  CURRENT_STATE_SYNC_RUN_DEADLINE_MINUTES: z.coerce.number().int().min(1).max(1_440).default(10),
+  CURRENT_STATE_SYNC_RUN_DEADLINE_MS: z.coerce
+    .number()
+    .int()
+    .min(1_000)
+    .max(86_400_000)
+    .default(600_000),
   CURRENT_STATE_TARGET_SYNC_SLA_MINUTES: z.coerce.number().int().min(1).max(1_440).default(20),
   DATA_SYNC_CRON: z.string().trim().min(1).default('25 */30 * * * *'),
+  DECISION_CRON: z.string().trim().min(1).default('45 */30 * * * *'),
   DAY_FINALIZATION_MIN_STABLE_MINUTES: z.coerce.number().int().min(0).max(10_080).default(60),
   DAY_FINALIZATION_MIN_STABLE_READS: z.coerce.number().int().min(2).max(100).default(2),
   EXTERNAL_WRITE_CONTROL_MODE: z.enum(['EXCLUSIVE', 'SHARED']).default('SHARED'),
+  CAMPAIGN_APPLY_CRON: z.string().trim().min(1).default('*/10 * * * * *'),
+  VERIFICATION_POLL_INTERVAL_MS: z.coerce.number().int().min(1_000).max(3_600_000).default(30_000),
+  RECONCILIATION_CRON: z.string().trim().min(1).default('15 * * * * *'),
+  BID_VERIFICATION_INITIAL_DELAY_MS: z.coerce
+    .number()
+    .int()
+    .min(30_000)
+    .max(3_600_000)
+    .default(30_000),
+  BID_VERIFICATION_TIMEOUT_MS: z.coerce.number().int().min(60_000).max(86_400_000).default(600_000),
+  RECONCILIATION_STABLE_OLD_STATE_READS: z.coerce.number().int().min(2).max(10).default(2),
+  RECONCILIATION_STABLE_READ_INTERVAL_MS: z.coerce
+    .number()
+    .int()
+    .min(1_000)
+    .max(3_600_000)
+    .default(30_000),
+  RECONCILIATION_MAX_WRITE_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(2),
+  WB_WRITE_PRE_BYTE_MAX_RETRIES: z.coerce.number().int().min(0).max(1).default(1),
+  PRE_WRITE_STATE_MAX_AGE_MS: z.coerce.number().int().min(1_000).max(60_000).default(10_000),
+  MAX_DECISION_AGE_MINUTES: z.coerce.number().int().min(1).max(10_080).default(60),
+  WB_WRITE_ATTEMPT_RETENTION_DAYS: z.coerce.number().int().min(1).max(3_650).default(30),
   MINIMUM_BID_FRESHNESS_MINUTES: z.coerce.number().int().min(1).max(43_200).default(720),
   MINIMUM_BID_TARGET_SYNC_SLA_MINUTES: z.coerce.number().int().min(1).max(43_200).default(720),
   WB_API_CONNECT_TIMEOUT_MS: z.coerce.number().int().min(100).max(60_000).default(2_000),
@@ -163,6 +223,11 @@ const rawSchema = z.object({
   WB_ENDPOINT_PROFILE_VERSION: z.string().min(1),
   WB_EXPECTED_TOKEN_TYPE: z.enum(['PERSONAL', 'TEST', 'BASE']),
   WB_PRODUCTION_WRITE_CONFIRMATION: z.string().default(''),
+  WB_TOKEN_EXPIRY_WARN_DAYS: z.coerce.number().int().min(1).max(365).default(14),
+  WB_READ_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(3),
+  WB_READ_RETRY_BASE_MS: z.coerce.number().int().min(1).max(60_000).default(250),
+  WB_READ_RETRY_CAP_MS: z.coerce.number().int().min(1).max(120_000).default(5_000),
+  WB_VERIFY_HTTP_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(2),
   SYNC_PAGE_SIZE: z.coerce.number().int().min(1).max(5_000).default(500),
 });
 
@@ -211,6 +276,8 @@ export function loadConfiguration(
     accountTimezone: value.ACCOUNT_TIMEZONE,
     adminApiServiceToken: value.ADMIN_API_SERVICE_TOKEN,
     databaseUrl: value.DATABASE_URL,
+    logFormat: value.LOG_FORMAT,
+    logLevel: value.LOG_LEVEL,
     metricsEnabled: value.METRICS_ENABLED,
     port: value.PORT,
     schedulerEnabled: value.SCHEDULER_ENABLED,
@@ -220,7 +287,7 @@ export function loadConfiguration(
       currentBidFreshnessMinutes: value.CURRENT_BID_FRESHNESS_MINUTES,
       currentBidTargetSlaMinutes: value.CURRENT_STATE_TARGET_SYNC_SLA_MINUTES,
       currentStateCron: value.CURRENT_STATE_SYNC_CRON,
-      currentStateDeadlineMinutes: value.CURRENT_STATE_SYNC_RUN_DEADLINE_MINUTES,
+      currentStateDeadlineMs: value.CURRENT_STATE_SYNC_RUN_DEADLINE_MS,
       dataCron: value.DATA_SYNC_CRON,
       dayFinalizationStableMinutes: value.DAY_FINALIZATION_MIN_STABLE_MINUTES,
       dayFinalizationStableReads: value.DAY_FINALIZATION_MIN_STABLE_READS,
@@ -228,6 +295,21 @@ export function loadConfiguration(
       minimumBidFreshnessMinutes: value.MINIMUM_BID_FRESHNESS_MINUTES,
       minimumBidTargetSlaMinutes: value.MINIMUM_BID_TARGET_SYNC_SLA_MINUTES,
       pageSize: value.SYNC_PAGE_SIZE,
+    }),
+    writePipeline: Object.freeze({
+      attemptRetentionDays: value.WB_WRITE_ATTEMPT_RETENTION_DAYS,
+      campaignApplyCron: value.CAMPAIGN_APPLY_CRON,
+      decisionCron: value.DECISION_CRON,
+      maximumDecisionAgeMinutes: value.MAX_DECISION_AGE_MINUTES,
+      maximumWriteAttempts: value.RECONCILIATION_MAX_WRITE_ATTEMPTS,
+      preByteMaximumRetries: value.WB_WRITE_PRE_BYTE_MAX_RETRIES,
+      preWriteStateMaximumAgeMs: value.PRE_WRITE_STATE_MAX_AGE_MS,
+      reconciliationCron: value.RECONCILIATION_CRON,
+      stableOldStateReads: value.RECONCILIATION_STABLE_OLD_STATE_READS,
+      stableReadIntervalMs: value.RECONCILIATION_STABLE_READ_INTERVAL_MS,
+      verificationInitialDelayMs: value.BID_VERIFICATION_INITIAL_DELAY_MS,
+      verificationPollIntervalMs: value.VERIFICATION_POLL_INTERVAL_MS,
+      verificationTimeoutMs: value.BID_VERIFICATION_TIMEOUT_MS,
     }),
     wb: Object.freeze({
       baseUrl,
@@ -238,10 +320,15 @@ export function loadConfiguration(
       globalRateLimitRequests: value.WB_API_GLOBAL_RATE_LIMIT_REQUESTS,
       maxInFlight: value.WB_API_MAX_IN_FLIGHT,
       mode: value.WB_API_MODE,
+      readMaximumAttempts: value.WB_READ_MAX_ATTEMPTS,
+      readRetryBaseMs: value.WB_READ_RETRY_BASE_MS,
+      readRetryCapMs: value.WB_READ_RETRY_CAP_MS,
       rateLimitOverrides,
       timeoutMs: value.WB_API_TIMEOUT_MS,
       token: value.WB_API_TOKEN,
+      tokenExpiryWarningDays: value.WB_TOKEN_EXPIRY_WARN_DAYS,
       tokenType: value.WB_EXPECTED_TOKEN_TYPE,
+      verificationHttpMaximumAttempts: value.WB_VERIFY_HTTP_MAX_ATTEMPTS,
       writesEnabled,
     }),
   });
@@ -258,10 +345,10 @@ function validateSyncInvariants(value: z.infer<typeof rawSchema>): void {
   const currentStateIntervalMinutes = inferSimpleMinuteInterval(value.CURRENT_STATE_SYNC_CRON);
   if (
     currentStateIntervalMinutes !== null &&
-    value.CURRENT_STATE_SYNC_RUN_DEADLINE_MINUTES >= currentStateIntervalMinutes
+    value.CURRENT_STATE_SYNC_RUN_DEADLINE_MS >= currentStateIntervalMinutes * 60_000
   ) {
     throw new ConfigurationError(
-      'CURRENT_STATE_SYNC_RUN_DEADLINE_MINUTES must be less than the cron interval',
+      'CURRENT_STATE_SYNC_RUN_DEADLINE_MS must be less than the cron interval',
     );
   }
   if (
@@ -270,6 +357,36 @@ function validateSyncInvariants(value: z.infer<typeof rawSchema>): void {
   ) {
     throw new ConfigurationError(
       'Current-state SLA and observation gap must not exceed current-bid freshness',
+    );
+  }
+  for (const expression of [
+    value.DATA_SYNC_CRON,
+    value.DECISION_CRON,
+    value.CAMPAIGN_APPLY_CRON,
+    value.RECONCILIATION_CRON,
+  ]) {
+    inferSimpleMinuteInterval(expression);
+  }
+  if (value.WB_READ_RETRY_BASE_MS > value.WB_READ_RETRY_CAP_MS) {
+    throw new ConfigurationError('WB_READ_RETRY_BASE_MS must not exceed WB_READ_RETRY_CAP_MS');
+  }
+  if (value.BID_VERIFICATION_INITIAL_DELAY_MS >= value.BID_VERIFICATION_TIMEOUT_MS) {
+    throw new ConfigurationError(
+      'BID_VERIFICATION_INITIAL_DELAY_MS must be less than BID_VERIFICATION_TIMEOUT_MS',
+    );
+  }
+  const minimumReconciliationWindowMs =
+    value.BID_VERIFICATION_INITIAL_DELAY_MS +
+    value.RECONCILIATION_STABLE_READ_INTERVAL_MS *
+      (value.RECONCILIATION_STABLE_OLD_STATE_READS - 1);
+  if (minimumReconciliationWindowMs >= value.BID_VERIFICATION_TIMEOUT_MS) {
+    throw new ConfigurationError(
+      'BID_VERIFICATION_TIMEOUT_MS must include the stable-read reconciliation window',
+    );
+  }
+  if (value.WB_WRITE_ATTEMPT_RETENTION_DAYS * 86_400_000 <= value.BID_VERIFICATION_TIMEOUT_MS) {
+    throw new ConfigurationError(
+      'WB_WRITE_ATTEMPT_RETENTION_DAYS must exceed the verification/reconciliation window',
     );
   }
 }

@@ -25,6 +25,7 @@
       "@wb-bidder/contracts": ["packages/contracts/src/index.ts"],
       "@wb-bidder/data-sync": ["packages/data-sync/src/index.ts"],
       "@wb-bidder/decision-engine": ["packages/decision-engine/src/index.ts"],
+      "@wb-bidder/write-pipeline": ["packages/write-pipeline/src/index.ts"],
       "@wb-bidder/wb-api": ["packages/wb-api/src/index.ts"]
     },
     "resolveJsonModule": true,

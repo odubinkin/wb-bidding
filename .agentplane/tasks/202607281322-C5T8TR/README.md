@@ -1,10 +1,10 @@
 ---
 id: "202607281322-C5T8TR"
 title: "Stage 4: queue, executor, reconciliation and Admin API"
-status: "TODO"
+status: "DOING"
 priority: "high"
 owner: "CODER"
-revision: 3
+revision: 5
 origin:
   system: "manual"
 depends_on:
@@ -24,9 +24,9 @@ verify:
   - "pnpm run test:unit"
   - "pnpm run typecheck"
 plan_approval:
-  state: "pending"
-  updated_at: null
-  updated_by: null
+  state: "approved"
+  updated_at: "2026-07-28T15:46:51.239Z"
+  updated_by: "ORCHESTRATOR"
   note: null
 verification:
   state: "pending"
@@ -35,11 +35,21 @@ verification:
   note: null
   attempts: 0
 commit: null
-comments: []
-events: []
+comments:
+  -
+    author: "CODER"
+    body: "Start: execute the user-approved Stage 4 queue, executor, reconciliation, and Admin API plan in direct mode."
+events:
+  -
+    type: "status"
+    at: "2026-07-28T15:46:56.129Z"
+    author: "CODER"
+    from: "TODO"
+    to: "DOING"
+    note: "Start: execute the user-approved Stage 4 queue, executor, reconciliation, and Admin API plan in direct mode."
 doc_version: 3
-doc_updated_at: "2026-07-28T13:24:55.230Z"
-doc_updated_by: "PLANNER"
+doc_updated_at: "2026-07-28T15:46:56.129Z"
+doc_updated_by: "CODER"
 description: "Implement transactional decision queue, leases and semantic idempotency, request and item write audit, pre-write validation, batching, UNKNOWN-result reconciliation, safe retry, verification, authenticated and authorized Admin API with problem+json, idempotency, ETag, pagination and audit, plus end-to-end mock workflows required by sections 7-8, 10, 14, 17, 19 and AC-07/08/09/11/17/25/28/29."
 sections:
   Summary: |-

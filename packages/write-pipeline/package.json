@@ -1,0 +1,30 @@
+{
+  "name": "@wb-bidder/write-pipeline",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@wb-bidder/wb-api": "workspace:*",
+    "canonicalize": "3.0.0",
+    "pg": "8.16.3"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --sourcemap --clean",
+    "clean": "rimraf dist",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/pg": "8.15.6",
+    "rimraf": "6.0.1",
+    "tsup": "8.5.1",
+    "typescript": "5.9.3"
+  }
+}

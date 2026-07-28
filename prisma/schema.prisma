@@ -159,6 +159,20 @@ enum SchedulerRunStatus {
   DEADLINE_EXCEEDED
 }
 
+enum AutomationMode {
+  DISABLED
+  OBSERVE_ONLY
+  APPLY
+}
+
+enum ManualJobStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
 enum SyncDataKind {
   CAMPAIGN_DISCOVERY
   CAMPAIGN_DETAILS
@@ -217,6 +231,8 @@ model Campaign {
   statistics        CampaignStatDaily[]
   policies          BiddingPolicy[]
   sourceSnapshots   SyncSourceSnapshot[]
+  automation        CampaignAutomation?
+  manualJobs        ManualJob[]
 
   @@index([status, supported])
 }
@@ -249,6 +265,9 @@ model CampaignTarget {
   decisions                 BidDecision[]
   experiments               BidExperiment[]
   policies                  BiddingPolicy[]
+  automation                TargetAutomation?
+  manualJobs                ManualJob[]
+  reconciliationReads       ReconciliationRead[]
 
   @@index([campaignId, nmId, targetKind, placement])
   @@index([lastConfirmedAt])
@@ -364,6 +383,7 @@ model ProductEconomicsImport {
   finishedAt       DateTime?                    @db.Timestamptz(3)
   createdByActor   String
   correlationId    String                       @db.Uuid
+  changeReason     String
   items            ProductEconomicsImportItem[]
 
   @@unique([idempotencyScope, idempotencyKey])
@@ -384,10 +404,12 @@ model ProductEconomicsImportItem {
   expectedCurrentVersion BigInt
   actualCurrentVersion   BigInt?
   createdVersion         BigInt?
+  createdAt              DateTime               @default(now()) @db.Timestamptz(3)
 
   @@unique([importId, rowId])
   @@unique([importId, nmId])
   @@index([importId, status])
+  @@index([importId, createdAt, id])
 }
 
 model BiddingPolicy {
@@ -509,6 +531,14 @@ model DecisionQueueItem {
   lastHttpStatus           Int?
   sentAt                   DateTime?           @db.Timestamptz(3)
   verifiedAt               DateTime?           @db.Timestamptz(3)
+  nextVerificationAt       DateTime?           @db.Timestamptz(3)
+  reconciliationDeadlineAt DateTime?           @db.Timestamptz(3)
+  stableReadChecksum       String?             @db.Char(64)
+  stableReadCount          Int                 @default(0)
+  lastReconciliationReadAt DateTime?           @db.Timestamptz(3)
+  manualRetryBlocked       Boolean             @default(false)
+  failureClassification    String?
+  version                  BigInt              @default(1)
 
   @@index([status, availableAt, priority])
   @@index([leaseUntil])
@@ -542,28 +572,107 @@ model WbWriteAttempt {
 }
 
 model WbWriteAttemptItem {
-  id                   String               @id @default(uuid()) @db.Uuid
-  attemptId            String               @db.Uuid
-  attempt              WbWriteAttempt       @relation(fields: [attemptId], references: [id], onDelete: Restrict)
-  decisionId           String               @db.Uuid
-  decision             BidDecision          @relation(fields: [decisionId], references: [id], onDelete: Restrict)
-  requestIndex         Int
-  endpointTargetKey    String
-  action               WriteAction
-  desiredBidState      DesiredBidState
-  sentBidMinor         BigInt?
-  wireBidRaw           String
-  attemptNumber        Int
-  status               WriteAttemptStatus
-  httpStatus           Int?
-  errorCode            String?
-  responseFragmentHash String?
-  reconciliationStatus ReconciliationStatus
-  reconciledAt         DateTime?            @db.Timestamptz(3)
+  id                    String               @id @default(uuid()) @db.Uuid
+  attemptId             String               @db.Uuid
+  attempt               WbWriteAttempt       @relation(fields: [attemptId], references: [id], onDelete: Restrict)
+  decisionId            String               @db.Uuid
+  decision              BidDecision          @relation(fields: [decisionId], references: [id], onDelete: Restrict)
+  requestIndex          Int
+  endpointTargetKey     String
+  action                WriteAction
+  desiredBidState       DesiredBidState
+  sentBidMinor          BigInt?
+  wireBidRaw            String
+  attemptNumber         Int
+  status                WriteAttemptStatus
+  httpStatus            Int?
+  errorCode             String?
+  responseFragmentHash  String?
+  reconciliationStatus  ReconciliationStatus
+  reconciledAt          DateTime?            @db.Timestamptz(3)
+  preWriteReadAt        DateTime?            @db.Timestamptz(3)
+  preWriteStateChecksum String?              @db.Char(64)
+  preWriteSourceMarker  String?
+  preWriteState         Json?
+  desiredStateChecksum  String?              @db.Char(64)
+  reconciliationReads   ReconciliationRead[]
 
   @@unique([attemptId, decisionId])
   @@unique([decisionId, attemptNumber])
   @@index([reconciliationStatus, reconciledAt])
+}
+
+model DeploymentControl {
+  id         String   @id @db.Uuid
+  globalKill Boolean  @default(false)
+  reason     String?
+  version    BigInt   @default(1)
+  updatedAt  DateTime @updatedAt @db.Timestamptz(3)
+  updatedBy  String
+}
+
+model CampaignAutomation {
+  id         String         @id @default(uuid()) @db.Uuid
+  campaignId String         @unique @db.Uuid
+  campaign   Campaign       @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  mode       AutomationMode
+  reason     String
+  version    BigInt         @default(1)
+  updatedAt  DateTime       @updatedAt @db.Timestamptz(3)
+  updatedBy  String
+}
+
+model TargetAutomation {
+  id        String         @id @default(uuid()) @db.Uuid
+  targetId  String         @unique @db.Uuid
+  target    CampaignTarget @relation(fields: [targetId], references: [id], onDelete: Restrict)
+  mode      AutomationMode
+  reason    String
+  version   BigInt         @default(1)
+  updatedAt DateTime       @updatedAt @db.Timestamptz(3)
+  updatedBy String
+}
+
+model ManualJob {
+  id            String          @id @default(uuid()) @db.Uuid
+  type          String
+  status        ManualJobStatus
+  scope         Json
+  campaignId    String?         @db.Uuid
+  campaign      Campaign?       @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  targetId      String?         @db.Uuid
+  target        CampaignTarget? @relation(fields: [targetId], references: [id], onDelete: Restrict)
+  requestedAt   DateTime        @default(now()) @db.Timestamptz(3)
+  requestedBy   String
+  correlationId String          @db.Uuid
+  leaseOwner    String?
+  leaseUntil    DateTime?       @db.Timestamptz(3)
+  startedAt     DateTime?       @db.Timestamptz(3)
+  finishedAt    DateTime?       @db.Timestamptz(3)
+  result        Json?
+  errorCode     String?
+
+  @@index([status, requestedAt])
+  @@index([campaignId, status])
+  @@index([targetId, status])
+}
+
+model ReconciliationRead {
+  id                  String             @id @default(uuid()) @db.Uuid
+  attemptItemId       String             @db.Uuid
+  attemptItem         WbWriteAttemptItem @relation(fields: [attemptItemId], references: [id], onDelete: Restrict)
+  targetId            String             @db.Uuid
+  target              CampaignTarget     @relation(fields: [targetId], references: [id], onDelete: Restrict)
+  readAt              DateTime           @db.Timestamptz(3)
+  stateChecksum       String             @db.Char(64)
+  sourceMarker        String
+  state               Json
+  classification      String
+  fresh               Boolean
+  prevalidationPassed Boolean
+
+  @@index([attemptItemId, readAt])
+  @@index([targetId, readAt])
 }
 
 model AuditEvent {

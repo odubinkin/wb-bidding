@@ -12,11 +12,14 @@ import type { DecisionPolicy, DecisionResult } from './types.js';
  */
 export interface EconomicsMutation {
   readonly actor: string;
+  readonly changeReason?: string;
   readonly contributionMinor: bigint;
   readonly correlationId: string;
   readonly effectiveFrom: Date;
+  readonly effectiveTo?: Date | null;
   readonly expectedCurrentVersion: bigint;
   readonly mutationKey: string;
+  readonly idempotencyKey?: string;
   readonly nmId: bigint;
   readonly source: 'IMPORT' | 'MANUAL';
   readonly sourceReference?: string;
@@ -29,6 +32,7 @@ export interface EconomicsMutation {
 export interface EconomicsImportRow {
   readonly contributionMinor: bigint;
   readonly effectiveFrom: Date;
+  readonly effectiveTo?: Date | null;
   readonly expectedCurrentVersion: bigint;
   readonly nmId: bigint;
   readonly rowId: string;
@@ -58,8 +62,10 @@ export class DecisionRepository {
   ): Promise<{ readonly created: boolean; readonly id: string; readonly version: bigint }> {
     validateEconomicsMutation(mutation);
     const checksum = scopedChecksum('product-economics-v1', {
+      changeReason: mutation.changeReason ?? null,
       contributionMinor: mutation.contributionMinor,
       effectiveFrom: mutation.effectiveFrom,
+      effectiveTo: mutation.effectiveTo ?? null,
       nmId: mutation.nmId,
       source: mutation.source,
       sourceReference: mutation.sourceReference ?? null,
@@ -92,10 +98,20 @@ export class DecisionRepository {
           version: BigInt(replayed.version),
         });
       }
-      const current = await client.query<{ id: string; version: string }>(
-        `SELECT "id", "version" FROM "ProductEconomics"
-          WHERE "nmId" = $1 AND "effectiveTo" IS NULL FOR UPDATE`,
-        [mutation.nmId.toString()],
+      const current = await client.query<{
+        effectiveFrom: Date;
+        effectiveTo: Date | null;
+        expectedContributionBeforeAdsMinor: string;
+        id: string;
+        version: string;
+      }>(
+        `SELECT "id", "version", "effectiveFrom", "effectiveTo",
+                "expectedContributionBeforeAdsMinor"
+           FROM "ProductEconomics"
+          WHERE "nmId" = $1 AND "effectiveFrom" < $2
+            AND ("effectiveTo" IS NULL OR "effectiveTo" >= $2)
+          ORDER BY "effectiveFrom" DESC LIMIT 1 FOR UPDATE`,
+        [mutation.nmId.toString(), mutation.effectiveFrom],
       );
       const actualVersion = BigInt(current.rows[0]?.version ?? '0');
       if (actualVersion !== mutation.expectedCurrentVersion) {
@@ -113,14 +129,15 @@ export class DecisionRepository {
       const version = actualVersion + 1n;
       await client.query(
         `INSERT INTO "ProductEconomics"
-           ("id", "nmId", "effectiveFrom", "expectedContributionBeforeAdsMinor",
+           ("id", "nmId", "effectiveFrom", "effectiveTo", "expectedContributionBeforeAdsMinor",
             "source", "sourceUpdatedAt", "sourceReference", "version", "mutationKey",
             "inputChecksum", "createdByActor")
-         VALUES ($1, $2, $3, $4, $5::"ProductEconomicsSource", $6, $7, $8, $9, $10, $11)`,
+         VALUES ($1, $2, $3, $4, $5, $6::"ProductEconomicsSource", $7, $8, $9, $10, $11, $12)`,
         [
           id,
           mutation.nmId.toString(),
           mutation.effectiveFrom,
+          mutation.effectiveTo ?? null,
           mutation.contributionMinor.toString(),
           mutation.source,
           mutation.sourceUpdatedAt ?? null,
@@ -138,10 +155,15 @@ export class DecisionRepository {
         id,
         mutation.correlationId,
         {
+          changeReason: mutation.changeReason ?? null,
           contributionMinor: mutation.contributionMinor,
+          effectiveFrom: mutation.effectiveFrom,
+          effectiveTo: mutation.effectiveTo ?? null,
+          idempotencyKey: mutation.idempotencyKey ?? null,
           nmId: mutation.nmId,
           version,
         },
+        current.rows[0] ?? null,
       );
       await client.query('COMMIT');
       return Object.freeze({ created: true, id, version });
@@ -161,6 +183,7 @@ export class DecisionRepository {
    */
   public async enqueueEconomicsImport(request: {
     readonly actor: string;
+    readonly changeReason?: string;
     readonly correlationId: string;
     readonly dryRun: boolean;
     readonly idempotencyKey: string;
@@ -169,6 +192,7 @@ export class DecisionRepository {
   }): Promise<{ readonly created: boolean; readonly importId: string }> {
     validateImportRequest(request.rows);
     const requestChecksum = scopedChecksum('product-economics-import-v1', {
+      changeReason: request.changeReason ?? null,
       dryRun: request.dryRun,
       rows: request.rows,
     });
@@ -191,8 +215,8 @@ export class DecisionRepository {
       await client.query(
         `INSERT INTO "ProductEconomicsImport"
            ("id", "status", "dryRun", "idempotencyScope", "idempotencyKey",
-            "requestChecksum", "totalItems", "createdByActor", "correlationId")
-         VALUES ($1, 'QUEUED', $2, $3, $4, $5, $6, $7, $8)`,
+            "requestChecksum", "totalItems", "createdByActor", "correlationId", "changeReason")
+         VALUES ($1, 'QUEUED', $2, $3, $4, $5, $6, $7, $8, $9)`,
         [
           importId,
           request.dryRun,
@@ -202,6 +226,7 @@ export class DecisionRepository {
           request.rows.length,
           request.actor,
           request.correlationId,
+          request.changeReason ?? 'unspecified import',
         ],
       );
       for (const row of request.rows) {
@@ -221,6 +246,20 @@ export class DecisionRepository {
           ],
         );
       }
+      await appendAudit(
+        client,
+        request.actor,
+        'PRODUCT_ECONOMICS_IMPORT_QUEUED',
+        importId,
+        request.correlationId,
+        {
+          changeReason: request.changeReason ?? null,
+          dryRun: request.dryRun,
+          idempotencyKey: request.idempotencyKey,
+          requestChecksum,
+          totalItems: request.rows.length,
+        },
+      );
       await client.query('COMMIT');
       return Object.freeze({ created: true, importId });
     } catch (error: unknown) {
@@ -305,9 +344,16 @@ export class DecisionRepository {
   public async createPolicyVersion(request: {
     readonly actor: string;
     readonly campaignId: string | null;
+    readonly changeReason?: string;
     readonly configuration: DecisionPolicy;
     readonly correlationId: string;
+    readonly enabled?: boolean;
+    readonly expectedCurrentVersion?: bigint;
+    readonly idempotencyKey?: string;
+    readonly idempotencyInput?: unknown;
+    readonly idempotencyScope?: string;
     readonly scope: 'CAMPAIGN' | 'DEPLOYMENT' | 'TARGET';
+    readonly supersedeQueued?: boolean;
     readonly targetId: string | null;
     readonly validFrom: Date;
   }): Promise<{ readonly id: string; readonly version: bigint }> {
@@ -316,6 +362,40 @@ export class DecisionRepository {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
+      const idempotencyChecksum = scopedChecksum(
+        'policy-admin-mutation-v1',
+        request.idempotencyInput ?? {
+          campaignId: request.campaignId,
+          changeReason: request.changeReason ?? null,
+          configuration: request.configuration,
+          enabled: request.enabled ?? true,
+          expectedCurrentVersion: request.expectedCurrentVersion ?? null,
+          scope: request.scope,
+          supersedeQueued: request.supersedeQueued ?? false,
+          targetId: request.targetId,
+          validFrom: request.validFrom,
+        },
+      );
+      if (request.idempotencyKey !== undefined && request.idempotencyScope !== undefined) {
+        const replay = await client.query<{
+          requestChecksum: string;
+          responseBody: { id: string; version: string };
+        }>(
+          `SELECT "requestChecksum", "responseBody" FROM "IdempotencyRecord"
+            WHERE "scope" = $1 AND "idempotencyKey" = $2 FOR UPDATE`,
+          [request.idempotencyScope, request.idempotencyKey],
+        );
+        if (replay.rows[0] !== undefined) {
+          if (replay.rows[0].requestChecksum !== idempotencyChecksum) {
+            throw new Error('IDEMPOTENCY_KEY_REUSED');
+          }
+          await client.query('COMMIT');
+          return Object.freeze({
+            id: replay.rows[0].responseBody.id,
+            version: BigInt(replay.rows[0].responseBody.version),
+          });
+        }
+      }
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended('policy:' || $1, 0))", [
         `${request.scope}:${request.campaignId ?? ''}:${request.targetId ?? ''}`,
       ]);
@@ -324,16 +404,32 @@ export class DecisionRepository {
           WHERE "scope" = $1::"PolicyScope"
             AND "campaignId" IS NOT DISTINCT FROM $2
             AND "targetId" IS NOT DISTINCT FROM $3
-            AND "validTo" IS NULL FOR UPDATE`,
+            AND "enabled" = true AND "validTo" IS NULL
+          ORDER BY "version" DESC LIMIT 1 FOR UPDATE`,
         [request.scope, request.campaignId, request.targetId],
       );
-      if (current.rows[0] !== undefined) {
+      const latest = await client.query<{ version: string }>(
+        `SELECT "version" FROM "BiddingPolicy"
+          WHERE "scope" = $1::"PolicyScope"
+            AND "campaignId" IS NOT DISTINCT FROM $2
+            AND "targetId" IS NOT DISTINCT FROM $3
+          ORDER BY "version" DESC LIMIT 1 FOR UPDATE`,
+        [request.scope, request.campaignId, request.targetId],
+      );
+      const enabled = request.enabled ?? true;
+      if (
+        request.expectedCurrentVersion !== undefined &&
+        BigInt(current.rows[0]?.version ?? '0') !== request.expectedCurrentVersion
+      ) {
+        throw new Error('VERSION_MISMATCH');
+      }
+      if (enabled && current.rows[0] !== undefined) {
         await client.query(`UPDATE "BiddingPolicy" SET "validTo" = $2 WHERE "id" = $1`, [
           current.rows[0].id,
           request.validFrom,
         ]);
       }
-      const version = BigInt(current.rows[0]?.version ?? '0') + 1n;
+      const version = BigInt(latest.rows[0]?.version ?? '0') + 1n;
       const id = randomUUID();
       const checksum = scopedChecksum('bidding-policy-v1', request.configuration);
       await client.query(
@@ -341,7 +437,7 @@ export class DecisionRepository {
            ("id", "scope", "campaignId", "targetId", "executionMode", "configuration",
             "enabled", "version", "validFrom", "inputChecksum", "createdByActor")
          VALUES ($1, $2::"PolicyScope", $3, $4, $5::"ExecutionMode", $6::jsonb,
-                 true, $7, $8, $9, $10)`,
+                 $7, $8, $9, $10, $11)`,
         [
           id,
           request.scope,
@@ -349,6 +445,7 @@ export class DecisionRepository {
           request.targetId,
           request.configuration.executionMode,
           JSON.stringify(normalizeCanonical(request.configuration)),
+          enabled,
           version.toString(),
           request.validFrom,
           checksum,
@@ -363,10 +460,42 @@ export class DecisionRepository {
         request.correlationId,
         {
           checksum,
+          changeReason: request.changeReason ?? null,
+          idempotencyKey: request.idempotencyKey ?? null,
           scope: request.scope,
           version,
         },
+        current.rows[0] ?? null,
       );
+      if (enabled && request.supersedeQueued === true) {
+        await client.query(
+          `UPDATE "DecisionQueueItem" q
+              SET "status" = 'SUPERSEDED', "version" = q."version" + 1
+             FROM "BidDecision" d, "CampaignTarget" t
+            WHERE q."decisionId" = d."id" AND t."id" = d."targetId"
+              AND q."status" IN ('QUEUED','RETRY_WAIT')
+              AND (($1 = 'TARGET' AND d."targetId" = $2)
+                OR ($1 = 'CAMPAIGN' AND t."campaignId" = $3)
+                OR $1 = 'DEPLOYMENT')`,
+          [request.scope, request.targetId, request.campaignId],
+        );
+      }
+      if (request.idempotencyKey !== undefined && request.idempotencyScope !== undefined) {
+        await client.query(
+          `INSERT INTO "IdempotencyRecord"
+             ("id", "scope", "idempotencyKey", "requestChecksum", "responseStatus",
+              "responseHeaders", "responseBody", "expiresAt")
+           VALUES ($1, $2, $3, $4, 201, '{}'::jsonb, $5::jsonb,
+                   NOW() + INTERVAL '400 days')`,
+          [
+            randomUUID(),
+            request.idempotencyScope,
+            request.idempotencyKey,
+            idempotencyChecksum,
+            JSON.stringify({ id, version: version.toString() }),
+          ],
+        );
+      }
       await client.query('COMMIT');
       return Object.freeze({ id, version });
     } catch (error: unknown) {
@@ -525,8 +654,8 @@ export class DecisionRepository {
         await client.query(
           `INSERT INTO "DecisionQueueItem"
              ("id", "decisionId", "status", "priority", "availableAt")
-           VALUES ($1, $2, 'QUEUED', 100, $3)`,
-          [randomUUID(), decisionId, request.calculatedAt],
+           VALUES ($1, $2, 'QUEUED', $3, $4)`,
+          [randomUUID(), decisionId, decisionPriority(request.result), request.calculatedAt],
         );
       }
       await client.query('COMMIT');
@@ -547,12 +676,13 @@ export class DecisionRepository {
         "SELECT pg_advisory_xact_lock(hashtextextended('product-economics-import-worker', 0))",
       );
       const selected = await client.query<{
+        changeReason: string;
         correlationId: string;
         createdByActor: string;
         dryRun: boolean;
         id: string;
       }>(
-        `SELECT "id", "dryRun", "createdByActor", "correlationId"
+        `SELECT "id", "dryRun", "createdByActor", "correlationId", "changeReason"
            FROM "ProductEconomicsImport" WHERE "status" = 'QUEUED'
           ORDER BY "createdAt" FOR UPDATE SKIP LOCKED LIMIT 1`,
       );
@@ -571,6 +701,7 @@ export class DecisionRepository {
       await client.query('COMMIT');
       return Object.freeze({
         actor: row.createdByActor,
+        changeReason: row.changeReason,
         correlationId: row.correlationId,
         dryRun: row.dryRun,
         id: row.id,
@@ -586,6 +717,7 @@ export class DecisionRepository {
 
 interface ClaimedImport {
   readonly actor: string;
+  readonly changeReason: string;
   readonly correlationId: string;
   readonly dryRun: boolean;
   readonly id: string;
@@ -598,6 +730,7 @@ interface ImportItemRow {
   readonly normalizedInput: {
     readonly contributionMinor: string;
     readonly effectiveFrom: string;
+    readonly effectiveTo?: string | null;
     readonly sourceReference?: string;
     readonly sourceUpdatedAt?: string;
   };
@@ -614,9 +747,14 @@ interface DecisionReplayRow {
 function importMutation(claimed: ClaimedImport, item: ImportItemRow): EconomicsMutation {
   return {
     actor: claimed.actor,
+    changeReason: claimed.changeReason,
     contributionMinor: BigInt(item.normalizedInput.contributionMinor),
     correlationId: claimed.correlationId,
     effectiveFrom: new Date(item.normalizedInput.effectiveFrom),
+    effectiveTo:
+      item.normalizedInput.effectiveTo === undefined || item.normalizedInput.effectiveTo === null
+        ? null
+        : new Date(item.normalizedInput.effectiveTo),
     expectedCurrentVersion: BigInt(item.expectedCurrentVersion),
     mutationKey: `import:${claimed.id}:${item.rowId}`,
     nmId: BigInt(item.nmId),
@@ -635,6 +773,10 @@ function validateEconomicsMutation(mutation: EconomicsMutation): void {
     mutation.nmId <= 0n ||
     mutation.expectedCurrentVersion < 0n ||
     mutation.effectiveFrom.toString() === 'Invalid Date' ||
+    (mutation.effectiveTo !== undefined &&
+      mutation.effectiveTo !== null &&
+      (mutation.effectiveTo.toString() === 'Invalid Date' ||
+        mutation.effectiveTo <= mutation.effectiveFrom)) ||
     mutation.mutationKey.length < 1
   ) {
     throw new Error('INVALID_PRODUCT_ECONOMICS');
@@ -642,9 +784,8 @@ function validateEconomicsMutation(mutation: EconomicsMutation): void {
 }
 
 function validateImportRequest(rows: readonly EconomicsImportRow[]): void {
-  if (rows.length < 1 || rows.length > 10_000) {
-    throw new Error('IMPORT_SIZE_OUT_OF_RANGE');
-  }
+  if (rows.length < 1) throw new Error('EMPTY_ITEMS');
+  if (rows.length > 10_000) throw new Error('TOO_MANY_ITEMS');
   if (new Set(rows.map((row) => row.rowId)).size !== rows.length) {
     throw new Error('DUPLICATE_ROW_ID');
   }
@@ -657,6 +798,7 @@ function validateImportRequest(rows: readonly EconomicsImportRow[]): void {
       contributionMinor: row.contributionMinor,
       correlationId: '00000000-0000-0000-0000-000000000000',
       effectiveFrom: row.effectiveFrom,
+      effectiveTo: row.effectiveTo ?? null,
       expectedCurrentVersion: row.expectedCurrentVersion,
       mutationKey: row.rowId,
       nmId: row.nmId,
@@ -697,17 +839,23 @@ async function appendAudit(
   entityId: string,
   correlationId: string,
   after: unknown,
+  before?: unknown,
 ): Promise<void> {
   await client.query(
     `INSERT INTO "AuditEvent"
-       ("id", "actor", "action", "entityType", "entityId", "after", "correlationId")
-     VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)`,
+       ("id", "actor", "action", "entityType", "entityId", "before", "after", "correlationId")
+     VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8)`,
     [
       randomUUID(),
       actor,
       action,
-      action.startsWith('PRODUCT') ? 'ProductEconomics' : 'BiddingPolicy',
+      action.includes('IMPORT')
+        ? 'ProductEconomicsImport'
+        : action.startsWith('PRODUCT')
+          ? 'ProductEconomics'
+          : 'BiddingPolicy',
       entityId,
+      before === undefined ? null : json(before),
       json(after),
       correlationId,
     ],
@@ -729,4 +877,16 @@ function classifyImportError(error: unknown): string {
 
 function safeMessage(error: unknown): string {
   return error instanceof Error ? error.message.slice(0, 500) : 'Unknown import error';
+}
+
+function decisionPriority(result: DecisionResult): number {
+  if (
+    result.action === 'DECREASE' &&
+    result.guardrailCodes.some((code) => code.includes('BUDGET') || code.includes('LOSS'))
+  ) {
+    return 500;
+  }
+  if (result.action === 'DECREASE') return 400;
+  if (result.action === 'INCREASE') return 200;
+  return 100;
 }

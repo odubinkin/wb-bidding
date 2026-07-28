@@ -2,6 +2,7 @@
 .env
 .agentplane/worktrees
 .agentplane/cache
+.agentplane/tmp
 .agentplane/recipes-cache
 .agentplane/.upgrade
 .agentplane/.release
