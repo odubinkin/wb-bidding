@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "task_id": "202607280940-ZBHKGR",
+  "evaluator_id": "recovery-context",
+  "evaluator_profile": "EVALUATOR",
+  "generated_at": "2026-07-28T09:45:47.052Z",
+  "verdict": "pass",
+  "summary": "The committed documentation change satisfies the approved scope and all deterministic checks passed.",
+  "evaluated_sha": "68614a0694269b853078797d555b7bde79c25dca",
+  "blueprint_digest": "36505631cbda64cbd71749574dc91849b717151938367ddb34b5045817c51d69",
+  "findings": [
+    "Section 13.1 explains each of the eight stages with inputs, behavior, and outcomes; section 15 prohibits database or durable mock storage, restricts data to deterministic seeds/generators, and requires complete synthetic request/response diagnostics; section 18 is self-contained and contains every previously named runtime configuration parameter."
+  ],
+  "evidence_refs": [
+    ".agentplane/tasks/202607280940-ZBHKGR/README.md",
+    "commit 68614a0694269b853078797d555b7bde79c25dca",
+    "docs/technical-specification.md",
+    "targeted specification checks: pass; git diff --check: pass; policy routing OK; ap doctor: OK"
+  ],
+  "missing_tests": [],
+  "hidden_assumptions": [],
+  "residual_risks": [
+    "These are specification requirements; implementation conformance will be verified by future code and contract tests."
+  ]
+}
