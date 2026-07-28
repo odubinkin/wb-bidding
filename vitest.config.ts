@@ -1,12 +1,88 @@
 import { defineConfig } from 'vitest/config';
 import { fileURLToPath } from 'node:url';
 
+const mutationReplacements: Readonly<Record<string, readonly [string, string, string]>> =
+  Object.freeze({
+    BUDGET_CONTRACT_BYPASS: [
+      '/packages/decision-engine/src/engine.ts',
+      "budget.contractStatus !== 'VERIFIED' ||",
+      "false || budget.contractStatus !== 'VERIFIED' &&",
+    ],
+    CLUSTER_CAPABILITY_BYPASS: [
+      '/packages/decision-engine/src/engine.ts',
+      "input.targetKey.targetKind === 'CLUSTER' && input.capability !== 'CLUSTER_WRITE_READY'",
+      "false && input.targetKey.targetKind === 'CLUSTER' && input.capability !== 'CLUSTER_WRITE_READY'",
+    ],
+    COOLDOWN_BYPASS: [
+      '/packages/decision-engine/src/engine.ts',
+      'input.lastWriteAt !== null &&',
+      'false && input.lastWriteAt !== null &&',
+    ],
+    HYSTERESIS_OR: [
+      '/packages/decision-engine/src/engine.ts',
+      'absolute >= input.policy.minAbsoluteChangeMinor &&',
+      'absolute >= input.policy.minAbsoluteChangeMinor ||',
+    ],
+    MINIMUM_CAP_INVERSION: [
+      '/packages/decision-engine/src/engine.ts',
+      'input.wbMinimumBidMinor > input.policy.policyMaxBidMinor',
+      'input.wbMinimumBidMinor < input.policy.policyMaxBidMinor',
+    ],
+    NEGATIVE_CONTRIBUTION_ZERO: [
+      '/packages/decision-engine/src/engine.ts',
+      'contribution <= 0n',
+      'contribution < 0n',
+    ],
+    PROFIT_ADDS_SPEND: [
+      '/packages/decision-engine/src/estimator.ts',
+      'expectedUnits.multiply(contributionMinor).subtract(expectedSpend)',
+      'expectedUnits.multiply(contributionMinor).add(expectedSpend)',
+    ],
+    QUANTUM_HALF_UP: [
+      '/packages/decision-engine/src/rational.ts',
+      'value - lower <= upper - value ? lower : upper',
+      'value - lower < upper - value ? lower : upper',
+    ],
+    STALE_SNAPSHOT_BYPASS: [
+      '/packages/decision-engine/src/engine.ts',
+      '!input.snapshotApplyEligible || input.wbMinimumBidMinor === null',
+      'false || input.wbMinimumBidMinor === null',
+    ],
+  });
+const selectedMutation =
+  process.env.WB_DECISION_MUTANT === undefined
+    ? undefined
+    : mutationReplacements[process.env.WB_DECISION_MUTANT];
+
 /**
  * Defines isolated verification projects so CI can run each acceptance layer independently.
  *
  * @returns Vitest workspace configuration with deterministic timeouts and coverage gates.
  */
 export default defineConfig({
+  plugins:
+    selectedMutation === undefined
+      ? []
+      : [
+          {
+            enforce: 'pre',
+            name: `decision-mutant-${process.env.WB_DECISION_MUTANT ?? 'unknown'}`,
+            /**
+             * Applies one verified source mutation to its exact module anchor.
+             *
+             * @param code - Module source.
+             * @param id - Absolute module identifier.
+             * @returns Mutated source or null for unrelated modules.
+             */
+            transform(code, id) {
+              const [fileSuffix, search, replacement] = selectedMutation;
+              if (!id.endsWith(fileSuffix)) {
+                return null;
+              }
+              return code.replace(search, replacement);
+            },
+          },
+        ],
   resolve: {
     alias: {
       '@wb-bidder/config': fileURLToPath(
@@ -17,6 +93,9 @@ export default defineConfig({
       ),
       '@wb-bidder/data-sync': fileURLToPath(
         new URL('./packages/data-sync/src/index.ts', import.meta.url),
+      ),
+      '@wb-bidder/decision-engine': fileURLToPath(
+        new URL('./packages/decision-engine/src/index.ts', import.meta.url),
       ),
       '@wb-bidder/wb-api': fileURLToPath(
         new URL('./packages/wb-api/src/index.ts', import.meta.url),
@@ -29,6 +108,13 @@ export default defineConfig({
       include: [
         'packages/config/**/*.ts',
         'packages/contracts/src/money.ts',
+        'packages/decision-engine/src/checksum.ts',
+        'packages/decision-engine/src/engine.ts',
+        'packages/decision-engine/src/estimator.ts',
+        'packages/decision-engine/src/experiments.ts',
+        'packages/decision-engine/src/ids.ts',
+        'packages/decision-engine/src/policy.ts',
+        'packages/decision-engine/src/rational.ts',
         'packages/wb-api/src/money.ts',
       ],
       provider: 'v8',

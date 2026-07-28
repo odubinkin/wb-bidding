@@ -64,6 +64,8 @@ docker compose -f docker-compose.mock-only.yml down
 описаны в [документации WB API](docs/wb-api-integration.md).
 Архитектура jobs, checkpoints, target snapshots и статистических evidence описана в
 [документации синхронизации](docs/data-synchronization.md).
+Алгоритм прибыли, exact arithmetic, bounds и exploration описаны в
+[документации Decision Engine](docs/decision-engine.md).
 
 ## Локальная проверка
 

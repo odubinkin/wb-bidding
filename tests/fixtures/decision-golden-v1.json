@@ -1,0 +1,13 @@
+{
+  "fixtureVersion": "decision-golden-v1",
+  "description": "Three eligible CPM buckets; conservative profit is maximized by the lower evidenced bid.",
+  "expected": {
+    "action": "DECREASE",
+    "boundedBidMinor": "80",
+    "bucketCount": 3,
+    "minimumCandidateCount": 3,
+    "outcomeReasonCode": "PROFIT_MAXIMIZING_DECREASE",
+    "queueEligible": true,
+    "strategyReasonCode": "PROFIT_MAXIMIZING_DECREASE"
+  }
+}

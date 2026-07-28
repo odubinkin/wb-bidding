@@ -1,5 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import type { INestApplication } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import type { Server } from 'node:http';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -40,6 +41,19 @@ describeWithDatabase('WB mock to PostgreSQL synchronization', () => {
     const baseUrl = new URL(`http://127.0.0.1:${String(address.port)}`);
     pool = new Pool({ connectionString: databaseUrl });
     const repository = new DataSyncRepository(pool);
+    await repository.ensureAccountBinding(
+      {
+        accountCurrency: 'RUB',
+        accountTimezone: 'Europe/Moscow',
+        environment: 'MOCK',
+        sellerSid: '00000000-0000-4000-8000-000000000001',
+        tokenCategory: 'PROMOTION',
+        tokenFingerprint: '1'.repeat(64),
+        tokenFor: null,
+        tokenType: 'TEST',
+      },
+      randomUUID(),
+    );
     const api = new WbApiClient({
       baseUrl,
       breakers: new CircuitBreakerRegistry(),

@@ -12,6 +12,7 @@ COPY apps/wb-mock/package.json apps/wb-mock/package.json
 COPY packages/config/package.json packages/config/package.json
 COPY packages/contracts/package.json packages/contracts/package.json
 COPY packages/data-sync/package.json packages/data-sync/package.json
+COPY packages/decision-engine/package.json packages/decision-engine/package.json
 COPY packages/wb-api/package.json packages/wb-api/package.json
 RUN pnpm install --frozen-lockfile
 
@@ -22,6 +23,7 @@ RUN pnpm --filter @wb-bidder/config build \
     && pnpm --filter @wb-bidder/contracts build \
     && pnpm --filter @wb-bidder/wb-api build \
     && pnpm --filter @wb-bidder/data-sync build \
+    && pnpm --filter @wb-bidder/decision-engine build \
     && pnpm --filter @wb-bidder/bidder build
 RUN pnpm deploy --filter @wb-bidder/bidder --prod /runtime
 

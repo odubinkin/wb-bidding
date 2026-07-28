@@ -27,8 +27,9 @@
     "test:integration": "vitest run tests/integration --passWithNoTests",
     "test:contract": "vitest run tests/contract --passWithNoTests",
     "test:e2e": "vitest run tests/e2e --passWithNoTests",
-    "test:property": "vitest run tests/property --passWithNoTests",
-    "test:mutation": "node scripts/test-placeholder.mjs mutation",
+    "test:golden": "vitest run tests/golden",
+    "test:property": "vitest run tests/property",
+    "test:mutation": "vitest run tests/mutation && node scripts/run-decision-mutation-tests.mjs",
     "test:load": "node scripts/test-placeholder.mjs load",
     "test:load-sync": "vitest run tests/load/sync-capacity.load.spec.ts",
     "test:runbook": "node scripts/test-placeholder.mjs runbook",
@@ -42,7 +43,7 @@
     "docs:check": "node scripts/test-placeholder.mjs docs",
     "security:scan": "pnpm audit --audit-level=high",
     "smoke:built": "node scripts/smoke-built-apps.mjs",
-    "quality": "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run test:unit && pnpm run test:openapi && pnpm run test:contract && pnpm run prisma:validate && pnpm run profile:checksum && pnpm run verify:wb-contract-fixtures && pnpm run verify:deprecated-endpoints"
+    "quality": "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run test:unit && pnpm run test:golden && pnpm run test:openapi && pnpm run test:contract && pnpm run prisma:validate && pnpm run profile:checksum && pnpm run verify:wb-contract-fixtures && pnpm run verify:deprecated-endpoints"
   },
   "dependencies": {
     "@nestjs/common": "11.1.28",
