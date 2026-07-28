@@ -4,7 +4,7 @@ title: "Stage 5: production readiness and complete DoD audit"
 status: "DOING"
 priority: "high"
 owner: "CODER"
-revision: 5
+revision: 6
 origin:
   system: "manual"
 depends_on:
@@ -39,11 +39,11 @@ plan_approval:
   updated_by: "ORCHESTRATOR"
   note: null
 verification:
-  state: "pending"
-  updated_at: null
-  updated_by: null
-  note: null
-  attempts: 0
+  state: "needs_rework"
+  updated_at: "2026-07-28T19:24:51.501Z"
+  updated_by: "CODER"
+  note: "Local Stage 5 runtime and quality gates pass; release DoD remains open."
+  attempts: 1
 commit: null
 comments:
   -
@@ -57,8 +57,14 @@ events:
     from: "TODO"
     to: "DOING"
     note: "Start: continue direct-mode task in current checkout."
+  -
+    type: "verify"
+    at: "2026-07-28T19:24:51.501Z"
+    author: "CODER"
+    state: "needs_rework"
+    note: "Local Stage 5 runtime and quality gates pass; release DoD remains open."
 doc_version: 3
-doc_updated_at: "2026-07-28T17:12:36.841Z"
+doc_updated_at: "2026-07-28T19:24:51.564Z"
 doc_updated_by: "CODER"
 description: "Complete security hardening, observability, retention, non-root Docker images, all Compose scenarios, full CI gates, load, graceful-shutdown, outage, rollback and kill-switch validation, Russian documentation and Mermaid diagrams, endpoint-profile evidence, AC-01 through AC-30 traceability, section 31 evidence, sandbox smoke harness and explicit deviations register. Production remains write-disabled until separately approved."
 sections:
@@ -90,11 +96,44 @@ sections:
     11. If SANDBOX_FIXTURE_MANIFEST and Test credentials are supplied with explicit external-action approval, run sandbox smoke. Expected: documented safe subset passes without unexplained discrepancies; otherwise section 31 remains open rather than being waived.
   Verification: |-
     <!-- BEGIN VERIFICATION RESULTS -->
+    ### 2026-07-28T19:24:51.501Z — VERIFY — needs_rework
+
+    By: CODER
+
+    Note: Local Stage 5 runtime and quality gates pass; release DoD remains open.
+    Attempts: 1
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-28T17:12:36.841Z, excerpt_hash=sha256:0f7ebe81cafca4ae9eda8825f8edf22adeacc6abe07cae0aa0bc3ca8b936f5a3
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607281323-PZZ48N/blueprint/resolved-snapshot.json
+    - old_digest: dd16438f127e6adb6f7a1435b7f7fc1e7ab22cfda2fe1298c4b616ac2f02c0ae
+    - current_digest: dd16438f127e6adb6f7a1435b7f7fc1e7ab22cfda2fe1298c4b616ac2f02c0ae
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202607281323-PZZ48N
+
+    DecisionContextRef:
+    - operator_action: run_exact_argv
+    - can_execute_now: true
+    - safe_command: agentplane task verify-show 202607281323-PZZ48N
+    - diagnostic_command: none
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: true
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: none
+
     <!-- END VERIFICATION RESULTS -->
   Rollback Plan: |-
     - Revert task-related commit(s).
     - Re-run required checks to confirm rollback safety.
-  Findings: ""
+  Findings: |-
+    - Observation: E2E-24 and E2E-49 lack a verified mock-only cluster profile/executor; Docker runtime/image/dependency scans, sandbox smoke, and product/API owner decisions have no evidence.
+      Impact: AC-14, AC-24, AC-30 and DoD 31.1/31.3/31.4/31.10 cannot be marked complete; production writes remain disabled.
+      Resolution: Implement the immutable verified mock cluster contract and cluster write/delete pipeline; then obtain green CI/Docker, sandbox manifest/Test credential evidence, and signed owner decisions.
 id_source: "generated"
 ---
 ## Summary
@@ -134,6 +173,36 @@ Complete security hardening, observability, retention, non-root Docker images, a
 ## Verification
 
 <!-- BEGIN VERIFICATION RESULTS -->
+### 2026-07-28T19:24:51.501Z — VERIFY — needs_rework
+
+By: CODER
+
+Note: Local Stage 5 runtime and quality gates pass; release DoD remains open.
+Attempts: 1
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-28T17:12:36.841Z, excerpt_hash=sha256:0f7ebe81cafca4ae9eda8825f8edf22adeacc6abe07cae0aa0bc3ca8b936f5a3
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607281323-PZZ48N/blueprint/resolved-snapshot.json
+- old_digest: dd16438f127e6adb6f7a1435b7f7fc1e7ab22cfda2fe1298c4b616ac2f02c0ae
+- current_digest: dd16438f127e6adb6f7a1435b7f7fc1e7ab22cfda2fe1298c4b616ac2f02c0ae
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202607281323-PZZ48N
+
+DecisionContextRef:
+- operator_action: run_exact_argv
+- can_execute_now: true
+- safe_command: agentplane task verify-show 202607281323-PZZ48N
+- diagnostic_command: none
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: true
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: none
+
 <!-- END VERIFICATION RESULTS -->
 
 ## Rollback Plan
@@ -142,3 +211,7 @@ Complete security hardening, observability, retention, non-root Docker images, a
 - Re-run required checks to confirm rollback safety.
 
 ## Findings
+
+- Observation: E2E-24 and E2E-49 lack a verified mock-only cluster profile/executor; Docker runtime/image/dependency scans, sandbox smoke, and product/API owner decisions have no evidence.
+  Impact: AC-14, AC-24, AC-30 and DoD 31.1/31.3/31.4/31.10 cannot be marked complete; production writes remain disabled.
+  Resolution: Implement the immutable verified mock cluster contract and cluster write/delete pipeline; then obtain green CI/Docker, sandbox manifest/Test credential evidence, and signed owner decisions.
