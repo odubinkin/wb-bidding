@@ -5,7 +5,7 @@
 | Поле | Значение |
 |---|---|
 | Назначение | Техническое задание на разработку сервиса автоматического управления ставками в кампаниях WB Продвижение |
-| Версия | 1.3 |
+| Версия | 1.4 |
 | Статус | Готово к декомпозиции и оценке разработки |
 | Дата актуализации сведений WB API | 28 июля 2026 года |
 | Язык продукта и документации | Русский |
@@ -19,6 +19,8 @@
 - **MAY / МОЖЕТ** — допустимый вариант реализации.
 
 Сведения о Wildberries, включая методы, лимиты, поля и статусы, должны быть повторно сверены с официальной документацией непосредственно перед началом реализации и перед каждым production-релизом. WB может изменять API независимо от релизов биддера.
+
+Результат каждой сверки фиксируется как неизменяемый versioned endpoint profile: дата проверки, ссылки на использованные страницы OpenAPI/release notes, checksum сохранённых contract fixtures, версия runtime schemas и статус каждого wire-контракта `VERIFIED | UNVERIFIED | DEPRECATED`. Production artifact ДОЛЖЕН содержать идентификатор этого профиля; изменение endpoint, поля, единицы, лимита или семантики требует новой версии профиля и повторного contract test.
 
 ## 2. Цель и контекст
 
@@ -75,7 +77,7 @@ expectedProfit =
 - модели оплаты `cpm` и `cpc`, если конкретная операция поддерживается текущим WB API;
 - кампании с типом ставки `manual` и `unified`;
 - ставки карточек товаров для сочетаний campaign/payment/bid/placement type, у которых доступная статистика позволяет однозначно связать результат с управляемой ставкой;
-- ставки поисковых кластеров только для поддерживаемых WB API кампаний с ручной ставкой и моделью оплаты `cpm`;
+- ставки поисковых кластеров только для поддерживаемых WB API кампаний с ручной ставкой и моделью оплаты `cpm`, и только после верификации cluster bid contract;
 - синхронизация кампаний, ставок, минимальных ставок и статистики;
 - расчёт метрик и правил без машинного обучения;
 - очередь решений в PostgreSQL;
@@ -130,7 +132,7 @@ expectedProfit =
 - актуальная кампания с единой или ручной ставкой имеет тип `9`;
 - `bid_type` принимает `manual` или `unified`;
 - `payment_type` принимает `cpm` или `cpc`;
-- ставки актуальных методов передаются в копейках;
+- card bids актуальных методов явно передаются в полях с семантикой копеек; cluster field `bid` требует отдельной верификации;
 - информация WB синхронизируется не мгновенно: в документации указаны ориентиры до 3 минут для данных, до 1 минуты для статусов и до 30 секунд для ставок;
 - статистика sandbox формируется на искусственных данных и имеет ограничения тестового контура;
 - `429 Too Many Requests` требует ожидания по заголовкам WB.
@@ -146,15 +148,17 @@ expectedProfit =
 | Текущие ставки кластеров | `POST /adv/v0/normquery/get-bids` | до 100 пар `advert_id` + `nm_id` | 5 запросов/с, интервал 200 мс, burst 10 |
 | Активные и неактивные кластеры | `POST /adv/v0/normquery/list` | до 100 пар; возвращаются кластеры, по которым было не меньше 100 показов | 5 запросов/с, интервал 200 мс, burst 10 |
 | Изменение ставок кластеров | `POST /adv/v0/normquery/bids` | до 100 ставок; только поддерживаемые кампании | 2 запроса/с, интервал 500 мс, burst 4 |
+| Удаление явно заданных ставок кластеров | `DELETE /adv/v0/normquery/bids` | endpoint-specific batch и payload фиксируются в verified profile | по актуальному endpoint profile и response headers |
 | Статистика кампаний | `GET /adv/v3/fullstats` | до 50 ID, период до 31 дня, статусы `7`, `9`, `11` | 3 запроса/мин, интервал 20 с, burst 1 |
 | Дневная статистика кластеров | `POST /adv/v1/normquery/stats` | до 100 пар, период дат | 10 запросов/мин, интервал 6 с, burst 20 |
 | Рекомендуемые ставки | `GET /api/advert/v0/bids/recommendations` | один `advertId` + `nmId`; только `cpm` | 5 запросов/мин, интервал 12 с, burst 5 |
 | Бюджет кампании | `GET /adv/v1/budget` | один ID кампании | 4 запроса/с, интервал 250 мс, burst 4 |
-| Проверка доступности | `GET /ping` | base URL выбранного режима | согласно общей документации |
+| Идентификация продавца | `GET https://common-api.wildberries.ru/api/v1/seller-info` | production account binding; без записи | по актуальному common API profile и response headers |
+| Проверка доступности | `GET /ping` | base URL выбранного режима; проверяет достижимость и авторизацию, но не доступность всех сервисов | не более 3 запросов за 30 секунд |
 
 Точные схемы запросов и ответов не должны копироваться вручную из этого ТЗ. При реализации адаптера они ДОЛЖНЫ быть зафиксированы contract fixtures и сверены с актуальной OpenAPI-документацией.
 
-Устаревшие `GET /adv/v1/promotion/adverts`, `GET /adv/v0/auction/adverts`, `PATCH /adv/v0/bids`, `PATCH /adv/v0/auction/bids` и `POST /adv/v2/fullstats` НЕ ДОЛЖНЫ использоваться.
+Устаревшие `POST /adv/v1/promotion/adverts`, `GET /adv/v0/auction/adverts`, `PATCH /adv/v0/bids`, `PATCH /adv/v0/auction/bids` и `POST /adv/v2/fullstats` НЕ ДОЛЖНЫ использоваться.
 
 ### 4.3. Семантика мест размещения
 
@@ -172,7 +176,7 @@ WB позволяет передавать отдельные card bids для `
 | Карточка в кампании `unified`, placement `combined`, `cpm` или `cpc` | дневной `fullstats` по campaign + `nmId` | `APPLY` |
 | Карточка в кампании `manual` с ровно одним активным placement, `cpm` или `cpc` | дневной `fullstats` по campaign + `nmId`; единственный placement делает атрибуцию однозначной | `APPLY` |
 | Карточка в кампании `manual` с одновременно активными `search` и `recommendations` | `fullstats` не разделяет результат по placement | `OBSERVE_ONLY` либо `BLOCKED` с `INSUFFICIENT_ATTRIBUTION_GRANULARITY`; два независимых write-решения запрещены |
-| Поисковый кластер `manual cpm` | `POST /adv/v1/normquery/stats` по campaign + `nmId` + `normQuery` | `APPLY` |
+| Поисковый кластер `manual cpm` | `POST /adv/v1/normquery/stats` по campaign + `nmId` + `normQuery` | `APPLY` только при `clusterBidContract=VERIFIED`; иначе `OBSERVE_ONLY` с `UNVERIFIED_CLUSTER_BID_CONTRACT` |
 | Поисковый кластер `manual cpc` | статистика доступна без `views`, `ctr`, `cpm`, но cluster bid write не поддерживается | только диагностика, `UNSUPPORTED_CAMPAIGN` для write |
 
 «Активный placement» определяется по подтверждённой конфигурации campaign/placement API, а не только по ненулевому bid: нулевое либо отсутствующее значение ставки не считается достаточным доказательством выключенного placement.
@@ -181,15 +185,40 @@ WB позволяет передавать отдельные card bids для `
 
 `POST /adv/v0/normquery/list` используется для discovery кластеров, но его результат ограничен кластерами, по которым было не меньше 100 показов. `get-bids` и statistics могут дополнять discovery управляемыми или наблюдавшимися кластерами. Bidder не создаёт и не оптимизирует кластер, которого нет ни в одном актуальном WB-источнике.
 
+Опубликованная документация не даёт достаточного основания переносить семантику card bid endpoints на поле `bid` методов `/adv/v0/normquery/*`: единица ставки, нормативный minimum, состояние отсутствующего override и эффект `DELETE` считаются отдельным cluster bid contract. До его проверки cluster writes fail closed. Версия `clusterBidContract` получает `VERIFIED` только после contract-spike, который:
+
+- фиксирует точную wire-единицу и integer/decimal type поля `bid`;
+- определяет нормативный источник minimum и запрещает считать `bidKopecksMin` из recommendations таким источником без прямого подтверждения;
+- различает `EXPLICIT`, `ABSENT` и `UNKNOWN` override, не выводя наследование из отсутствующего поля;
+- проверяет `POST`, `DELETE`, partial response и read-after-write/read-after-delete;
+- сохраняет production/sandbox fixtures, checksum и дату проверки.
+
+Любая смена проверенной семантики возвращает профиль в `UNVERIFIED`, отключает cluster APPLY и создаёт alert. Удаление cluster bid разрешено только как явно смоделированное решение восстановления состояния; оно не подменяется отправкой нулевой ставки.
+
 `GET /api/advert/v0/bids/recommendations` возвращает для `cpm` аукционные ориентиры карточки (`competitiveBid`, `leadersBid`, `top2`) и уровни охвата кластеров (`reachMin`, `reachMedium`, `reachMax`). Эти значения МОГУТ добавляться в множество candidate bids, но не являются доказательством прибыльности и не заменяют profit estimator.
 
 ### 4.4. Денежные единицы и поля статистики
 
-Ставки актуальных bid endpoints передаются в полях, которые WB называет копейками (`bid_kopecks`, `bids_kopecks`, `bidKopecks`). Во внутренней модели используется нейтральный термин `minor unit`: одна сотая `ACCOUNT_CURRENCY`. Суффикс `Kopecks` допустим только в wire DTO WB adapter; доменные поля имеют суффикс `Minor`.
+Ставки актуальных card-bid endpoints передаются в полях, которые WB называет копейками (`bid_kopecks`, `bids_kopecks`, `bidKopecks`). Во внутренней модели используется нейтральный термин `minor unit`: одна сотая `ACCOUNT_CURRENCY`. Суффикс `Kopecks` допустим только в wire DTO WB adapter; доменные поля имеют суффикс `Minor`. Поле cluster `bid` не нормализуется в minor units до `clusterBidContract=VERIFIED`.
 
 Это не означает, что все денежные поля всех ответов WB также выражены в сотых долях: статистические суммы и бюджеты могут иметь другую документированную единицу и десятичный формат.
 
 Адаптер ДОЛЖЕН иметь явную таблицу единиц на уровне `endpoint + field` и конвертировать значение во внутренние minor units через точную decimal-арифметику. `ACCOUNT_CURRENCY` в v1 должен обозначать валюту с двумя десятичными знаками; несовместимая scale вызывает startup failure. Запрещено применять единое слепое умножение ко всем денежным полям.
+
+Нормативная semantic matrix:
+
+| Endpoint / wire fields | Тип и единица | Внутренняя нормализация | Статус/ограничение |
+|---|---|---|---|
+| `GET /api/advert/v2/adverts`: `bids_kopecks`; `POST /api/advert/v1/bids/min`: bid fields с семантикой kopecks; `PATCH /api/advert/v1/bids`: `bid_kopecks` | integer, сотые доли валюты аккаунта | `BIGINT ...Minor`, без масштабирования | `VERIFIED` текущим card-bid profile |
+| `GET /api/advert/v0/bids/recommendations`: `bidKopecks` и card auction hints | integer, сотые доли валюты аккаунта | candidate hint в `...Minor` | не является minimum или доказательством прибыли |
+| `GET /adv/v3/fullstats`: `sum`, `sum_price` | decimal в основной денежной единице ответа WB | exact decimal × currency scale → `spendMinor`, `attributedRevenueMinor` | точный type/scale подтверждается fixture профиля |
+| `POST /adv/v1/normquery/stats`: `spend`, `cpc`, `cpm` | decimal в основной денежной единице ответа WB | exact decimal × currency scale → соответствующие `...Minor` | schema различается для CPM/CPC; поля показов опциональны для CPC |
+| `GET /adv/v1/budget`: `cash`, `netting`, `total` | wire type читается schema adapter | сохраняются как raw-normalized значения без имени «остаток» | `UNVERIFIED` для decision semantics до отдельного budget contract |
+| `/adv/v0/normquery/get-bids`, `/bids`, `DELETE /bids`: `bid` и состояние override | единица и absence/delete semantics не переносятся с card endpoints | write запрещён | `UNVERIFIED_CLUSTER_BID_CONTRACT` до отдельного verified profile |
+
+Точные wire-названия вложенных полей и schemas хранятся в versioned fixtures адаптера, а не угадываются доменным слоем. Profile обязан задавать для каждого поля JSON type, optionality, unit, currency scale, rounding rule/quantum, path в payload, aggregation level и date semantics. Неизвестное или новое поле не используется в решении до явной классификации.
+
+Для `fullstats` сохраняются исходные строки на самом нижнем доступном дневном уровне. Нормализатор НЕ ДОЛЖЕН одновременно суммировать родительские totals и их дочерние `nm`/`appType` rows. Natural key raw row включает как минимум `advertId`, `nmId`, WB statistical date и присутствующие dimensions; затем один детерминированный aggregation step схлопывает `appType` ровно один раз до target-day. Отсутствие однозначного уровня агрегации делает день `INVALID`.
 
 Минимальная нормализация статистики:
 
@@ -204,7 +233,7 @@ WB позволяет передавать отдельные card bids для `
 | `sum_price` | атрибутированная сумма заказов, не гарантированная net revenue |
 | `canceled` | отмены, если поле доступно |
 
-`orderedUnits` для profit-формулы берётся из `shks`. Если `shks` отсутствует, fallback на `orders` разрешён только с флагом качества `ORDER_COUNT_AS_UNIT_FALLBACK` и отражается в explanation. Предоставленный продавцом `expectedContributionBeforeAdsMinor` должен иметь ту же семантику единицы, которая применяется к `orderedUnits`.
+`orderedUnits` для profit-формулы берётся только из `shks`. `orders` имеет другую размерность и может использоваться только как диагностический conversion counter. Если `shks` отсутствует, profit estimator и APPLY блокируются с `MISSING_ORDERED_UNITS`; fallback `orders → orderedUnits` запрещён. Предоставленный продавцом `expectedContributionBeforeAdsMinor` ДОЛЖЕН иметь семантику одной единицы `shks`.
 
 ## 5. Архитектурные принципы
 
@@ -215,7 +244,7 @@ WB позволяет передавать отдельные card bids для `
 5. **Детерминированность.** Одинаковые входные данные, версия политики и конфигурация дают одинаковое решение.
 6. **Fail closed.** При устаревших, неполных или противоречивых данных ставка не изменяется.
 7. **Объяснимость.** Каждое решение содержит формулы, значения входов, сработавшие ограничения и причину.
-8. **Деньги — целые числа.** Ставки и денежные суммы хранятся как `BigInt` в minor units — сотых долях константы `ACCOUNT_CURRENCY`; wire-поля ставок WB называются копейками только внутри адаптера. `float` для денег запрещён.
+8. **Деньги — целые числа.** Верифицированные ставки и денежные суммы хранятся как `BigInt` в minor units — сотых долях константы `ACCOUNT_CURRENCY`; card wire-поля ставок WB называются копейками только внутри адаптера. Неверифицированное cluster wire-значение не попадает в доменную денежную модель. `float` для денег запрещён.
 9. **UTC внутри системы.** В БД и API сервиса используется UTC; локальная зона применяется только для календарных политик продавца.
 
 ## 6. Компоненты
@@ -247,7 +276,7 @@ Observability ──────> logs, /health/live, /health/ready, /metrics
 | `MetricsCalculationModule` | Детерминированно рассчитывает метрики из валидных данных PostgreSQL и формирует неизменяемый `MetricSnapshot` со всеми входами и checksum. Не обращается к WB API, не выбирает новую ставку и не ставит решения в очередь. |
 | `DecisionModule` | Применяет версионированные политики и guardrails к `MetricSnapshot`, перебирает допустимые ставки и формирует детерминированный `BidDecision` с reason code и explanation. Не обращается к WB API и не применяет решение. |
 | `DecisionQueueModule` | Хранит state machine очереди решений, обеспечивает semantic deduplication, приоритет, lease/claim, переходы состояний и retry metadata. Не рассчитывает решения и не выполняет WB-запросы. |
-| `ExecutorModule` | Получает решения из очереди, повторно проверяет их актуальность, пакетирует операции, выполняет write через `WbApiModule` и фиксирует `WbWriteAttempt`. Не пересчитывает решение и не считает HTTP success окончательным подтверждением изменения. |
+| `ExecutorModule` | Получает решения из очереди, повторно проверяет их актуальность, пакетирует операции, выполняет write через `WbApiModule` и фиксирует request-level `WbWriteAttempt` с item-level `WbWriteAttemptItem`. Не пересчитывает решение и не считает HTTP success окончательным подтверждением изменения. |
 | `ReconciliationModule` | Выполняет verification read, сопоставляет фактическое состояние WB с отправленным решением, разрешает `UNKNOWN_RESULT`, восстанавливает зависшие leases и завершает либо отменяет queue item. Не повторяет write с неизвестным результатом без предварительной проверки. |
 | `PolicyModule` | Валидирует, версионирует и хранит политики автоматизации, назначения политик кампаниям и режимы `enabled`, `disabled` и `observe-only`. Не рассчитывает метрики или решения и не изменяет ставки напрямую. |
 | `ProductEconomicsModule` | Управляет неизменяемыми версиями product economics, conditional update, идемпотентностью и асинхронным batch-импортом, включая dry-run и построчные результаты. Не реализует формулу прибыли и не обращается к WB API. |
@@ -296,7 +325,9 @@ Data Sync Worker ДОЛЖЕН:
 
 Между последовательными statistical snapshots система МОЖЕТ формировать intraday deltas для budget guardrail и мониторинга аномального расхода. Такие deltas не используются как самостоятельные observations profit estimator: WB возвращает статистику по календарным датам и может поздно доатрибутировать заказы и расходы к уже прочитанному дню.
 
-Основная единица bid-response evidence — завершённый `BidPerformanceDay`. Он связывает финализированную дневную статистику с bid state, который был подтверждён и неизменен весь соответствующий WB statistical day. Частичный день, день изменения ставки, placement configuration, campaign status или payment type, а также день с неизвестным состоянием исключается из profit estimator.
+Основная единица bid-response evidence — завершённый `BidPerformanceDay`. Он связывает финализированную дневную статистику с bid state, который был подтверждён и неизменен весь соответствующий WB statistical day. Граница дня берётся из raw date WB и versioned `wbStatisticalDayProfile`, а не выводится из `ACCOUNT_TIMEZONE`. Частичный день, день изменения ставки, placement configuration, campaign status или payment type, а также день с неизвестным состоянием исключается из profit estimator.
+
+История, предшествующая началу непрерывного наблюдения bidder, не считается доказательством неизменности ставки. Eligible period начинается только после warm-up, когда зафиксирован полный statistical day с непрерывным покрытием bid/configuration snapshots. Разрыв больше `bidStateMaxObservationGapMinutes`, изменение `Campaign.wbChangedAt` или других WB change markers, смена policy/product economics/configuration либо manual write инвалидируют затронутый день. При `externalWriteControlMode=SHARED` внешний change-and-revert между двумя чтениями невозможно исключить только current-state API; поэтому APPLY использует день лишь при наличии достаточного WB change marker и непрерывного coverage по profile, иначе target остаётся `OBSERVE_ONLY`. Строгий APPLY без такого marker требует подтверждённого `EXCLUSIVE` режима управления ставкой.
 
 ### 7.3. Шаг 3. Расчёт метрик
 
@@ -331,7 +362,7 @@ Decision Engine ДОЛЖЕН:
 4. построить допустимые candidate bids и оценить консервативную дневную прибыль каждого обеспеченного данными кандидата;
 5. выбрать ставку с максимальным `conservativeProfitScore`;
 6. применить floor, cap, hysteresis, cooldown и ограничение скорости изменения;
-7. сформировать `NO_CHANGE`, `INCREASE`, `DECREASE` или `BLOCKED`;
+7. сформировать `NO_CHANGE`, `INCREASE`, `DECREASE`, `RESTORE_ABSENT_OVERRIDE` или `BLOCKED`; restore допустим только для verified cluster contract и доказанного исходного `ABSENT`;
 8. сохранить объяснение независимо от наличия изменения.
 
 ### 7.5. Шаг 5. Постановка в очередь
@@ -347,8 +378,9 @@ Executor Engine ДОЛЖЕН:
 - применить endpoint-specific rate limit;
 - сгруппировать совместимые решения в пакет;
 - создать durable `WbWriteAttempt` непосредственно перед исходящим write-запросом;
+- создать по одному durable `WbWriteAttemptItem` для каждого решения в request batch;
 - отправить запрос;
-- сохранить transport result и redacted metadata в `WbWriteAttempt`;
+- сохранить request-level transport result в `WbWriteAttempt`, а item-level результат и reconciliation — в соответствующих `WbWriteAttemptItem`;
 - перейти к проверке результата.
 
 ### 7.7. Шаг 7. Проверка результата
@@ -371,7 +403,24 @@ Executor ДОЛЖЕН:
 
 ### 8.1. Основные сущности
 
-Параметры единственного WB-аккаунта (`mode`, token secret reference, timezone, `ACCOUNT_CURRENCY`, automation/write flags) задаются типизированной конфигурацией deployment и не моделируются как изменяемая коллекция seller accounts в PostgreSQL.
+Параметры единственного WB-аккаунта (`mode`, token secret reference, timezone, `ACCOUNT_CURRENCY`, automation/write flags) задаются типизированной конфигурацией deployment. При этом identity, environment, currency и timezone неизменно привязываются к БД, чтобы рестарт или ротация токена не могли незаметно переинтерпретировать накопленные данные.
+
+#### `DeploymentAccountBinding`
+
+Ровно одна строка на БД:
+
+- `id` — фиксированный singleton key;
+- `sellerSid`;
+- `wbEnvironment MOCK | SANDBOX | PROD`;
+- `accountCurrency`;
+- `accountTimezone`;
+- `tokenCategory`;
+- `tokenIdentityFingerprint` — необратимый fingerprint идентификатора/claims, не сам token;
+- `initializedAt`, `lastValidatedAt`;
+- `bindingVersion`;
+- unique `(sellerSid, wbEnvironment)`.
+
+При первом валидном подключении production/sandbox token profile локально разбирает JWT, проверяет `sid`, `exp`, access-category claims и read-only bit, затем после успешного WB API вызова создаёт binding. В production `sellerSid` дополнительно сверяется через `GET https://common-api.wildberries.ru/api/v1/seller-info`; sandbox использует подтверждённую identity тестового token profile, а mock — детерминированный `sellerSid` seed-сценария без требования JWT. Ротация токена разрешена только для того же `sellerSid`, environment и допустимой категории. Несовпадение `sellerSid`, environment, `ACCOUNT_CURRENCY` или `ACCOUNT_TIMEZONE` с существующим binding вызывает startup failure до запуска scheduler; изменить binding можно только отдельной документированной миграцией в пустой/новой БД. Токен и secret reference в binding не сохраняются.
 
 #### `Campaign`
 
@@ -398,8 +447,9 @@ Executor ДОЛЖЕН:
 - `nmId BIGINT`;
 - `placement COMBINED | SEARCH | RECOMMENDATIONS`;
 - `normQuery TEXT NULL`;
-- `currentBidMinor BIGINT`;
-- `minimumBidMinor BIGINT`;
+- `currentBidMinor BIGINT NULL`; для card target значение обязательно, `NULL` обязателен для cluster state `ABSENT|UNKNOWN`;
+- `minimumBidMinor BIGINT NULL`; для card target значение обязательно перед write, для cluster допустимо только из verified cluster contract;
+- для cluster target: `clusterBidState EXPLICIT | ABSENT | UNKNOWN`, `clusterBidContractVersion NULL`;
 - `lastConfirmedAt`;
 - unique `(campaignId, nmId, placement, normQueryNormalized)`.
 
@@ -408,7 +458,7 @@ Executor ДОЛЖЕН:
 #### `CampaignStatDaily`
 
 - `wbCampaignId`, `nmId`, `date`;
-- опционально `placement` и `normQueryNormalized`;
+- опционально `placement`, `normQueryNormalized`, `appType` и другие wire dimensions профиля;
 - исходные счётчики;
 - `spendMinor`, `attributedRevenueMinor`;
 - `fetchedAt`, `sourceVersion`, `syncRunId`;
@@ -421,11 +471,14 @@ Executor ДОЛЖЕН:
 
 - `targetId`;
 - `wbStatisticDate`;
+- `statisticalDayProfileVersion`;
 - `confirmedBidMinor`;
 - для связанного manual-card target — полный `placementBidState`, чтобы доказать, что второй placement не влиял на общую статистику;
 - `campaignStatus`, `paymentType`, `bidType`, active placement configuration;
 - `viewsDelta NULL`, `clicksDelta`, `atbsDelta`, `ordersDelta`, `orderedUnitsDelta`, `spendDeltaMinor`, `attributedRevenueDeltaMinor`;
-- `orderedUnitsSource SHKS | ORDER_COUNT_FALLBACK`;
+- `orderedUnitsSource SHKS`;
+- `bidStateCoverageStartedAt`, `bidStateCoverageEndedAt`, `maxObservedGapMinutes`;
+- `externalWriteControlMode EXCLUSIVE | SHARED`, `changeMarkerCoverageStatus`;
 - ссылки на исходные daily statistical snapshots и bid/configuration snapshots;
 - `statisticsFinalizedAt`, `conversionLagDaysApplied`;
 - `status DRAFT | FINALIZED | SUPERSEDED | INVALID`, `supersededAt NULL`;
@@ -434,7 +487,7 @@ Executor ДОЛЖЕН:
 - unique `(targetId, wbStatisticDate, inputChecksum)`;
 - partial unique: не более одной текущей записи со статусом `FINALIZED` для `(targetId, wbStatisticDate)`.
 
-День допускается в profit estimator, только если ставка и конфигурация были подтверждены и неизменны весь день, кампания могла получать трафик, все deltas неотрицательны, source day старше conversion cutoff, а не менее `dayFinalizationMinStableReads` последовательных чтений на протяжении не менее `dayFinalizationMinStableMinutes` после lag дали одинаковый source checksum. Частичный день, день изменения ставки, разрыв, reset, manual write, неизвестный bid state или неоднозначная placement attribution получают quality flag и исключаются.
+День допускается в profit estimator, только если он не предшествует `bidStateCoverageStartedAt`, ставка и конфигурация были подтверждены и неизменны от начала до конца дня согласно `wbStatisticalDayProfile`, кампания могла получать трафик, все deltas неотрицательны, `shks` присутствует, source day старше conversion cutoff, а не менее `dayFinalizationMinStableReads` последовательных чтений на протяжении не менее `dayFinalizationMinStableMinutes` после lag дали одинаковый source checksum. Максимальный разрыв наблюдения не превышает `bidStateMaxObservationGapMinutes`; change markers покрывают период либо действует подтверждённый `EXCLUSIVE` режим. Частичный день, pre-enrollment history, день изменения ставки, разрыв, reset, manual write, `SHARED`-режим с неопределённым provenance, неизвестный bid state или неоднозначная placement attribution получают quality flag и исключаются.
 
 Финализированная запись неизменяема. Если overlap sync обнаруживает позднее изменение source day, прежняя запись атомарно получает `SUPERSEDED`, создаётся новая `DRAFT`, а зависящие ещё не отправленные решения получают `SUPERSEDED` и пересчитываются после новой finalization. Исторический audit продолжает ссылаться на старую версию.
 
@@ -494,6 +547,7 @@ Intraday deltas хранятся отдельно либо вычисляютс�
 - minimum sample thresholds отдельно для `cpm` и `cpc`;
 - `candidateBidStepPpm`, `explorationStepPpm`, `minBidObservationDays`;
 - `dayFinalizationMinStableReads`, `dayFinalizationMinStableMinutes`;
+- `bidStateMaxObservationGapMinutes`, `externalWriteControlMode EXCLUSIVE | SHARED`;
 - estimator safety parameters и prediction horizon;
 - `minExpectedProfitImprovementMinor`;
 - min/max bid;
@@ -526,7 +580,7 @@ Intraday deltas хранятся отдельно либо вычисляютс�
 
 - `id UUID PK`, значение UUIDv7 генерируется приложением;
 - target;
-- `action`;
+- `action NO_CHANGE | INCREASE | DECREASE | RESTORE_ABSENT_OVERRIDE | BLOCKED`;
 - `currentBidMinor`;
 - `proposedBidMinor`;
 - `boundedBidMinor`;
@@ -573,23 +627,32 @@ Intraday deltas хранятся отдельно либо вычисляютс�
 #### `WbWriteAttempt`
 
 - `id UUID PK`;
-- `decisionId FK`;
 - endpoint key, method;
 - correlation ID, WB request ID;
-- `attemptNumber`;
+- request checksum, batch size;
 - `status PREPARED | ACCEPTED | REJECTED | UNKNOWN`;
 - `preparedAt`, `completedAt`, latency;
 - HTTP status;
 - rate-limit response headers;
 - redacted request/response digest;
 - error class и error code;
-- `reconciliationStatus NOT_REQUIRED | PENDING | CONFIRMED | MISMATCH`, `reconciledAt`;
-- unique `(decisionId, attemptNumber)`;
 - index `(status, preparedAt)`.
 
-В PostgreSQL сохраняется одна запись на каждую попытку исходящего write-запроса к WB. Запись создаётся до отправки и дополняется transport result после ответа. HTTP `2xx` даёт статус `ACCEPTED`, но окончательное применение подтверждается только reconciliation. Timeout или разрыв соединения после возможной отправки даёт `UNKNOWN`; повторный write запрещён до завершения reconciliation.
+#### `WbWriteAttemptItem`
 
-Read-запросы не создают `WbWriteAttempt`. Их вызовы отражаются в structured logs и Prometheus-метриках, агрегаты выполнения — в `SchedulerRun`, а нормализованные бизнес-результаты — в соответствующих snapshots. Полные request/response payload не сохраняются в `WbWriteAttempt`; диагностический payload для аномалий следует отдельной ограниченной retention policy из раздела 13.3.
+- `id UUID PK`, `attemptId FK`, `decisionId FK`;
+- `requestIndex`, endpoint-specific target key;
+- отправленное действие `SET | DELETE` и значение `sentBidMinor NULL`; `DELETE` соответствует только decision action `RESTORE_ABSENT_OVERRIDE`;
+- `attemptNumber` — последовательный номер write для решения;
+- `status PREPARED | ACCEPTED | REJECTED | UNKNOWN`;
+- item HTTP/error code и redacted response fragment digest;
+- `reconciliationStatus NOT_REQUIRED | PENDING | CONFIRMED | MISMATCH`, `reconciledAt`;
+- unique `(attemptId, decisionId)`, unique `(decisionId, attemptNumber)`;
+- index `(reconciliationStatus, reconciledAt)`.
+
+В PostgreSQL сохраняется одна `WbWriteAttempt` на фактический исходящий HTTP write-запрос и один `WbWriteAttemptItem` на каждое включённое решение. Оба уровня создаются в одной транзакции до отправки. Request HTTP `2xx` даёт request status `ACCEPTED`, но item считается применённым только после reconciliation. Если WB возвращает partial result, статус каждого item берётся из его результата; отсутствие item result даёт `UNKNOWN`. Timeout или разрыв соединения после возможной отправки переводит request и все элементы без доказанного результата в `UNKNOWN`; повторный write каждого такого решения запрещён до его собственной reconciliation. Ошибка одного элемента не меняет успешный результат другого.
+
+Read-запросы не создают `WbWriteAttempt`. Их вызовы отражаются в structured logs и Prometheus-метриках, агрегаты выполнения — в `SchedulerRun`, а нормализованные бизнес-результаты — в соответствующих snapshots. Полные request/response payload не сохраняются в `WbWriteAttempt`/`WbWriteAttemptItem`; диагностический payload для аномалий следует отдельной ограниченной retention policy из раздела 13.3.
 
 #### `AuditEvent`
 
@@ -635,7 +698,7 @@ Read-запросы не создают `WbWriteAttempt`. Их вызовы от
 - естественный ключ target: `wbCampaignId`, `nmId`, `placement`, `normalizedNormQuery`;
 - границы статистических периодов, нормализованные значения использованных исходных записей и их source checksum;
 - выбранные `BidPerformanceDay` с их естественными ключами, WB statistical dates, подтверждёнными bid states, дневными deltas, finalization metadata, `qualityFlags` и `inputChecksum`;
-- текущая подтверждённая ставка, minimum bid WB и состояние подтверждения;
+- текущая подтверждённая ставка, применимый verified minimum bid WB, состояние override и версии endpoint contracts;
 - `productEconomicsVersion` и `expectedContributionBeforeAdsMinor`;
 - состояние бюджета, полнота, свежесть и иные входные flags, если они влияют на рассчитанные метрики.
 
@@ -872,9 +935,14 @@ rawRecommendedBid =
 
 Если `zeroConversionSpendThresholdMinor=DISABLED`, spend-ветвь zero-conversion condition отсутствует. Traffic threshold выбирается по `paymentType`, поэтому отсутствие `views` у CPC не блокирует правило.
 
-Budget guardrail использует WB-reported campaign budget snapshot только согласно подтверждённой endpoint contract semantics. Поля `cash`, `netting`, `total` не называются «остатком» без contract fixture. Внутренний `dailySpendLimitMinor` рассчитывается отдельно по intraday spend deltas.
+Budget guardrail состоит из двух независимых источников:
 
-Повышение запрещается, если budget snapshot неизвестен/устарел, daily limit превышен или прогнозируется его превышение, либо обнаружен spend spike. Hard budget breach МОЖЕТ сформировать защитное снижение и игнорировать cooldown только при явном policy flag; floor, idempotency и reconciliation не обходятся.
+- обязательный для APPLY внутренний `dailySpendLimitMinor`, рассчитанный по intraday spend deltas `fullstats` и policy;
+- опциональный WB budget snapshot, который влияет на решение только при `wbBudgetContractStatus=VERIFIED`.
+
+Поля `cash`, `netting`, `total` не называются «остатком» и не блокируют/разрешают повышение, пока versioned contract fixture не подтвердил их единицу, взаимосвязь и смысл относительно расходов кампании. При `UNVERIFIED` либо stale WB budget snapshot он сохраняется только диагностически и не делает обязательный target snapshot неполным. После верификации он становится дополнительным, но не единственным guardrail.
+
+Повышение запрещается, если внутренний daily limit превышен или прогнозируется его превышение, обнаружен spend spike либо verified WB budget rule запрещает действие. Hard budget breach МОЖЕТ сформировать защитное снижение и игнорировать cooldown только по доказанному источнику и при явном policy flag; floor, idempotency и reconciliation не обходятся. Неопределённость WB budget semantics сама по себе не называется breach.
 
 ### 9.7. Exploration
 
@@ -949,17 +1017,19 @@ rawRecommendedBid
 6. выбрать protective, profit либо exploration strategy;
 7. применить pipeline раздела 9.8;
 8. применить `OBSERVE_ONLY`;
-9. создать queue item только для итогового `INCREASE`/`DECREASE`.
+9. создать queue item только для итогового `INCREASE`/`DECREASE` либо доказанного `RESTORE_ABSENT_OVERRIDE`.
 
 Если blockers несколько, все сохраняются. Primary outcome выбирается в порядке:
 
 ```text
 MANUAL_PAUSE
 UNSUPPORTED_CAMPAIGN
+UNVERIFIED_CLUSTER_BID_CONTRACT
 INSUFFICIENT_ATTRIBUTION_GRANULARITY
 DATA_INCONSISTENCY
 INVALID_PRODUCT_ECONOMICS
 MISSING_PRODUCT_ECONOMICS
+MISSING_ORDERED_UNITS
 STALE_DATA
 MIN_ABOVE_POLICY_MAX
 ```
@@ -978,13 +1048,16 @@ MIN_ABOVE_POLICY_MAX
 | `INSUFFICIENT_DATA` | outcome | Даже текущий bucket не проходит evidence thresholds. |
 | `INSUFFICIENT_BID_RESPONSE_DATA` | outcome | Текущий bucket обеспечен, но обычной альтернативы нет. |
 | `INSUFFICIENT_ATTRIBUTION_GRANULARITY` | blocker | Статистика не разделяет результаты нескольких независимо управляемых bids. |
+| `UNVERIFIED_CLUSTER_BID_CONTRACT` | blocker | Единица, minimum либо absence/delete semantics cluster bid profile не подтверждены; write запрещён. |
 | `EXPLORATION_PLANNED` | strategy | Создан experiment для получения нового bid bucket. |
 | `EXPLORATION_ACTIVE` | outcome | Experiment активен; иные изменения target запрещены. |
 | `EXPLORATION_ACCEPTED` | strategy | Новый bucket стал eligible и обычный estimator выбрал experiment bid. |
 | `EXPLORATION_REVERTED` | strategy | Experiment завершён возвратом из-за результата, лимита или safety condition. |
+| `CLUSTER_OVERRIDE_RESTORE` | strategy | Verified cluster contract восстанавливает доказанное исходное состояние `ABSENT` через `DELETE`; нулевая ставка не используется. |
 | `STALE_DATA` | blocker | Обязательный основной вход старше freshness threshold. |
 | `MISSING_PRODUCT_ECONOMICS` | blocker | Нет действующей экономики `nmId`. |
 | `INVALID_PRODUCT_ECONOMICS` | blocker | Версия экономики невалидна или имеет конфликтующий период. |
+| `MISSING_ORDERED_UNITS` | blocker | В eligible statistics отсутствует `shks`; `orders` не используется как подмена заказанных единиц. |
 | `COOLDOWN` | outcome/guardrail | Применимое изменение заблокировано до cooldown deadline. |
 | `BELOW_MIN_CHANGE` | outcome/guardrail | Изменение не достигло одновременно absolute и relative thresholds. |
 | `AT_FLOOR` | outcome/guardrail | Требуется снижение, но floor уже достигнут. |
@@ -1005,6 +1078,8 @@ MIN_ABOVE_POLICY_MAX
 | `primaryWindowDays` / `baselineWindowDays` | `7` / `28` | Короткое safety-окно и полное окно response curve. |
 | `conversionLagDays` / `predictionHorizonDays` | `2` / `1` | Последние два дня исключаются из profit evidence. |
 | `dayFinalizationMinStableReads` / `dayFinalizationMinStableMinutes` | `2` / `30` | После conversion lag нужны два одинаковых чтения source day, разделённых минимум 30 минутами. |
+| `bidStateMaxObservationGapMinutes` | `20` | Больший разрыв bid/config coverage исключает день; значение не может превышать freshness current bid. |
+| `externalWriteControlMode` | `SHARED` | Без доказанного change marker исторический day остаётся неeligible; `EXCLUSIVE` включается только после организационного запрета внешних writes. |
 | `minBidObservationDays` | `3` | Не меньше трёх полных финализированных days на bucket. |
 | `minBidViews` / `minBidClicks` | `1000` / `30` | Traffic evidence для CPM/CPC. |
 | `minBidOrderedUnits` | `3` | Обычная profit-оценка не строится на единичной конверсии. |
@@ -1018,7 +1093,7 @@ MIN_ABOVE_POLICY_MAX
 | `maxIncreasePerCyclePpm` / `maxDecreasePerCyclePpm` | `100000` / `200000` | До +10% / −20% за цикл. |
 | `maxDailyIncreasePpm` / `maxDailyDecreasePpm` | `200000` / `400000` | До +20% / −40% от daily anchor. |
 | `cooldownMinutes` | `1440` | Один обычный write target в сутки; emergency budget rule оговаривается отдельно. |
-| `policyMinBidMinor` | `UNSET` | Эффективный floor равен максимуму явного policy floor и актуального `wbMinimumBidMinor`. |
+| `policyMinBidMinor` | `UNSET` | Эффективный floor равен максимуму явного policy floor и актуального verified `wbMinimumBidMinor`; без required minimum write запрещён. |
 | `policyMaxBidMinor` | `REQUIRED_FOR_APPLY` | Без явного cap target остаётся `OBSERVE_ONLY`. |
 | `dailySpendLimitMinor` | `REQUIRED_FOR_INCREASE` | Без лимита разрешены observe и защитные снижения, но не повышение. |
 | `zeroConversionMinViews` / `zeroConversionMinClicks` | `1000` / `30` | Проверяются в primary window после conversion lag. |
@@ -1030,7 +1105,7 @@ MIN_ABOVE_POLICY_MAX
 | `explorationSpendSafetyBufferPpm` | `200000` | Revert начинается при 80% лимита. |
 | `maxConcurrentExperimentsPerCampaign` / `PerAccount` | `1` / `10` | Ограничивает общий риск и влияние временных факторов. |
 
-Freshness defaults для основных источников согласованы с default cron и endpoint throughput: current bid — 20 минут, campaign details/status — 45 минут, minimum bid — 120 минут, budget — 60 минут, факт успешного обновления daily statistics — 180 минут, cluster list — 24 часа, bid recommendations — 6 часов. Recommendations остаются необязательными. Эти значения валидируются с `targetSyncSla`; если аккаунт при фактических лимитах WB не успевает их выдерживать, система остаётся `OBSERVE_ONLY`, пока оператор не уменьшит scope, не изменит расписание или не утвердит более длинный SLA.
+Freshness defaults для основных источников согласованы с default cron и endpoint throughput: current bid — 20 минут, campaign details/status — 45 минут, applicable verified minimum bid — 120 минут, verified WB budget — 60 минут, факт успешного обновления daily statistics — 180 минут, cluster list — 24 часа, bid recommendations — 6 часов. Recommendations и unverified WB budget остаются необязательными. Эти значения валидируются с `targetSyncSla`; если аккаунт при фактических лимитах WB не успевает их выдерживать, система остаётся `OBSERVE_ONLY`, пока оператор не уменьшит scope, не изменит расписание или не утвердит более длинный SLA.
 
 Любая policy с `APPLY` невалидна без `policyMaxBidMinor`, `minExpectedProfitImprovementMinor` и требуемых budget limits. Переход из начального профиля выполняется только после replay/backtest на истории аккаунта и минимум одного полного observe-only окна; конкретные валютные пороги нельзя безопасно вывести из документации WB.
 
@@ -1054,7 +1129,7 @@ QUEUED
 
 ### 10.2. Идентификатор решения и идемпотентность
 
-`BidDecision.id` является UUIDv7 и используется как технический идентификатор решения в очереди, audit, логах и `WbWriteAttempt`. Случайность UUID не используется для дедупликации.
+`BidDecision.id` является UUIDv7 и используется как технический идентификатор решения в очереди, audit, логах и `WbWriteAttemptItem`. Случайность UUID не используется для дедупликации.
 
 Семантическую идемпотентность обеспечивает единственный `decisionInputChecksum`, определённый в разделе 9.1. Транзакция создания решения и очереди использует unique constraint `BidDecision.decisionInputChecksum`:
 
@@ -1134,11 +1209,12 @@ Cron означает частоту попыток запустить job, а �
 | `sandbox` | `https://advert-api-sandbox.wildberries.ru` | тестовый токен WB | да, только для документированно поддерживаемых sandbox методов и тестовых кампаний |
 | `prod` | `https://advert-api.wildberries.ru` | production-токен категории «Продвижение» | только при отдельном флаге |
 
-URL каждого режима переопределяется env:
+URL mock и sandbox может переопределяться env:
 
 - `WB_API_MOCK_BASE_URL`;
 - `WB_API_SANDBOX_BASE_URL`;
-- `WB_API_PROD_BASE_URL`.
+
+`WB_API_PROD_BASE_URL` не является произвольным proxy URL. В production схема обязана быть `https`, host для promotion requests — ровно `advert-api.wildberries.ru`, а identity check использует ровно `common-api.wildberries.ru`; userinfo, IP literal, нестандартный port и redirect запрещены. Допускается менять только документированный path/profile внутри этих hosts. Custom production host вызывает startup failure; proxy/mirror требует отдельного security design и не включается env-флагом.
 
 Также обязательны:
 
@@ -1148,14 +1224,29 @@ URL каждого режима переопределяется env:
 - `WB_API_TIMEOUT_MS`;
 - `WB_API_CONNECT_TIMEOUT_MS`.
 
-Production startup должен завершаться ошибкой, если `WB_API_MODE=prod`, но отсутствует корректная комбинация токена, secret provider и явного `WB_API_WRITE_ENABLED=true`.
+Production разрешено запускать с `WB_API_WRITE_ENABLED=false`: это штатный `OBSERVE_ONLY`/read-only режим rollout. Startup завершается ошибкой при отсутствующем/невалидном token или secret provider, identity/config binding mismatch и небезопасном production URL, но не из-за выключенных writes. Исходящий production write возможен только при одновременном выполнении всех условий:
+
+- `WB_API_WRITE_ENABLED=true`;
+- token не истёк, имеет категорию «Продвижение» и не имеет read-only restriction;
+- активная policy и target capability разрешают `APPLY`;
+- account binding подтверждён, auth/availability breakers закрыты;
+- automation и global kill switch разрешают write.
+
+Любое невыполненное условие оставляет чтение и Admin API доступными, но блокирует write с измеримым reason code. Включение одного env-флага не обходит остальные gates.
+
+Для sandbox/prod JWT token валидируется при startup и периодически: структурно читаются `sid`, `exp`, category/access claims (`acc`/`s` согласно текущему token profile), promotion category bit и read-only bit; доверие к identity устанавливается только после успешного авторизованного WB-вызова и проверки `DeploymentAccountBinding`. Token с read-only restriction допустим для OBSERVE_ONLY, но всегда блокирует APPLY. До `exp` публикуются предупреждения по настраиваемым порогам, после истечения открывается auth breaker; token не логируется. Production token profile учитывает опубликованный срок жизни токена до 180 дней, но источником истины остаётся `exp`. Mock использует seed identity и отдельный тестовый auth contract.
 
 Sandbox не считается ускоренной моделью production time. По документации WB статистика продвижения в sandbox создаётся один раз в сутки только для запущенных тестовых кампаний и доступна за последние 30 дней. Поэтому:
 
+- используется только тестовый token; production token и production host в sandbox profile запрещены;
+- в sandbox допускается не более 50 тестовых кампаний;
+- тестовая кампания удаляется WB через 30 дней после последнего изменения, а удалённый status может исчезать из списка примерно через 3 минуты; tests используют bounded polling и не предполагают немедленность;
 - `sandbox smoke` проверяет авторизацию, schemas, документированные read/write методы, rate-limit headers и read-after-write, не ожидая появления новой дневной статистики;
 - `sandbox soak` является отдельным необязательным профилем длительного теста: запускает тестовую кампанию, фиксирует UTC/WB statistical dates и проверяет появление и неизменяемость дневных данных после фактической суточной генерации;
 - multi-day lifecycle estimator и exploration в CI доказывается в `mock` через виртуальные часы, а не реальным ожиданием sandbox;
 - отсутствие свежей дневной статистики во время smoke является ожидаемым ограничением контура, а не дефектом bidder.
+
+Документированные promotion endpoint limits применяются и к sandbox только там, где WB явно объявляет одинаковый контракт. Остальные sandbox limits считаются отдельным profile; фактические `X-Ratelimit-*` и `Retry-After` всегда имеют приоритет над встроенным значением.
 
 ### 12.2. Rate limiter
 
@@ -1175,6 +1266,8 @@ Sandbox не считается ускоренной моделью production t
 Встроенный профиль endpoint limits должен соответствовать таблице раздела 4.2. Более строгий из общего и endpoint-specific limit всегда побеждает. Профиль sandbox по умолчанию совпадает с документированным профилем продвижения; пользователь может задать более строгие значения.
 
 Limiter ДОЛЖЕН быть общим для всех реплик deployment. Допустим PostgreSQL-based limiter; in-memory limiter разрешён только при одной реплике и в `mock`.
+
+Лимиты WB действуют на account/service scope и могут расходоваться другими приложениями того же продавца. Поэтому deployment limiter гарантирует только собственную координацию и НЕ ДОЛЖЕН обещать отсутствие `429`. Встроенный profile — консервативный стартовый предел; наблюдаемые headers могут немедленно уменьшить доступную квоту, заморозить bucket и перевести APPLY в degraded/paused state. Автоматически увеличивать лимит выше проверенного profile по одному удачному ответу запрещено.
 
 ### 12.3. Адаптация по заголовкам
 
@@ -1198,10 +1291,13 @@ Limiter ДОЛЖЕН быть общим для всех реплик deployment
 
 | Класс | Поведение |
 |---|---|
-| `400`, `403`, `422` | terminal для конкретного payload; без слепого retry |
+| `400`, `422` | terminal для конкретного payload; без слепого retry |
 | `401` | остановить WB-интеграцию deployment, alert; токен не логировать |
+| `402` | terminal service/account billing or balance condition; остановить применимые writes и alert, не считать payload retryable |
+| `403` | различить token category/read-only/capability denial и payload-specific prohibition; auth/capability случай открывает breaker или блокирует APPLY |
 | `404` | сверить endpoint/profile; terminal либо resync сущности |
-| `409` | классифицировать по телу; повторять только документированно временные случаи |
+| `409` | классифицировать по телу и rate-limit headers; повторять только документированно временные случаи |
+| `413` | уменьшить/split batch в рамках endpoint limits; одиночный валидный item после повторного `413` terminal и создаёт contract alert |
 | `429` | retry по заголовкам |
 | `5xx` | exponential backoff + full jitter |
 | timeout до отправки | retryable |
@@ -1212,7 +1308,7 @@ Retry policy задаётся отдельно для read, write и verify. Б�
 ### 12.5. Circuit breaker
 
 - отдельный breaker на endpoint group;
-- `401/403` открывают auth breaker;
+- `401` и только auth/category/read-only-classified `403` открывают auth breaker; payload-specific `403` остаётся terminal для операции;
 - серия `5xx/timeouts` открывает availability breaker;
 - half-open probe не должен нарушать rate limit;
 - Decision Engine продолжает считать решения, но просроченные решения не отправляются после восстановления.
@@ -1224,12 +1320,12 @@ Retry policy задаётся отдельно для read, write и verify. Б�
 1. `DISCOVER_CAMPAIGNS` — получает сгруппированный по типам и статусам список кампаний, отбирает кампании в допустимых статусах и фиксирует checkpoint обнаружения. Результат стадии — актуальный набор идентификаторов кампаний для текущего sync run с признаком поддержки и причиной исключения для неподдерживаемых кампаний.
 2. `SYNC_CAMPAIGN_DETAILS` — пакетами загружает подробности обнаруженных кампаний: статус, тип, `bid_type`, `payment_type`, карточки, места размещения и остальные необходимые для последующих стадий метаданные. Результат нормализуется, валидируется и upsert-ится с `fetchedAt`, checksum и идентификатором sync run.
 3. `SYNC_CURRENT_BIDS` — читает фактически подтверждённые WB текущие ставки по всем поддерживаемым target и местам размещения, включая ставки кластеров там, где они применимы. Результат связывается с конкретными campaign, target, bid/payment type и используется как исходное состояние для решений и reconciliation.
-4. `SYNC_MIN_BIDS` — запрашивает актуальные минимальные ставки для поддерживаемых сочетаний `nmId`, вида оплаты и места размещения, соблюдая batch limits. Результат задаёт нижнюю границу допустимых candidate bids; отсутствие или несовместимость minimum bid отмечается как неполнота либо неподдерживаемая комбинация.
+4. `SYNC_MIN_BIDS` — запрашивает актуальные минимальные ставки карточек для поддерживаемых сочетаний `nmId`, вида оплаты и места размещения, соблюдая batch limits. Для cluster target minimum читается только из источника, явно подтверждённого `clusterBidContract`; card minimum и recommendation не переносятся на cluster. Результат задаёт нижнюю границу допустимых candidate bids; отсутствие verified minimum для write отмечается как blocker.
 5. `SYNC_CAMPAIGN_STATS` — инкрементально загружает статистику кампаний за требуемое дневное окно с overlap для поздних изменений, точно нормализует денежные единицы и upsert-ит source days по естественному ключу. Дневные значения связываются с подтверждённой историей ставки; только полный день с одним неизменным bid/configuration state может стать `BidPerformanceDay`.
 6. `SYNC_CLUSTER_LIST` — получает доступные пары `advertId`/`nmId` с нормализованными кластерами пакетами до 100 пар. Кластеры, не возвращённые WB из-за порога видимости, не синтезируются и не считаются доступными для управления.
 7. `SYNC_CLUSTER_STATS` — для применимых кампаний загружает дневную статистику поисковых кластеров, учитывая различия схем для CPM и CPC и опциональность показателей, основанных на показах. Неприменимые кампании стадия явно пропускает, а применимые данные связывает с campaign, `nmId`, нормализованным кластером и периодом.
 8. `SYNC_BID_RECOMMENDATIONS` — по priority queue получает CPM-рекомендации WB только для targets, которым они нужны согласно разделу 9.4; сохраняет каждое поле как candidate hint вместе с `fetchedAt`, checksum и endpoint profile. Отсутствие рекомендации не блокирует обычный estimator, а сама рекомендация не считается доказательством прибыли.
-9. `SYNC_BUDGETS` — при включённом budget guardrail получает текущий бюджет каждой применимой кампании, нормализует его денежные поля и сохраняет freshness. Если guardrail выключен, стадия получает явный статус `SKIPPED`; ошибка обязательной проверки бюджета делает соответствующую часть snapshot неполной.
+9. `SYNC_BUDGETS` — получает текущие budget fields применимых кампаний только для диагностики либо при `wbBudgetContractStatus=VERIFIED`, сохраняет raw-normalized значения, profile и freshness. При `UNVERIFIED` стадия не называет их остатком и не является обязательной для APPLY; при `VERIFIED` обязательность определяется policy. Внутренний daily spend guardrail независимо строится из intraday `fullstats` deltas.
 10. `FINALIZE` — проверяет результаты и checkpoints всех предыдущих стадий, фиксирует для каждой статус `SUCCEEDED`, `FAILED` или `SKIPPED`, вычисляет completeness и freshness и завершает sync run. Стадия публикует согласованные target-level snapshots с явным указанием отсутствующих или невалидных данных; обязательные пробелы далее блокируют применение решения по правилам раздела 13.2.
 
 Частичный сбой одной стадии не должен удалять ранее корректные данные. Completeness snapshot отражает успешные и неуспешные стадии.
@@ -1243,7 +1339,7 @@ Decision Engine использует только snapshot, у которого:
 - период статистики непрерывен либо пробел явно допустим;
 - текущая ставка подтверждена после последнего отправленного решения.
 
-Глобальное завершение обхода всех кампаний не является условием расчёта. Snapshot target должен атомарно ссылаться на версии campaign details, current bid, minimum bid, budget и статистических days; смешивание данных из несовместимых bid/configuration states запрещено. Recommendations являются необязательным source, кроме явно начатого workflow их обновления.
+Глобальное завершение обхода всех кампаний не является условием расчёта. Snapshot target должен атомарно ссылаться на версии campaign details, current bid, применимый minimum bid, внутренних spend deltas, опционального verified budget и статистических days; смешивание данных из несовместимых bid/configuration states запрещено. Recommendations являются необязательным source, кроме явно начатого workflow их обновления. Cluster minimum и cluster bid state считаются обязательными для write только после `clusterBidContract=VERIFIED`; до этого cluster target принудительно `OBSERVE_ONLY`.
 
 ### 13.3. Аномалии данных
 
@@ -1323,6 +1419,7 @@ Mock ДОЛЖЕН реализовать совместимое подмноже
 - статусы кампаний;
 - rate-limit headers;
 - стандартные `400`, `401`, `403`, `429`, `5xx`;
+- предусмотренные profile ошибки `402` и `413`;
 - задержку видимости изменённой ставки.
 
 ### 15.3. Управление сценариями
@@ -1456,7 +1553,7 @@ API version prefix: `/api/v1`.
 
 Минимальные группы:
 
-- policies: CRUD с неизменяемыми версиями;
+- policies: чтение, создание неизменяемой версии и явная активация/назначение;
 - product economics: чтение, единичное версионированное изменение и асинхронный batch-импорт;
 - campaign automation: включить, выключить, observe-only;
 - manual resync/recalculate без обхода блокировок;
@@ -1691,6 +1788,64 @@ Authorization: Bearer <service-token>
 - После `SENT` сначала завершается reconciliation; новая экономика применяется только к следующему решению.
 - Импорт не включает automation автоматически и не обходит `OBSERVE_ONLY`, cooldown, budget или write safety flags.
 
+### 17.7. Общие правила остальных Admin API
+
+Все list endpoints используют cursor pagination: `limit=1..500`, default `100`, стабильную сортировку `(createdAt, id)` и ответ `{items, nextCursor}`. Фильтры валидируются fail closed. Mutating endpoints требуют `Idempotency-Key`, а операции над текущим состоянием — также `If-Match`; повтор ключа с другим payload возвращает `409 IDEMPOTENCY_KEY_REUSED`, stale ETag — `412 VERSION_MISMATCH`, отсутствующий обязательный conditional header — `428 PRECONDITION_REQUIRED`.
+
+Минимальные permissions:
+
+- `policies:read|write|activate`;
+- `automation:read|write|kill`;
+- `jobs:read|trigger`;
+- `decisions:read`;
+- `queue:read|retry`;
+- `audit:read`.
+
+Каждая мутация атомарно создаёт `AuditEvent` с actor, before/after, reason, idempotency key и correlation ID. Ошибки используют единый `application/problem+json`; IDs `BIGINT` сериализуются decimal strings. Ни один Admin endpoint не обращается к WB API синхронно и не обходит queue, locks, rate limiter, write gates или reconciliation.
+
+### 17.8. Policies и назначения
+
+```http
+GET  /api/v1/policies?scope={scope}&cursor={cursor}&limit={limit}
+GET  /api/v1/policies/{policyId}
+POST /api/v1/policies
+POST /api/v1/policies/{policyId}/activations
+GET  /api/v1/policy-assignments?campaignId={id}&targetId={id}
+PUT  /api/v1/policy-assignments/{scopeType}/{scopeId}
+```
+
+`POST /policies` создаёт новую immutable-версию и никогда не обновляет старую. Request содержит scope, полную конфигурацию, `validFrom` и `changeReason`; ответ — `201`, `Location`, ETag и результат межполевой валидации. Activation и assignment требуют `policies:activate`, `Idempotency-Key`, `If-Match`, возвращают effective policy/version и supersede только ещё не отправленные решения. Исторические snapshots/decisions не переписываются. Физический `DELETE` policy отсутствует; ошибочная версия получает новую заменяющую версию или не активируется.
+
+### 17.9. Automation, kill switch и manual jobs
+
+```http
+GET /api/v1/automation
+PUT /api/v1/automation/campaigns/{campaignId}
+PUT /api/v1/automation/targets/{targetId}
+POST /api/v1/automation/global-kill
+POST /api/v1/jobs/resync
+POST /api/v1/jobs/recalculate
+GET /api/v1/jobs/{jobId}
+```
+
+Campaign/target automation принимает `mode=DISABLED|OBSERVE_ONLY|APPLY`, `changeReason`, `If-Match` и `Idempotency-Key`. `APPLY` не включает `WB_API_WRITE_ENABLED` и проходит все capability/token/profile guards. Global kill endpoint разрешает немедленно установить kill switch одному actor с `automation:kill`; обратное включение выполняется отдельной audited операцией с ETag и утверждённым production control, но не автоматически.
+
+Manual resync/recalculate принимает bounded scope (`campaignIds`, `targetIds`, data kinds), возвращает `202 Accepted` и `jobId`. Job использует те же leases/checkpoints, что scheduler; конфликтующий active run объединяется либо возвращает `409 JOB_ALREADY_RUNNING`, но никогда не запускается параллельно в обход lock. Recalculate работает только из сохранённого согласованного snapshot и не вызывает WB.
+
+### 17.10. Decisions, queue failures и audit
+
+```http
+GET  /api/v1/decisions?campaignId={id}&targetId={id}&action={action}&cursor={cursor}
+GET  /api/v1/decisions/{decisionId}
+GET  /api/v1/queue/failures?classification={class}&cursor={cursor}
+POST /api/v1/queue/failures/{decisionId}/retry
+GET  /api/v1/audit-events?campaignId={id}&targetId={id}&correlationId={id}&cursor={cursor}
+```
+
+Decision detail возвращает explanation, version/checksum inputs, attempt items и reconciliation result без секретов. Retry требует `queue:retry`, `Idempotency-Key`, `If-Match` и `changeReason`; он разрешён только для terminal item с классификацией, которая допускает повтор после новой pre-send validation. `UNKNOWN`, `PENDING` reconciliation, auth/capability denial, invalid payload и superseded decision вручную не переотправляются. Для них endpoint возвращает `409 RETRY_NOT_SAFE` и ссылку на требуемую reconciliation/resync. Retry использует существующий `decisionId` и создаёт новый `attemptNumber`, но не новый decision.
+
+Audit list только read-only, имеет стабильную cursor pagination и фильтры по времени, actor, entity, action, campaign/target/correlation ID. Redaction применяется до сериализации; отсутствие permission на чувствительные before/after fields возвращает их masked, а не раскрывает через error detail.
+
 ## 18. Конфигурация
 
 Конфигурация валидируется при старте через типизированную схему. Неизвестные критичные значения и несовместимые флаги вызывают startup failure.
@@ -1713,11 +1868,15 @@ Authorization: Bearer <service-token>
 - `WB_API_MODE=mock|sandbox|prod`;
 - `WB_API_MOCK_BASE_URL`;
 - `WB_API_SANDBOX_BASE_URL`;
-- `WB_API_PROD_BASE_URL`;
+- `WB_API_PROD_BASE_URL` — только официальный HTTPS host из раздела 12.1; custom host в production запрещён;
 - `WB_API_TOKEN`;
 - `WB_API_WRITE_ENABLED=false` по умолчанию;
+- `WB_TOKEN_EXPIRY_WARN_DAYS`;
+- `WB_ENDPOINT_PROFILE_VERSION` — выбирает только собранный и проверенный artifact по version/checksum;
 - `WB_API_TIMEOUT_MS`;
 - `WB_API_CONNECT_TIMEOUT_MS`.
+
+Статусы cluster/budget contracts являются свойствами pinned endpoint profile и не переключаются env-переменной. Неизвестная версия, checksum mismatch или попытка объявить непроверенный контракт `VERIFIED` вызывает startup failure либо принудительный `OBSERVE_ONLY` согласно profile.
 
 Для mock-сервера:
 
@@ -1780,7 +1939,7 @@ Production logs — JSON в stdout/stderr. Обязательные поля:
 - connection string с паролем;
 - полные секретные payload.
 
-Все вызовы WB API, включая read-запросы, попадают в structured logs и агрегированные метрики. Отдельная строка PostgreSQL создаётся только для исходящего write-запроса в `WbWriteAttempt`. После `WB_WRITE_ATTEMPT_RETENTION_DAYS` завершённая детализированная запись удаляется плановой очисткой; `PREPARED`, `UNKNOWN` и `PENDING` reconciliation не удаляются, а превышение ими максимального окна создаёт alert. Бизнес-аудит сохраняет идентификаторы попыток и итог применения без полного payload.
+Все вызовы WB API, включая read-запросы, попадают в structured logs и агрегированные метрики. Отдельные строки PostgreSQL создаются только для исходящего write-запроса (`WbWriteAttempt`) и его решений (`WbWriteAttemptItem`). После `WB_WRITE_ATTEMPT_RETENTION_DAYS` завершённые детализированные request/item records удаляются плановой очисткой; `PREPARED`, `UNKNOWN` и `PENDING` reconciliation не удаляются, а превышение ими максимального окна создаёт alert. Бизнес-аудит сохраняет идентификаторы attempt/items и итог каждого решения без полного payload.
 
 ### 19.2. Бизнес-аудит
 
@@ -1807,10 +1966,12 @@ Audit events append-only. Изменение или удаление audit recor
 ### 20.1. Endpoints
 
 - `GET /health/live` — event loop и процесс живы; без тяжёлых внешних проверок;
-- `GET /health/ready` — БД доступна, миграции применены, конфигурация валидна; для prod также проверяется состояние интеграции без выполнения write;
+- `GET /health/ready` — БД доступна, миграции применены, конфигурация и account binding валидны; для prod используется кэшированное состояние последней auth/integration проверки и breakers без WB-вызова на каждый probe;
 - `GET /metrics` — Prometheus text format.
 
 Не следует использовать `/metrics` как единственный health endpoint.
+
+WB `GET /ping` вызывается отдельным quota-aware integration check не чаще 3 раз за 30 секунд. Успех подтверждает достижимость endpoint и валидность token/category для этого вызова, но не доступность всех сервисов продвижения. Readiness не проксирует `/ping`: при истечении TTL последней успешной проверки она отражает degraded/not-ready согласно runbook, а сам check выполняется scheduler-ом с rate limiter.
 
 ### 20.2. Метрики
 
@@ -1871,6 +2032,8 @@ Audit events append-only. Изменение или удаление audit recor
 - Предпочтительно хранить WB token во внешнем secret manager; допустимо зашифрованное хранение в БД с ключом вне БД.
 - Токен расшифровывается только перед запросом и не кешируется дольше необходимого.
 - Один deployment и его БД обслуживают только аккаунт, которому принадлежит настроенный WB token; подключение другого аккаунта требует отдельного deployment и отдельной БД.
+- `DeploymentAccountBinding` проверяется до scheduler startup; token rotation с другим `sid`, environment либо несовпадающей валютой/timezone запрещена.
+- JWT expiry, promotion category и read-only restriction проверяются до APPLY; read-only token не мешает разрешённым чтениям, но никогда не проходит write gate.
 - Admin API использует authentication + authorization.
 - Production write требует отдельного feature flag и подтверждённого режима.
 - Sandbox token нельзя использовать с production URL и наоборот.
@@ -1911,7 +2074,7 @@ Audit events append-only. Изменение или удаление audit recor
 - входы WB проверяются runtime schemas;
 - domain logic не зависит от NestJS decorators;
 - публичные контракты versioned;
-- все deprecated WB методы централизованы в compatibility registry и запрещены lint/contract тестом.
+- все deprecated WB методы централизованы как пары HTTP method + path в compatibility registry и запрещены lint/contract тестом; в частности запрещён именно `POST /adv/v1/promotion/adverts`.
 
 ## 23. Требования к JSDoc
 
@@ -1970,7 +2133,8 @@ JSDoc НЕ ДОЛЖЕН пересказывать очевидный код и�
 - optimistic locking и идемпотентности single/batch economics endpoints;
 - частично успешного batch import и dry-run;
 - выборки окон и conversion lag;
-- eligibility `BidPerformanceDay`, включая частичный день, смену ставки/configuration и late attribution;
+- eligibility `BidPerformanceDay`, включая warm-up, WB statistical day boundary, observation gap, shared/exclusive external-write mode, частичный день, смену ставки/configuration и late attribution;
+- отсутствие `shks` даёт `MISSING_ORDERED_UNITS`, а `orders` остаётся только диагностикой;
 - bucket evidence отдельно для CPM и CPC без обязательного `views` в CPC;
 - PAVA с одним bucket, несколькими нарушениями монотонности и точными весами `eligibleDays`;
 - safety discount/premium, linear interpolation и запрет extrapolation;
@@ -1986,8 +2150,11 @@ JSDoc НЕ ДОЛЖЕН пересказывать очевидный код и�
 - state machine;
 - error classification;
 - retry/backoff/jitter с fake timers;
-- state machine `WbWriteAttempt`, включая `UNKNOWN` и блокировку повторного write до reconciliation;
-- batch builder;
+- request/item state machines `WbWriteAttempt`/`WbWriteAttemptItem`, включая partial response, per-item `UNKNOWN` и блокировку повторного write до reconciliation;
+- batch builder с устойчивым `requestIndex` и независимым результатом каждого decision;
+- cluster contract states `UNVERIFIED|VERIFIED`, `EXPLICIT|ABSENT|UNKNOWN`, `POST`/`DELETE` и запрет APPLY без verified unit/minimum;
+- budget contract states и независимый internal `dailySpendLimitMinor`;
+- JWT promotion/read-only/expiry gates и account-binding mismatch;
 - redaction;
 - config validation.
 
@@ -2002,6 +2169,7 @@ JSDoc НЕ ДОЛЖЕН пересказывать очевидный код и�
 - при равном score tie-break выбирает current, затем меньшую ставку;
 - неоднозначная attribution двух manual placements никогда не создаёт write;
 - невалидные или stale данные никогда не создают write;
+- cluster target без verified contract и день без непрерывного bid-state provenance никогда не создают write;
 - деньги не теряют minor units из-за float.
 
 ### 25.2. Integration tests
@@ -2011,6 +2179,7 @@ JSDoc НЕ ДОЛЖЕН пересказывать очевидный код и�
 - Prisma migrations;
 - upsert статистики;
 - формирование `BidPerformanceDay` только для полного финализированного source day с одной подтверждённой ставкой и неизменной configuration;
+- pre-enrollment history, observation gap и shared-mode provenance не становятся eligible без требуемого change marker;
 - повторное чтение дня с late attribution обновляет source row, инвалидирует прежнюю finalization и меняет checksum;
 - immutable product economics versions и запрет пересекающихся периодов;
 - single update с optimistic locking;
@@ -2020,10 +2189,10 @@ JSDoc НЕ ДОЛЖЕН пересказывать очевидный код и�
 - `SKIP LOCKED` с несколькими workers;
 - lease expiry/recovery;
 - supersede rules;
-- durable-регистрация `WbWriteAttempt` до отправки, reconciliation для `UNKNOWN` и плановая retention-очистка;
+- атомарная durable-регистрация `WbWriteAttempt` и всех `WbWriteAttemptItem` до отправки, partial batch mapping, per-item reconciliation для `UNKNOWN` и плановая retention-очистка;
 - advisory scheduler lock;
 - audit append-only;
-- startup validation констант `ACCOUNT_CURRENCY` и `ACCOUNT_TIMEZONE`;
+- создание singleton `DeploymentAccountBinding`; startup failure при смене `sellerSid`, environment, `ACCOUNT_CURRENCY` или `ACCOUNT_TIMEZONE`, но успешная ротация token того же account;
 - quota-aware round-robin сохраняет cursor, не создаёт starvation и публикует согласованные target-level snapshots.
 
 ### 25.3. Contract tests
@@ -2039,9 +2208,11 @@ JSDoc НЕ ДОЛЖЕН пересказывать очевидный код и�
 - ошибки;
 - fixtures из официальной документации без секретов.
 
+Contract suite проверяет version/checksum endpoint profile, exact wire type/unit/rounding/date/aggregation semantics и fail-closed поведение неизвестного поля. Cluster write/delete tests включаются в sandbox/prod-capable profile только после `clusterBidContract=VERIFIED`; до этого проверяется отсутствие исходящего cluster write. Budget fields не используются как remaining balance до verified budget fixture.
+
 Полный consumer contract suite запускается против mock. Sandbox smoke запускает только документированно доступное и безопасное подмножество read/write contracts и не требует появления новой daily statistics. Sandbox soak отдельно проверяет суточную генерацию статистики и не входит в обычный PR CI. Production contract tests выполняют только read methods.
 
-Для внутренних product economics endpoints отдельные contract tests покрывают JSON schemas, decimal-string сериализацию `BIGINT`, conditional headers, idempotency, request-level и item-level ошибки, pagination и все состояния import job.
+Для внутренних Admin API contract tests покрывают policies/assignments, automation и kill switch, async jobs, decisions, queue retry safety, audit pagination и product economics: JSON schemas, permissions, ETag/conditional headers, idempotency, decimal-string сериализацию `BIGINT`, request/item errors, pagination и все состояния jobs/imports.
 
 Для bidder и mock-сервера contract tests отдельно проверяют доступность Swagger UI, валидность OpenAPI 3.x JSON, полноту списка реализованных paths и соответствие схем runtime DTO. Спецификация bidder проверяется на security requirements и отсутствие секретов в examples/defaults; спецификация mock-сервера — на наличие WB-compatible paths и всех endpoints `/__mock`.
 
@@ -2072,13 +2243,21 @@ JSDoc НЕ ДОЛЖЕН пересказывать очевидный код и�
 21. выбор максимальной ожидаемой прибыли по нескольким подтверждённым bid buckets;
 22. PAVA, interpolation и отказ от extrapolation;
 23. блокировка двух manual placement bids при неразделённой статистике;
-24. кластер CPM оптимизируется, кластер CPC остаётся diagnostic-only;
+24. кластер CPM оптимизируется только в mock profile с verified unit/minimum/delete semantics, unverified CPM и кластер CPC не создают write;
 25. WB recommendation используется только как обеспеченный candidate hint;
 26. lower и upper exploration с безопасным revert;
 27. `/__mock/time/advance` создаёт несколько полных days и conversion lag без ожидания wall-clock time;
 28. late attribution инвалидирует day и приводит к новому детерминированному snapshot.
+29. production стартует с writes disabled и остаётся read-only; одного `WB_API_WRITE_ENABLED=true` недостаточно без остальных gates;
+30. account binding принимает ротацию token того же `sid` и отвергает другой account/currency/timezone после рестарта;
+31. batch с partial response и timeout reconciles каждый `WbWriteAttemptItem` независимо без двойного write;
+32. cluster `POST`/`DELETE` и absence state недоступны для APPLY при unverified profile;
+33. pre-enrollment day, observation gap и external change-and-revert в shared mode исключаются из estimator;
+34. read-only/expired/wrong-category token блокирует APPLY с правильной причиной;
+35. readiness использует cached integration state и не вызывает `/ping` чаще лимита;
+36. Admin API соблюдает permissions, idempotency, ETag, async job locks и `RETRY_NOT_SAFE`.
 
-Сценарии 21–28 используют фиксированное `MOCK_INITIAL_TIME`: test harness делает `time/advance`, запускает resync/recalculate и применяет bounded polling только к выполнению jobs. Wall-clock budget полного multi-day набора фиксируется CI и не должен зависеть от числа виртуальных дней.
+Сценарии 21–36 используют фиксированное `MOCK_INITIAL_TIME`, где применимо: test harness делает `time/advance`, запускает resync/recalculate и применяет bounded polling только к выполнению jobs. Wall-clock budget полного multi-day набора фиксируется CI и не должен зависеть от числа виртуальных дней.
 
 ### 25.5. Негативные и нагрузочные тесты
 
@@ -2089,6 +2268,10 @@ JSDoc НЕ ДОЛЖЕН пересказывать очевидный код и�
 - malformed payload;
 - clock skew;
 - истёкший токен;
+- wrong-category и read-only token;
+- production base URL с custom host, redirect, IP literal или нестандартным port;
+- sandbox cap 50 campaigns, delayed removal и удаление по 30-дневному lifecycle в виртуальном fixture;
+- ответы `402`, `413` и account-wide quota, частично израсходованная другим client;
 - race двух executor replicas;
 - graceful shutdown;
 - starvation при постоянном потоке high-priority targets;
@@ -2143,7 +2326,7 @@ Production deployment СЛЕДУЕТ включать:
 
 ### AC-02. Режимы
 
-`mock`, `sandbox`, `prod` выбирают корректные default URLs; URL можно переопределить; production write не включается неявно.
+`mock`, `sandbox`, `prod` выбирают корректные default URLs. Mock/sandbox URL можно безопасно переопределить; production принимает только официальные HTTPS hosts без redirect. Production успешно стартует с writes disabled; write не включается неявно и требует одновременного прохождения всех gates раздела 12.1.
 
 ### AC-03. Data Sync
 
@@ -2175,7 +2358,7 @@ Decision Engine выбирает допустимую обеспеченную �
 
 ### AC-10. Rate limit
 
-Соблюдаются глобальный и endpoint limits. После mock `429` следующий запрос не выполняется раньше `X-Ratelimit-Retry`.
+Соблюдаются deployment-wide и endpoint limits, при этом система не предполагает эксклюзивную account quota. После mock `429` следующий запрос не выполняется раньше `X-Ratelimit-Retry`; уменьшившиеся response headers замораживают/ограничивают bucket.
 
 ### AC-11. Аудит
 
@@ -2183,7 +2366,7 @@ Decision Engine выбирает допустимую обеспеченную �
 
 ### AC-12. Наблюдаемость
 
-Live, ready и metrics endpoints работают; ключевые stages имеют metrics; labels не содержат высококардинальные ID.
+Live, ready и metrics endpoints работают; readiness не вызывает WB на каждый probe и использует cached integration state. `/ping` не вызывается чаще 3 раз за 30 секунд и не трактуется как гарантия доступности всех сервисов. Ключевые stages имеют metrics; labels не содержат высококардинальные ID.
 
 ### AC-13. Mock
 
@@ -2207,7 +2390,7 @@ Lint подтверждает обязательный JSDoc; комплект �
 
 ### AC-18. Один аккаунт и единая валюта
 
-Deployment принимает один WB token и обрабатывает только кампании соответствующего seller account. Все денежные значения относятся к `ACCOUNT_CURRENCY`; internal API и таблицы не принимают и не хранят валюту на уровне отдельных записей. Отсутствующее или невалидное значение `ACCOUNT_CURRENCY` приводит к startup failure.
+Deployment принимает один WB token и обрабатывает только кампании соответствующего seller account. Все денежные значения относятся к `ACCOUNT_CURRENCY`; internal API и бизнес-записи не принимают валюту на уровне отдельных объектов. Singleton binding сохраняет currency/timezone один раз для защиты истории. Отсутствующее, невалидное или несовпадающее с binding значение приводит к startup failure.
 
 ### AC-19. Swagger и OpenAPI
 
@@ -2219,11 +2402,43 @@ Golden fixtures подтверждают разбиение по полным WB
 
 ### AC-21. Возможности WB и атрибуция
 
-Capability matrix исполняется fail-closed: unified card, single-placement manual card и manual CPM cluster допускают `APPLY`; dual-placement manual card без разделённой статистики блокируется; CPC cluster не создаёт write. WB recommendation только добавляет CPM candidate hint и сама по себе не обосновывает изменение.
+Capability matrix исполняется fail-closed: unified card и single-placement manual card допускают `APPLY`; manual CPM cluster допускает его только с verified cluster contract. Dual-placement manual card без разделённой статистики блокируется; CPC cluster не создаёт write. WB recommendation только добавляет CPM candidate hint и сама по себе не обосновывает изменение или minimum.
 
 ### AC-22. Exploration и тестовые режимы
 
 `BidExperiment` допускает не более одного активного experiment на target, собирает требуемое число полных days, ждёт conversion cutoff, соблюдает spend/concurrency caps и безопасно возвращает ставку. Mock выполняет этот lifecycle через `/__mock/time/advance` за минуты wall-clock time. Sandbox smoke завершается без ожидания daily statistics; sandbox soak запускается и оценивается отдельно.
+
+### AC-23. Account binding и token lifecycle
+
+Первое валидное подключение создаёт `DeploymentAccountBinding`; production identity подтверждается seller-info. Ротация token того же `sid` проходит, а другой `sid`, environment, currency или timezone после рестарта вызывает startup failure. Wrong-category, expired и read-only token дают разные диагностируемые состояния; read-only разрешает чтение, но не APPLY.
+
+### AC-24. Cluster bid contract
+
+При `clusterBidContract=UNVERIFIED` ни `POST`, ни `DELETE` cluster bid не отправляются. Verified fixture доказывает unit, minimum, `EXPLICIT|ABSENT|UNKNOWN`, delete effect, batch/partial response и reconciliation; изменение checksum снова отключает APPLY. `DELETE` возможен только для `RESTORE_ABSENT_OVERRIDE` при доказанном исходном `ABSENT`.
+
+### AC-25. Batch write audit
+
+Каждый HTTP write имеет один `WbWriteAttempt`, а каждое решение batch — отдельный `WbWriteAttemptItem`. Partial response и timeout сопоставляются по item; успешный item не откатывается из-за соседнего, а `UNKNOWN` не переотправляется до индивидуальной reconciliation.
+
+### AC-26. Statistical day и ordered units
+
+Estimator использует только дни после enrollment/warm-up с непрерывным bid/configuration coverage по versioned WB statistical-day profile. Observation gap, change marker, shared-mode uncertain provenance и external change-and-revert исключают день. При отсутствии `shks` возвращается `MISSING_ORDERED_UNITS`; `orders` не подменяет units.
+
+### AC-27. Wire semantics и бюджеты
+
+Contract tests подтверждают endpoint/field type, unit, rounding, date и aggregation semantics versioned profile. `fullstats` parent и child rows не суммируются дважды. WB budget fields не называются остатком и не влияют на решение до verified contract; обязательный internal daily spend limit работает независимо.
+
+### AC-28. Полнота Admin API
+
+Policies, assignments, automation/kill switch, async resync/recalculate, decisions, queue failures и audit реализуют permissions, pagination, `application/problem+json`, audit, idempotency и conditional updates. Manual jobs не обходят locks, а `UNKNOWN`/небезопасный terminal result возвращает `RETRY_NOT_SAFE`.
+
+### AC-29. Ошибки, health и account-wide quota
+
+`402`, `403`, `409`, `413`, `429`, timeout before/after send классифицируются по разделу 12.4. `413` приводит к bounded split, auth/read-only denial не retry-ится как payload error, response headers ограничивают account-wide quota, а readiness и `/ping` соблюдают контракт раздела 20.1.
+
+### AC-30. Sandbox и API profile traceability
+
+Sandbox tests используют только test token, соблюдают максимум 50 кампаний, 30-дневное удаление, задержку исчезновения status и суточную статистику за последние 30 дней запущенной кампании. Build содержит дату/checksum endpoint profile; CI запрещает точную пару `POST /adv/v1/promotion/adverts` и остальные deprecated method/path pairs.
 
 ## 28. Матрица трассировки исходных требований
 
@@ -2251,6 +2466,14 @@ Capability matrix исполняется fail-closed: unified card, single-place
 | 20 | Ограничения WB по placement, cluster и recommendations | 4.2–4.4, 13 | AC-21 |
 | 21 | Быстрый multi-day mock и реалистичный sandbox | 9.7, 12.1, 15, 25 | AC-13, AC-22 |
 | 22 | Независимое расписание при ограниченном API throughput | 11, 13 | AC-03, AC-16 |
+| 23 | Identity, token lifecycle и неизменяемая привязка аккаунта | 8.1, 12.1, 18, 21 | AC-18, AC-23 |
+| 24 | Проверяемая семантика cluster write/delete | 4.2–4.4, 8.1, 13 | AC-21, AC-24 |
+| 25 | Request/item аудит и reconciliation batch writes | 7, 8.1, 10, 14 | AC-08, AC-09, AC-25 |
+| 26 | Полнота statistical-day evidence и `shks` | 4.4, 7.2, 8.1, 9 | AC-20, AC-26 |
+| 27 | Wire units, aggregation и budget semantics | 4.4, 9.6, 13 | AC-06, AC-27 |
+| 28 | Полный внутренний Admin API | 17 | AC-17, AC-28 |
+| 29 | Token-aware errors, health и account-wide rate limiting | 12, 20 | AC-10, AC-12, AC-29 |
+| 30 | Sandbox lifecycle и endpoint-profile traceability | 1, 4, 12.1, 25, 26 | AC-22, AC-30 |
 
 ## 29. Этапы реализации
 
@@ -2267,9 +2490,10 @@ Capability matrix исполняется fail-closed: unified card, single-place
 ### Этап 1. WB adapter и mock
 
 - runtime schemas;
+- versioned endpoint profile и wire semantic fixtures;
 - read endpoints, включая cluster list и CPM bid recommendations;
 - rate limiter;
-- журнал `WbWriteAttempt`, structured request logs и redaction;
+- журнал `WbWriteAttempt`/`WbWriteAttemptItem`, structured request logs и redaction;
 - virtual clock, daily statistics generator, mock scenarios и contract tests.
 
 ### Этап 2. Data Sync
@@ -2314,19 +2538,25 @@ Capability matrix исполняется fail-closed: unified card, single-place
 | Риск/вопрос | Требуемое действие |
 |---|---|
 | WB меняет методы и лимиты | Версионировать endpoint profile, проверять release notes, contract tests |
+| Cluster bid unit/minimum/delete semantics не подтверждены | Держать cluster targets в `OBSERVE_ONLY` до verified contract-spike; при изменении checksum снова отключать APPLY |
 | Статистика и ставка видимы с задержкой | Daily finalization, conversion lag, delayed verification, reconciliation |
+| Current-state API не доказывает отсутствие внешнего change-and-revert | Warm-up и continuous coverage; `EXCLUSIVE` control либо fail-closed eligibility в `SHARED` |
 | `fullstats` не разделяет manual placements | Блокировать независимый APPLY при двух активных placements; не выводить placement-эффект вычитанием |
 | Статистика sandbox создаётся раз в сутки | Быстрый smoke без ожидания; отдельный scheduled soak; multi-day CI только через mock virtual time |
 | Рекомендации WB отражают аукцион, а не прибыль | Использовать только как CPM candidate hints внутри обеспеченного диапазона или ограничитель experiment |
 | Полный sync дольше cron interval | Persisted cursor, round-robin fairness, target-level snapshots, SLA/ETA metrics |
 | Рекламные заказы не равны выкупам | Требовать, чтобы `expectedContributionBeforeAdsMinor` уже учитывал ожидаемый невыкуп и возврат; не называть orders продажами |
+| `orders` не равен числу заказанных единиц | Использовать только `shks`; при отсутствии блокировать profit/APPLY с `MISSING_ORDERED_UNITS` |
+| Семантика `cash/netting/total` бюджета не подтверждена | Не называть остатком и не использовать в решении; независимо применять internal daily spend limit |
 | Нет product economics | Блокировать изменение ставки конкретного `nmId`; не переключать цель оптимизации |
 | Ручное изменение конфликтует с bidder | Pre-send compare, audit, cancel + recalculate |
 | Две реплики превышают общий лимит | Distributed limiter, общий для deployment |
+| Другой client расходует account-wide quota | Считать response headers авторитетными, деградировать/замораживать bucket и не обещать отсутствие `429` |
 | HTTP success без фактического изменения | Read-after-write verification |
 | Timeout после записи | Verify-before-retry |
 | Слишком много метрик labels | IDs только в logs/audit |
 | Production включён случайно | Fail-closed flags, secret/type checks, canary |
+| Token/конфигурация указывают на другой seller account | Singleton account binding и startup failure при mismatch |
 
 До production владелец продукта ДОЛЖЕН утвердить:
 
@@ -2334,19 +2564,22 @@ Capability matrix исполняется fail-closed: unified card, single-place
 2. attribution window и conversion lag;
 3. допустимые default policy values;
 4. лимиты дневного расхода;
-5. retention статистики, аудита и детализированного журнала `WbWriteAttempt`;
+5. retention статистики, аудита и детализированного журнала `WbWriteAttempt`/`WbWriteAttemptItem`;
 6. identity provider Admin API;
 7. целевой sync SLA для полного набора кампаний аккаунта;
 8. допустимость автоматического повышения ставок;
 9. процедуру аварийного глобального отключения writes;
 10. результаты backtest/observe-only и валютные thresholds обязательных полей policy;
-11. результат хотя бы одного sandbox soak перед первым production write enable либо документированное исключение, если WB sandbox не поддерживает необходимый метод.
+11. результат хотя бы одного sandbox soak перед первым production write enable либо документированное исключение, если WB sandbox не поддерживает необходимый метод;
+12. pinned endpoint profile с датой/checksum и перечнем `VERIFIED|UNVERIFIED` contracts;
+13. режим внешнего управления ставками `EXCLUSIVE|SHARED` и доказательства, допускающие historical day eligibility;
+14. процедуру смены seller account/currency/timezone только через новый deployment/БД либо отдельную migration approval.
 
 ## 31. Definition of Done разработки
 
 Система считается готовой, только когда:
 
-1. выполнены AC-01–AC-22;
+1. выполнены AC-01–AC-30;
 2. нет известных нарушений денежных единиц и WB rate limits;
 3. все критические тесты и CI gates зелёные;
 4. sandbox smoke завершён без необъяснённых расхождений; soak не блокирует обычный development DoD и применяется как отдельный pre-production gate из раздела 30;
@@ -2355,4 +2588,5 @@ Capability matrix исполняется fail-closed: unified card, single-place
 7. секреты отсутствуют в репозитории и логах;
 8. production по умолчанию остаётся write-disabled;
 9. rollback и global kill switch проверены;
-10. решение о включении production writes зафиксировано владельцем продукта.
+10. решение о включении production writes зафиксировано владельцем продукта;
+11. ни один write capability не включён при `UNVERIFIED` unit/minimum/absence contract.
