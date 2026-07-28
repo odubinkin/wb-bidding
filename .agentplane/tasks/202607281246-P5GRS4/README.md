@@ -1,10 +1,12 @@
 ---
 id: "202607281246-P5GRS4"
 title: "Revise WB bidder technical specification after API review"
-status: "DOING"
+result_summary: "Updated technical specification v1.6 with safe scheduling, immutable account settings, write recovery, live validation, cluster semantics, and acceptance coverage."
+risk_level: "low"
+status: "DONE"
 priority: "high"
 owner: "ORCHESTRATOR"
-revision: 6
+revision: 7
 origin:
   system: "manual"
 depends_on: []
@@ -38,11 +40,16 @@ quality_review:
     - "docs/technical-specification.md"
   findings:
     - "Document contracts are internally consistent: immutable env binding, non-overlapping current-state sync, directional guards, bounded write recovery, live pre-write reads, lower-only exploration, exact cluster DELETE audit, NFC query identity, and explicit acceptance tests."
-commit: null
+commit:
+  hash: "28c729937d4bbc6de2eb4915e6645a8481460c69"
+  message: "✅ P5GRS4 docs: done"
 comments:
   -
     author: "ORCHESTRATOR"
     body: "Start: Apply the approved documentation corrections and verify the revised specification for internal consistency and WB API safety gates."
+  -
+    author: "ORCHESTRATOR"
+    body: "Verified: revised WB bidder technical specification for the approved Wildberries API findings; document consistency, policy routing, workspace checks, and evaluator quality review pass."
 events:
   -
     type: "status"
@@ -57,8 +64,15 @@ events:
     author: "ORCHESTRATOR"
     state: "ok"
     note: "Technical specification updated for all approved P0/P1/P2 findings; consistency, routing, and workspace checks pass."
+  -
+    type: "status"
+    at: "2026-07-28T13:14:17.768Z"
+    author: "ORCHESTRATOR"
+    from: "DOING"
+    to: "DONE"
+    note: "Verified: revised WB bidder technical specification for the approved Wildberries API findings; document consistency, policy routing, workspace checks, and evaluator quality review pass."
 doc_version: 3
-doc_updated_at: "2026-07-28T13:00:06.344Z"
+doc_updated_at: "2026-07-28T13:14:17.769Z"
 doc_updated_by: "ORCHESTRATOR"
 description: "Apply the user-approved P0/P1/P2 corrections to docs/technical-specification.md without changing implementation scope beyond the selected findings."
 sections:
@@ -116,6 +130,10 @@ sections:
     - Observation: docs/technical-specification.md now defines immutable env account settings, current-state scheduling, direction-sensitive guards, write retry/recovery, live pre-write reads, lower-only exploration, cluster DELETE audit, NFC query identity, and acceptance coverage.
       Impact: Removes unsafe or ambiguous implementation contracts while preserving the explicitly excluded estimator, disaster-recovery, and token-profile scope.
       Resolution: Validated with document sequence/stale-term checks, git diff --check, policy routing, and AgentPlane doctor.
+extensions:
+  implementation_commit:
+    hash: "28c729937d4bbc6de2eb4915e6645a8481460c69"
+    message: "✅ P5GRS4 docs: done"
 id_source: "generated"
 ---
 ## Summary
