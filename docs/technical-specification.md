@@ -314,8 +314,9 @@ Executor Engine ДОЛЖЕН:
 - перечитать актуальность политики и отсутствие более нового решения;
 - применить endpoint-specific rate limit;
 - сгруппировать совместимые решения в пакет;
+- создать durable `WbWriteAttempt` непосредственно перед исходящим write-запросом;
 - отправить запрос;
-- сохранить request metadata и ответ без токена;
+- сохранить transport result и redacted metadata в `WbWriteAttempt`;
 - перейти к проверке результата.
 
 ### 7.7. Шаг 7. Проверка результата
@@ -507,17 +508,26 @@ Observation создаётся только из неотрицательных 
 - `sentAt`, `verifiedAt`;
 - index `(status, availableAt, priority)`.
 
-#### `WbApiCall`
+#### `WbWriteAttempt`
 
+- `id UUID PK`;
+- `decisionId FK`;
 - endpoint key, method;
 - correlation ID, WB request ID;
-- attempt;
-- request time, latency;
+- `attemptNumber`;
+- `status PREPARED | ACCEPTED | REJECTED | UNKNOWN`;
+- `preparedAt`, `completedAt`, latency;
 - HTTP status;
 - rate-limit response headers;
 - redacted request/response digest;
-- error class;
-- связь с sync run или decision.
+- error class и error code;
+- `reconciliationStatus NOT_REQUIRED | PENDING | CONFIRMED | MISMATCH`, `reconciledAt`;
+- unique `(decisionId, attemptNumber)`;
+- index `(status, preparedAt)`.
+
+В PostgreSQL сохраняется одна запись на каждую попытку исходящего write-запроса к WB. Запись создаётся до отправки и дополняется transport result после ответа. HTTP `2xx` даёт статус `ACCEPTED`, но окончательное применение подтверждается только reconciliation. Timeout или разрыв соединения после возможной отправки даёт `UNKNOWN`; повторный write запрещён до завершения reconciliation.
+
+Read-запросы не создают `WbWriteAttempt`. Их вызовы отражаются в structured logs и Prometheus-метриках, агрегаты выполнения — в `SchedulerRun`, а нормализованные бизнес-результаты — в соответствующих snapshots. Полные request/response payload не сохраняются в `WbWriteAttempt`; диагностический payload для аномалий следует отдельной ограниченной retention policy из раздела 13.3.
 
 #### `AuditEvent`
 
@@ -1339,6 +1349,7 @@ Authorization: Bearer <service-token>
 - `RECONCILIATION_CRON`;
 - `BID_VERIFICATION_INITIAL_DELAY_MS`, default не меньше 30 секунд;
 - `BID_VERIFICATION_TIMEOUT_MS`;
+- `WB_WRITE_ATTEMPT_RETENTION_DAYS` — положительный срок хранения детализированного журнала write-попыток, не меньше максимального окна retry и reconciliation;
 - `MAX_DECISION_AGE_MINUTES`;
 - `SCHEDULER_ENABLED`;
 - `METRICS_ENABLED`;
@@ -1371,6 +1382,8 @@ Production logs — JSON в stdout/stderr. Обязательные поля:
 - connection string с паролем;
 - полные секретные payload.
 
+Все вызовы WB API, включая read-запросы, попадают в structured logs и агрегированные метрики. Отдельная строка PostgreSQL создаётся только для исходящего write-запроса в `WbWriteAttempt`. После `WB_WRITE_ATTEMPT_RETENTION_DAYS` завершённая детализированная запись удаляется плановой очисткой; `PREPARED`, `UNKNOWN` и `PENDING` reconciliation не удаляются, а превышение ими максимального окна создаёт alert. Бизнес-аудит сохраняет идентификаторы попыток и итог применения без полного payload.
+
 ### 19.2. Бизнес-аудит
 
 Для решения сохраняются:
@@ -1382,7 +1395,7 @@ Production logs — JSON в stdout/stderr. Обязательные поля:
 - policy и algorithm version;
 - причины;
 - все применённые ограничения;
-- API attempts;
+- идентификаторы и итоги исходящих write-attempts;
 - фактически прочитанная ставка;
 - actor ручного вмешательства.
 
@@ -1554,6 +1567,7 @@ JSDoc НЕ ДОЛЖЕН пересказывать очевидный код и�
 - state machine;
 - error classification;
 - retry/backoff/jitter с fake timers;
+- state machine `WbWriteAttempt`, включая `UNKNOWN` и блокировку повторного write до reconciliation;
 - batch builder;
 - redaction;
 - config validation.
@@ -1583,6 +1597,7 @@ JSDoc НЕ ДОЛЖЕН пересказывать очевидный код и�
 - `SKIP LOCKED` с несколькими workers;
 - lease expiry/recovery;
 - supersede rules;
+- durable-регистрация `WbWriteAttempt` до отправки, reconciliation для `UNKNOWN` и плановая retention-очистка;
 - advisory scheduler lock;
 - audit append-only;
 - startup validation констант `ACCOUNT_CURRENCY` и `ACCOUNT_TIMEZONE`.
@@ -1803,7 +1818,7 @@ Bidder и mock-сервер возвращают Swagger UI по `GET /docs` и 
 - runtime schemas;
 - read endpoints;
 - rate limiter;
-- request audit/redaction;
+- журнал `WbWriteAttempt`, structured request logs и redaction;
 - mock scenarios и contract tests.
 
 ### Этап 2. Data Sync
@@ -1863,7 +1878,7 @@ Bidder и mock-сервер возвращают Swagger UI по `GET /docs` и 
 2. attribution window и conversion lag;
 3. допустимые default policy values;
 4. лимиты дневного расхода;
-5. retention статистики и аудита;
+5. retention статистики, аудита и детализированного журнала `WbWriteAttempt`;
 6. identity provider Admin API;
 7. целевой sync SLA для полного набора кампаний аккаунта;
 8. допустимость автоматического повышения ставок;
