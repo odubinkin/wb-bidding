@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "task_id": "202607280917-7XFVZX",
+  "evaluator_id": "recovery-context",
+  "evaluator_profile": "EVALUATOR",
+  "generated_at": "2026-07-28T09:24:50.335Z",
+  "verdict": "pass",
+  "summary": "The specification now separates technical UUID identity from semantic checksum deduplication and defines deterministic checksum construction.",
+  "evaluated_sha": "20104929f60ecd1c03550c257557e46795578642",
+  "blueprint_digest": "d0a410619c6a8b6fb1ff1c3fe0979c2b6cbc6ce2e1bad06042e5763e3e7f6fc1",
+  "findings": [
+    "The old nine-field BidDecision idempotency formula is removed; decisionInputChecksum alone is unique and retries reuse decisionId.",
+    "inputSnapshotChecksum and decisionInputChecksum have explicit domains, SHA-256 formula, RFC 8785 canonicalization, normalization rules, included inputs, and versioning requirements.",
+    "Product economics HTTP Idempotency-Key contracts remain unchanged."
+  ],
+  "evidence_refs": [
+    ".agentplane/tasks/202607280917-7XFVZX/README.md",
+    "docs/technical-specification.md",
+    "git diff --check: pass",
+    "node .agentplane/policy/check-routing.mjs: policy routing OK",
+    "ap doctor: errors=0 warnings=0"
+  ],
+  "missing_tests": [],
+  "hidden_assumptions": [],
+  "residual_risks": [
+    "Implementation must produce and lock golden fixtures for both checksum schema versions before production use."
+  ]
+}

@@ -1,10 +1,10 @@
 ---
 id: "202607280917-7XFVZX"
 title: "Define decision checksum and idempotency"
-status: "DOING"
+status: "BLOCKED"
 priority: "med"
 owner: "DOCS"
-revision: 13
+revision: 21
 origin:
   system: "manual"
 depends_on: []
@@ -18,10 +18,31 @@ plan_approval:
   note: null
 verification:
   state: "ok"
-  updated_at: "2026-07-28T09:22:14.671Z"
+  updated_at: "2026-07-28T09:25:07.441Z"
   updated_by: "DOCS"
-  note: "Documentation contract verified: deterministic checksums, UUID identity, and checksum uniqueness are consistent."
+  note: "Defined deterministic snapshot and decision checksums; UUIDv7 now serves only as BidDecision identity and checksum uniqueness provides deduplication."
   attempts: 0
+quality_review:
+  state: "pass"
+  updated_at: "2026-07-28T09:24:50.335Z"
+  updated_by: "EVALUATOR"
+  note: "The specification now separates technical UUID identity from semantic checksum deduplication and defines deterministic checksum construction."
+  evaluated_sha: "20104929f60ecd1c03550c257557e46795578642"
+  blueprint_digest: "d0a410619c6a8b6fb1ff1c3fe0979c2b6cbc6ce2e1bad06042e5763e3e7f6fc1"
+  evidence_refs:
+    - ".agentplane/tasks/202607280917-7XFVZX/README.md"
+    - ".agentplane/tasks/202607280917-7XFVZX/quality/20260728-092450335-recovery-context/quality-report.json"
+    - ".agentplane/tasks/202607280917-7XFVZX/quality/20260728-092450335-recovery-context/evaluator-prompt.md"
+    - ".agentplane/tasks/202607280917-7XFVZX/quality/20260728-092450335-recovery-context/evaluator-opinion.md"
+    - ".agentplane/tasks/202607280917-7XFVZX/blueprint/resolved-snapshot.json"
+    - "docs/technical-specification.md"
+    - "git diff --check: pass"
+    - "node .agentplane/policy/check-routing.mjs: policy routing OK"
+    - "ap doctor: errors=0 warnings=0"
+  findings:
+    - "The old nine-field BidDecision idempotency formula is removed; decisionInputChecksum alone is unique and retries reuse decisionId."
+    - "inputSnapshotChecksum and decisionInputChecksum have explicit domains, SHA-256 formula, RFC 8785 canonicalization, normalization rules, included inputs, and versioning requirements."
+    - "Product economics HTTP Idempotency-Key contracts remain unchanged."
 commit: null
 comments:
   -
@@ -33,6 +54,15 @@ comments:
   -
     author: "DOCS"
     body: "Start: continue direct-mode task in current checkout."
+  -
+    author: "DOCS"
+    body: "Blocked: Closeout requires the configured EVALUATOR quality review; implementation commit is valid and scope remains unchanged."
+  -
+    author: "DOCS"
+    body: "Start: continue direct-mode task in current checkout."
+  -
+    author: "DOCS"
+    body: "Blocked: Deterministic closeout requires the evaluator and recovery task artifacts to be committed first; specification scope is unchanged."
 events:
   -
     type: "status"
@@ -61,8 +91,41 @@ events:
     from: "BLOCKED"
     to: "DOING"
     note: "Start: continue direct-mode task in current checkout."
+  -
+    type: "verify"
+    at: "2026-07-28T09:24:03.485Z"
+    author: "DOCS"
+    state: "ok"
+    note: "Defined deterministic snapshot and decision checksums; UUIDv7 now serves only as BidDecision identity and checksum uniqueness provides deduplication."
+  -
+    type: "status"
+    at: "2026-07-28T09:24:37.875Z"
+    author: "DOCS"
+    from: "DOING"
+    to: "BLOCKED"
+    note: "Blocked: Closeout requires the configured EVALUATOR quality review; implementation commit is valid and scope remains unchanged."
+  -
+    type: "status"
+    at: "2026-07-28T09:25:00.086Z"
+    author: "DOCS"
+    from: "BLOCKED"
+    to: "DOING"
+    note: "Start: continue direct-mode task in current checkout."
+  -
+    type: "verify"
+    at: "2026-07-28T09:25:07.441Z"
+    author: "DOCS"
+    state: "ok"
+    note: "Defined deterministic snapshot and decision checksums; UUIDv7 now serves only as BidDecision identity and checksum uniqueness provides deduplication."
+  -
+    type: "status"
+    at: "2026-07-28T09:25:38.519Z"
+    author: "DOCS"
+    from: "DOING"
+    to: "BLOCKED"
+    note: "Blocked: Deterministic closeout requires the evaluator and recovery task artifacts to be committed first; specification scope is unchanged."
 doc_version: 3
-doc_updated_at: "2026-07-28T09:23:37.719Z"
+doc_updated_at: "2026-07-28T09:25:38.519Z"
 doc_updated_by: "DOCS"
 description: "Specify deterministic decisionInputChecksum computation and replace the composite BidDecision idempotency key with UUID identity plus checksum-based uniqueness."
 sections:
@@ -136,6 +199,66 @@ sections:
     - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
     - risks: none
 
+    ### 2026-07-28T09:24:03.485Z — VERIFY — ok
+
+    By: DOCS
+
+    Note: Defined deterministic snapshot and decision checksums; UUIDv7 now serves only as BidDecision identity and checksum uniqueness provides deduplication.
+    Attempts: 0
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-28T09:23:37.719Z, excerpt_hash=sha256:801d7120e7d559f97a397c68c5746a4f71cc5dfd8c5fad115ca3089c448c1636
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607280917-7XFVZX/blueprint/resolved-snapshot.json
+    - old_digest: d0a410619c6a8b6fb1ff1c3fe0979c2b6cbc6ce2e1bad06042e5763e3e7f6fc1
+    - current_digest: d0a410619c6a8b6fb1ff1c3fe0979c2b6cbc6ce2e1bad06042e5763e3e7f6fc1
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202607280917-7XFVZX
+
+    DecisionContextRef:
+    - operator_action: stop
+    - can_execute_now: false
+    - safe_command: none
+    - diagnostic_command: agentplane task next-action 202607280917-7XFVZX --explain
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: false
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: unsafe_shell_chain_route
+
+    ### 2026-07-28T09:25:07.441Z — VERIFY — ok
+
+    By: DOCS
+
+    Note: Defined deterministic snapshot and decision checksums; UUIDv7 now serves only as BidDecision identity and checksum uniqueness provides deduplication.
+    Attempts: 0
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-28T09:25:00.086Z, excerpt_hash=sha256:801d7120e7d559f97a397c68c5746a4f71cc5dfd8c5fad115ca3089c448c1636
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607280917-7XFVZX/blueprint/resolved-snapshot.json
+    - old_digest: d0a410619c6a8b6fb1ff1c3fe0979c2b6cbc6ce2e1bad06042e5763e3e7f6fc1
+    - current_digest: d0a410619c6a8b6fb1ff1c3fe0979c2b6cbc6ce2e1bad06042e5763e3e7f6fc1
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202607280917-7XFVZX
+
+    DecisionContextRef:
+    - operator_action: stop
+    - can_execute_now: false
+    - safe_command: none
+    - diagnostic_command: agentplane task next-action 202607280917-7XFVZX --explain
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: false
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: unsafe_shell_chain_route
+
     <!-- END VERIFICATION RESULTS -->
   Rollback Plan: |-
     - Revert the task close commit created by AgentPlane.
@@ -144,9 +267,23 @@ sections:
     Commit attempt recovery:
 
     - Observation: ap commit rejected the initial subject before creating a commit because it did not match the required emoji/task-suffix/scope format.
-    - Impact: docs/technical-specification.md remains staged and uncommitted; verified content is unchanged.
-    - Resolution: use the AgentPlane-provided subject format and rerun the guarded commit after resuming the task.
+    - Impact: verified specification content remained unchanged.
+    - Resolution: used the AgentPlane-provided subject format; implementation commit 20104929f60ecd1c03550c257557e46795578642 was created.
     - Fixability: repo-local command correction; no scope or risk change.
+
+    Closeout quality-gate recovery:
+
+    - Observation: the first task complete attempt found the required EVALUATOR quality review missing.
+    - Impact: task remained open; implementation commit was unchanged.
+    - Resolution: EVALUATOR review completed with verdict pass and report recorded under the task quality directory.
+    - Fixability: repo-local lifecycle correction; no scope or risk change.
+
+    Close-commit cleanliness recovery:
+
+    - Observation: task complete requires a clean tracked worktree before its deterministic close commit, while the evaluator and recovery steps had updated the tracked task README.
+    - Impact: task remained open; no specification or implementation commit changed.
+    - Resolution: commit only the active task lifecycle and quality artifacts through ap commit --allow-tasks, then resume and rerun task complete.
+    - Fixability: repo-local lifecycle correction; no scope or risk change.
 id_source: "generated"
 ---
 ## Summary
@@ -229,6 +366,66 @@ DecisionContextRef:
 - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
 - risks: none
 
+### 2026-07-28T09:24:03.485Z — VERIFY — ok
+
+By: DOCS
+
+Note: Defined deterministic snapshot and decision checksums; UUIDv7 now serves only as BidDecision identity and checksum uniqueness provides deduplication.
+Attempts: 0
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-28T09:23:37.719Z, excerpt_hash=sha256:801d7120e7d559f97a397c68c5746a4f71cc5dfd8c5fad115ca3089c448c1636
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607280917-7XFVZX/blueprint/resolved-snapshot.json
+- old_digest: d0a410619c6a8b6fb1ff1c3fe0979c2b6cbc6ce2e1bad06042e5763e3e7f6fc1
+- current_digest: d0a410619c6a8b6fb1ff1c3fe0979c2b6cbc6ce2e1bad06042e5763e3e7f6fc1
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202607280917-7XFVZX
+
+DecisionContextRef:
+- operator_action: stop
+- can_execute_now: false
+- safe_command: none
+- diagnostic_command: agentplane task next-action 202607280917-7XFVZX --explain
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: false
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: unsafe_shell_chain_route
+
+### 2026-07-28T09:25:07.441Z — VERIFY — ok
+
+By: DOCS
+
+Note: Defined deterministic snapshot and decision checksums; UUIDv7 now serves only as BidDecision identity and checksum uniqueness provides deduplication.
+Attempts: 0
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-28T09:25:00.086Z, excerpt_hash=sha256:801d7120e7d559f97a397c68c5746a4f71cc5dfd8c5fad115ca3089c448c1636
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607280917-7XFVZX/blueprint/resolved-snapshot.json
+- old_digest: d0a410619c6a8b6fb1ff1c3fe0979c2b6cbc6ce2e1bad06042e5763e3e7f6fc1
+- current_digest: d0a410619c6a8b6fb1ff1c3fe0979c2b6cbc6ce2e1bad06042e5763e3e7f6fc1
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202607280917-7XFVZX
+
+DecisionContextRef:
+- operator_action: stop
+- can_execute_now: false
+- safe_command: none
+- diagnostic_command: agentplane task next-action 202607280917-7XFVZX --explain
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: false
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: unsafe_shell_chain_route
+
 <!-- END VERIFICATION RESULTS -->
 
 ## Rollback Plan
@@ -241,6 +438,20 @@ DecisionContextRef:
 Commit attempt recovery:
 
 - Observation: ap commit rejected the initial subject before creating a commit because it did not match the required emoji/task-suffix/scope format.
-- Impact: docs/technical-specification.md remains staged and uncommitted; verified content is unchanged.
-- Resolution: use the AgentPlane-provided subject format and rerun the guarded commit after resuming the task.
+- Impact: verified specification content remained unchanged.
+- Resolution: used the AgentPlane-provided subject format; implementation commit 20104929f60ecd1c03550c257557e46795578642 was created.
 - Fixability: repo-local command correction; no scope or risk change.
+
+Closeout quality-gate recovery:
+
+- Observation: the first task complete attempt found the required EVALUATOR quality review missing.
+- Impact: task remained open; implementation commit was unchanged.
+- Resolution: EVALUATOR review completed with verdict pass and report recorded under the task quality directory.
+- Fixability: repo-local lifecycle correction; no scope or risk change.
+
+Close-commit cleanliness recovery:
+
+- Observation: task complete requires a clean tracked worktree before its deterministic close commit, while the evaluator and recovery steps had updated the tracked task README.
+- Impact: task remained open; no specification or implementation commit changed.
+- Resolution: commit only the active task lifecycle and quality artifacts through ap commit --allow-tasks, then resume and rerun task complete.
+- Fixability: repo-local lifecycle correction; no scope or risk change.
