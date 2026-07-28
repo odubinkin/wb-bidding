@@ -4,6 +4,7 @@ import { LoggerModule } from 'nestjs-pino';
 import { APP_CONFIGURATION, createApplicationConfiguration } from './application-config.js';
 import { HealthController } from './health.controller.js';
 import { ServiceInfoController } from './service-info.controller.js';
+import { createWbTokenProfile, WB_TOKEN_PROFILE } from './wb-integration.js';
 
 /**
  * Root bidder composition module.
@@ -33,6 +34,11 @@ import { ServiceInfoController } from './service-info.controller.js';
     {
       provide: APP_CONFIGURATION,
       useFactory: createApplicationConfiguration,
+    },
+    {
+      inject: [APP_CONFIGURATION],
+      provide: WB_TOKEN_PROFILE,
+      useFactory: createWbTokenProfile,
     },
   ],
 })

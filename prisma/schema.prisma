@@ -578,3 +578,13 @@ model IdempotencyRecord {
   @@unique([scope, idempotencyKey])
   @@index([expiresAt])
 }
+
+model WbRateLimitBucket {
+  bucketKey      String   @id @map("bucket_key")
+  blockedUntilMs BigInt   @default(0) @map("blocked_until_ms")
+  tokens         Decimal  @db.Decimal(20, 9)
+  lastRefillAtMs BigInt   @map("last_refill_at_ms")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@map("wb_rate_limit_bucket")
+}

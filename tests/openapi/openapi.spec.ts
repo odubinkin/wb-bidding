@@ -25,7 +25,7 @@ describe('generated OpenAPI contracts', () => {
       SCHEDULER_ENABLED: 'false',
       WB_API_MODE: 'mock',
       WB_API_MOCK_BASE_URL: 'http://wb-mock:3001',
-      WB_API_TOKEN: 'synthetic-test-token',
+      WB_API_TOKEN: 'mock-test-token',
       WB_API_WRITE_ENABLED: 'false',
       WB_ENDPOINT_PROFILE_VERSION: 'wb-promotion-2026-07-28-v1',
       WB_EXPECTED_TOKEN_TYPE: 'TEST',
@@ -44,7 +44,7 @@ describe('generated OpenAPI contracts', () => {
       expect.arrayContaining(['/api/v1/service-info', '/health/live', '/health/ready', '/metrics']),
     );
     expect(document.components?.securitySchemes).toHaveProperty('admin-service-token');
-    expect(serialized).not.toContain('synthetic-test-token');
+    expect(serialized).not.toContain('mock-test-token');
     expect(serialized).not.toContain('test-admin-token');
   });
 
@@ -62,10 +62,54 @@ describe('generated OpenAPI contracts', () => {
     applications.push(application);
 
     const document = buildMockOpenApi(application);
+    const serialized = JSON.stringify(document);
+    const requiredWbPaths = [
+      '/adv/v1/promotion/count',
+      '/api/advert/v2/adverts',
+      '/api/advert/v1/bids/min',
+      '/api/advert/v1/bids',
+      '/adv/v0/normquery/get-bids',
+      '/adv/v0/normquery/list',
+      '/adv/v0/normquery/bids',
+      '/adv/v3/fullstats',
+      '/adv/v1/normquery/stats',
+      '/api/advert/v0/bids/recommendations',
+      '/adv/v1/budget',
+      '/api/v1/seller-info',
+      '/ping',
+    ];
 
     expect(document.openapi).toMatch(/^3\./u);
     expect(document.paths).toHaveProperty('/__mock/state');
+    expect(document.paths).toHaveProperty('/__mock/reset');
+    expect(document.paths).toHaveProperty('/__mock/seed/{scenario}');
+    expect(document.paths).toHaveProperty('/__mock/faults');
+    expect(document.paths).toHaveProperty('/__mock/time/advance');
+    expect(document.paths).toHaveProperty('/__mock/requests');
     expect(document.paths).toHaveProperty('/health/live');
+    for (const path of requiredWbPaths) {
+      expect(document.paths).toHaveProperty(path);
+    }
+    expect(Object.keys(document.paths)).not.toContain('/adv/v1/promotion/adverts');
     expect(document.components?.securitySchemes).toHaveProperty('HeaderApiKey');
+    expect(document.paths['/api/advert/v1/bids/min']?.post?.requestBody).toMatchObject({
+      content: {
+        'application/json': {
+          schema: { $ref: '#/components/schemas/MinimumBidsRequestDto' },
+        },
+      },
+      required: true,
+    });
+    expect(document.components?.schemas?.CardNmBidDto).toMatchObject({
+      properties: {
+        bid_kopecks: {
+          description: 'Kopecks (minor RUB units).',
+          minimum: 1,
+        },
+      },
+      required: ['bid_kopecks', 'nm_id', 'placement'],
+    });
+    expect(document.paths['/adv/v1/promotion/count']?.get?.responses).toHaveProperty('429');
+    expect(serialized).not.toContain('mock-test-token');
   });
 });

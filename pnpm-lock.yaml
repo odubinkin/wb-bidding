@@ -159,6 +159,9 @@ importers:
       '@wb-bidder/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@wb-bidder/wb-api':
+        specifier: workspace:*
+        version: link:../../packages/wb-api
       nestjs-pino:
         specifier: 4.6.0
         version: 4.6.0(@nestjs/common@11.1.28(class-transformer@0.5.1)(class-validator@0.15.1)(reflect-metadata@0.2.2)(rxjs@7.8.2))(pino-http@11.0.0)(pino@10.3.1)(rxjs@7.8.2)
@@ -192,6 +195,9 @@ importers:
       '@wb-bidder/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@wb-bidder/wb-api':
+        specifier: workspace:*
+        version: link:../../packages/wb-api
       nestjs-pino:
         specifier: 4.6.0
         version: 4.6.0(@nestjs/common@11.1.28(class-transformer@0.5.1)(class-validator@0.15.1)(reflect-metadata@0.2.2)(rxjs@7.8.2))(pino-http@11.0.0)(pino@10.3.1)(rxjs@7.8.2)
@@ -209,6 +215,24 @@ importers:
         version: 4.4.3
 
   packages/contracts: {}
+
+  packages/wb-api:
+    dependencies:
+      '@wb-bidder/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      decimal.js:
+        specifier: 10.6.0
+        version: 10.6.0
+      jose:
+        specifier: 6.1.2
+        version: 6.1.2
+      pg:
+        specifier: 8.16.3
+        version: 8.16.3
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
 
 packages:
 

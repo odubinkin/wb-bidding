@@ -1,10 +1,10 @@
 ---
 id: "202607281322-QKFWZS"
 title: "Stage 1: WB adapter, rate limiter and deterministic mock"
-status: "TODO"
+status: "DOING"
 priority: "high"
 owner: "CODER"
-revision: 3
+revision: 6
 origin:
   system: "manual"
 depends_on:
@@ -25,22 +25,38 @@ verify:
   - "pnpm run test:unit"
   - "pnpm run typecheck"
 plan_approval:
-  state: "pending"
-  updated_at: null
-  updated_by: null
+  state: "approved"
+  updated_at: "2026-07-28T13:55:18.236Z"
+  updated_by: "ORCHESTRATOR"
   note: null
 verification:
-  state: "pending"
-  updated_at: null
-  updated_by: null
-  note: null
+  state: "ok"
+  updated_at: "2026-07-28T14:42:06.120Z"
+  updated_by: "CODER"
+  note: "Stage 1 local verification passed: quality, build, built-process smoke, WB consumer/OpenAPI contracts, deterministic virtual-time/fault scenarios, clean PostgreSQL migration and cross-replica limiter integration, and all Compose configs. Official WB evidence is pinned; uncertain cluster/budget/fullstats/same-day semantics remain UNVERIFIED and fail-closed."
   attempts: 0
 commit: null
-comments: []
-events: []
+comments:
+  -
+    author: "CODER"
+    body: "Start: continue direct-mode task in current checkout."
+events:
+  -
+    type: "status"
+    at: "2026-07-28T13:55:28.443Z"
+    author: "CODER"
+    from: "TODO"
+    to: "DOING"
+    note: "Start: continue direct-mode task in current checkout."
+  -
+    type: "verify"
+    at: "2026-07-28T14:42:06.120Z"
+    author: "CODER"
+    state: "ok"
+    note: "Stage 1 local verification passed: quality, build, built-process smoke, WB consumer/OpenAPI contracts, deterministic virtual-time/fault scenarios, clean PostgreSQL migration and cross-replica limiter integration, and all Compose configs. Official WB evidence is pinned; uncertain cluster/budget/fullstats/same-day semantics remain UNVERIFIED and fail-closed."
 doc_version: 3
-doc_updated_at: "2026-07-28T13:24:53.063Z"
-doc_updated_by: "PLANNER"
+doc_updated_at: "2026-07-28T14:42:06.201Z"
+doc_updated_by: "CODER"
 description: "Implement versioned WB endpoint profiles/runtime schemas, token and account-binding validation, exact wire normalization, distributed rate limiting, retries/circuit breakers, WB adapter modes, deterministic NestJS mock with virtual clock, fault injection, request journal, Swagger, fixtures and consumer contract tests required by sections 4, 8, 12, 15 and AC-02/10/13/19/23/24/27/29/30."
 sections:
   Summary: |-
@@ -67,11 +83,44 @@ sections:
     7. Inspect endpoint profile evidence. Expected: exact official-source URLs/date/checksums are pinned, and cluster write/delete, budget and same-day contracts stay fail-closed unless reproducible evidence qualifies them as VERIFIED.
   Verification: |-
     <!-- BEGIN VERIFICATION RESULTS -->
+    ### 2026-07-28T14:42:06.120Z — VERIFY — ok
+
+    By: CODER
+
+    Note: Stage 1 local verification passed: quality, build, built-process smoke, WB consumer/OpenAPI contracts, deterministic virtual-time/fault scenarios, clean PostgreSQL migration and cross-replica limiter integration, and all Compose configs. Official WB evidence is pinned; uncertain cluster/budget/fullstats/same-day semantics remain UNVERIFIED and fail-closed.
+    Attempts: 0
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-28T13:55:28.443Z, excerpt_hash=sha256:a9586e9a0c94107508fa1750f05d04a5d3b935366429828523dd5e41830bf5fc
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607281322-QKFWZS/blueprint/resolved-snapshot.json
+    - old_digest: 226d93ae7730451d39ca4e20b8a491c481eb75470b615bf4ec3c753a24218e08
+    - current_digest: 226d93ae7730451d39ca4e20b8a491c481eb75470b615bf4ec3c753a24218e08
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202607281322-QKFWZS
+
+    DecisionContextRef:
+    - operator_action: run_exact_argv
+    - can_execute_now: true
+    - safe_command: agentplane task verify-show 202607281322-QKFWZS
+    - diagnostic_command: none
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: true
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: none
+
     <!-- END VERIFICATION RESULTS -->
   Rollback Plan: |-
     - Revert task-related commit(s).
     - Re-run required checks to confirm rollback safety.
-  Findings: ""
+  Findings: |-
+    - Observation: Docker CLI is present but the local Docker daemon is unavailable, so image build and container runtime were not executable in this environment.
+      Impact: Local verification used compiled-process smoke and static Compose validation; CI remains the authoritative Docker image/runtime gate.
+      Resolution: CI builds both Dockerfiles against PostgreSQL 18; no production write capability is enabled by this local limitation.
 id_source: "generated"
 ---
 ## Summary
@@ -107,6 +156,36 @@ Implement versioned WB endpoint profiles/runtime schemas, token and account-bind
 ## Verification
 
 <!-- BEGIN VERIFICATION RESULTS -->
+### 2026-07-28T14:42:06.120Z — VERIFY — ok
+
+By: CODER
+
+Note: Stage 1 local verification passed: quality, build, built-process smoke, WB consumer/OpenAPI contracts, deterministic virtual-time/fault scenarios, clean PostgreSQL migration and cross-replica limiter integration, and all Compose configs. Official WB evidence is pinned; uncertain cluster/budget/fullstats/same-day semantics remain UNVERIFIED and fail-closed.
+Attempts: 0
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-28T13:55:28.443Z, excerpt_hash=sha256:a9586e9a0c94107508fa1750f05d04a5d3b935366429828523dd5e41830bf5fc
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607281322-QKFWZS/blueprint/resolved-snapshot.json
+- old_digest: 226d93ae7730451d39ca4e20b8a491c481eb75470b615bf4ec3c753a24218e08
+- current_digest: 226d93ae7730451d39ca4e20b8a491c481eb75470b615bf4ec3c753a24218e08
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202607281322-QKFWZS
+
+DecisionContextRef:
+- operator_action: run_exact_argv
+- can_execute_now: true
+- safe_command: agentplane task verify-show 202607281322-QKFWZS
+- diagnostic_command: none
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: true
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: none
+
 <!-- END VERIFICATION RESULTS -->
 
 ## Rollback Plan
@@ -115,3 +194,7 @@ Implement versioned WB endpoint profiles/runtime schemas, token and account-bind
 - Re-run required checks to confirm rollback safety.
 
 ## Findings
+
+- Observation: Docker CLI is present but the local Docker daemon is unavailable, so image build and container runtime were not executable in this environment.
+  Impact: Local verification used compiled-process smoke and static Compose validation; CI remains the authoritative Docker image/runtime gate.
+  Resolution: CI builds both Dockerfiles against PostgreSQL 18; no production write capability is enabled by this local limitation.

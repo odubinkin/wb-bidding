@@ -1,5 +1,6 @@
 {
   "checkedAt": "2026-07-28T00:00:00.000Z",
+  "contractFixtureChecksumSha256": "2dcbdbdf073472a0d648a8ede4a124216ab5ddb594ceb2f4c362c5678c58828e",
   "profileId": "wb-promotion-2026-07-28-v1",
   "sources": [
     "https://dev.wildberries.ru/ru/openapi/promotion",
@@ -9,6 +10,21 @@
     "https://dev.wildberries.ru/sandbox",
     "https://dev.wildberries.ru/release-notes"
   ],
+  "rateProfiles": {
+    "BASE+PROD": {
+      "status": "CONSERVATIVE_READ_ONLY",
+      "globalCap": "1 request/second; slower endpoint limits still win"
+    },
+    "PERSONAL+PROD": {
+      "status": "VERIFIED",
+      "source": "official endpoint tables"
+    },
+    "TEST+SANDBOX": {
+      "status": "CONSERVATIVE",
+      "globalCap": "1 request/second; slower endpoint limits still win"
+    }
+  },
+  "runtimeSchemaVersion": "wb-promotion-runtime-v1",
   "wireContracts": {
     "budgetSemantics": "UNVERIFIED",
     "cardBidMinorUnits": "VERIFIED",

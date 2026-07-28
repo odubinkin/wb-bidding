@@ -15,12 +15,19 @@ export default defineConfig({
       '@wb-bidder/contracts': fileURLToPath(
         new URL('./packages/contracts/src/index.ts', import.meta.url),
       ),
+      '@wb-bidder/wb-api': fileURLToPath(
+        new URL('./packages/wb-api/src/index.ts', import.meta.url),
+      ),
     },
   },
   test: {
     coverage: {
       exclude: ['**/main.ts', '**/*.module.ts', '**/*.spec.ts', '**/generated/**', '**/prisma/**'],
-      include: ['packages/config/**/*.ts', 'packages/contracts/src/money.ts'],
+      include: [
+        'packages/config/**/*.ts',
+        'packages/contracts/src/money.ts',
+        'packages/wb-api/src/money.ts',
+      ],
       provider: 'v8',
       reporter: ['text', 'json-summary', 'lcov'],
       thresholds: {

@@ -29,7 +29,7 @@ const bidder = spawn('node', ['apps/bidder/dist/main.js'], {
     SCHEDULER_ENABLED: 'false',
     WB_API_MOCK_BASE_URL: `http://127.0.0.1:${mockPort}`,
     WB_API_MODE: 'mock',
-    WB_API_TOKEN: 'synthetic-test-token',
+    WB_API_TOKEN: 'mock-test-token',
     WB_API_WRITE_ENABLED: 'false',
     WB_ENDPOINT_PROFILE_VERSION: 'wb-promotion-2026-07-28-v1',
     WB_EXPECTED_TOKEN_TYPE: 'TEST',

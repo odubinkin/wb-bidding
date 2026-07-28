@@ -2,6 +2,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 
 const roots = ['apps', 'packages'];
+const compatibilityRegistry = 'packages/wb-api/src/endpoint-registry.ts';
 const forbiddenPairs = [
   ['POST', '/adv/v1/promotion/adverts'],
   ['GET', '/adv/v0/auction/adverts'],
@@ -35,7 +36,7 @@ const violations = [];
 for (const file of files) {
   const content = await readFile(file, 'utf8');
   for (const [method, path] of forbiddenPairs) {
-    if (content.includes(method) && content.includes(path)) {
+    if (file !== compatibilityRegistry && content.includes(method) && content.includes(path)) {
       violations.push(`${file}: ${method} ${path}`);
     }
   }
@@ -43,6 +44,13 @@ for (const file of files) {
 
 if (violations.length > 0) {
   throw new Error(`Deprecated WB endpoint pairs detected:\n${violations.join('\n')}`);
+}
+
+const registry = await readFile(compatibilityRegistry, 'utf8');
+for (const [method, path] of forbiddenPairs) {
+  if (!registry.includes(method) || !registry.includes(path)) {
+    throw new Error(`Deprecated pair is missing from compatibility registry: ${method} ${path}`);
+  }
 }
 
 process.stdout.write(`Checked ${files.length} implementation and contract files.\n`);

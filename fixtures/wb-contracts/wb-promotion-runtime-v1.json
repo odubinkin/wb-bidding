@@ -1,0 +1,243 @@
+{
+  "fixtureVersion": "wb-promotion-runtime-v1",
+  "capturedAt": "2026-07-28T00:00:00.000Z",
+  "dataClassification": "SYNTHETIC_REDACTED",
+  "source": "https://dev.wildberries.ru/ru/openapi/promotion",
+  "contracts": {
+    "campaignCount": {
+      "method": "GET",
+      "path": "/adv/v1/promotion/count",
+      "response": {
+        "adverts": [
+          {
+            "type": 9,
+            "status": 9,
+            "count": 1,
+            "advert_list": [
+              {
+                "advertId": 10001,
+                "changeTime": "2026-07-28T00:00:00.000Z"
+              }
+            ]
+          }
+        ],
+        "all": 1
+      }
+    },
+    "campaignDetails": {
+      "method": "GET",
+      "path": "/api/advert/v2/adverts",
+      "response": {
+        "adverts": [
+          {
+            "bid_type": "manual",
+            "id": 10001,
+            "nm_settings": [
+              {
+                "bids_kopecks": {
+                  "recommendations": 0,
+                  "search": 1200
+                },
+                "nm_id": 20001,
+                "subject": {
+                  "id": 52,
+                  "name": "synthetic subject"
+                }
+              }
+            ],
+            "settings": {
+              "name": "Synthetic 10001",
+              "payment_type": "cpm",
+              "placements": {
+                "recommendations": false,
+                "search": true
+              }
+            },
+            "status": 9,
+            "timestamps": {
+              "created": "2026-07-28T00:00:00.000Z",
+              "deleted": "2100-01-01T00:00:00.000Z",
+              "started": "2026-07-28T00:00:00.000Z",
+              "updated": "2026-07-28T00:00:00.000Z"
+            }
+          }
+        ]
+      }
+    },
+    "cardMinimumBids": {
+      "method": "POST",
+      "path": "/api/advert/v1/bids/min",
+      "request": {
+        "advert_id": 10001,
+        "nm_ids": [20001],
+        "payment_type": "cpm",
+        "placement_types": ["search"]
+      },
+      "response": {
+        "bids": [
+          {
+            "bids": [
+              {
+                "type": "search",
+                "value": 250
+              }
+            ],
+            "nm_id": 20001
+          }
+        ]
+      }
+    },
+    "cardWriteBids": {
+      "method": "PATCH",
+      "path": "/api/advert/v1/bids",
+      "request": {
+        "bids": [
+          {
+            "advert_id": 10001,
+            "nm_bids": [
+              {
+                "nm_id": 20001,
+                "bid_kopecks": 1250,
+                "placement": "search"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "clusterCurrentBids": {
+      "method": "POST",
+      "path": "/adv/v0/normquery/get-bids",
+      "request": {
+        "items": [
+          {
+            "advert_id": 10001,
+            "nm_id": 20001
+          }
+        ]
+      },
+      "response": {
+        "bids": [
+          {
+            "advert_id": 10001,
+            "bid": 700,
+            "nm_id": 20001,
+            "norm_query": "synthetic cluster one"
+          }
+        ]
+      }
+    },
+    "clusterList": {
+      "method": "POST",
+      "path": "/adv/v0/normquery/list",
+      "request": {
+        "items": [
+          {
+            "advert_id": 10001,
+            "nm_id": 20001
+          }
+        ]
+      },
+      "response": {
+        "items": [
+          {
+            "advert_id": 10001,
+            "nm_id": 20001,
+            "norm_queries": ["synthetic cluster one"]
+          }
+        ]
+      }
+    },
+    "clusterWriteBids": {
+      "method": "POST",
+      "path": "/adv/v0/normquery/bids",
+      "status": "UNVERIFIED",
+      "request": {
+        "bids": [
+          {
+            "advert_id": 10001,
+            "bid": 1000,
+            "nm_id": 20001,
+            "norm_query": "synthetic cluster one"
+          }
+        ]
+      }
+    },
+    "clusterDeleteBids": {
+      "method": "DELETE",
+      "path": "/adv/v0/normquery/bids",
+      "status": "UNVERIFIED"
+    },
+    "campaignStatistics": {
+      "method": "GET",
+      "path": "/adv/v3/fullstats",
+      "status": "UNVERIFIED",
+      "response": []
+    },
+    "clusterStatistics": {
+      "method": "POST",
+      "path": "/adv/v1/normquery/stats",
+      "request": {
+        "from": "2026-07-27",
+        "to": "2026-07-27",
+        "items": [
+          {
+            "advert_id": 10001,
+            "nm_id": 20001
+          }
+        ]
+      },
+      "response": {
+        "items": []
+      }
+    },
+    "bidRecommendations": {
+      "method": "GET",
+      "path": "/api/advert/v0/bids/recommendations",
+      "response": {
+        "advertId": 10001,
+        "base": {
+          "competitiveBid": {
+            "bidKopecks": 1200
+          },
+          "leadersBid": {
+            "bidKopecks": 1800
+          },
+          "top2": {
+            "bidKopecks": 2500
+          }
+        },
+        "nmId": 20001,
+        "normQueries": []
+      }
+    },
+    "campaignBudget": {
+      "method": "GET",
+      "path": "/adv/v1/budget",
+      "status": "UNVERIFIED",
+      "response": {
+        "cash": 0,
+        "netting": 0,
+        "total": 500
+      }
+    },
+    "sellerInfo": {
+      "method": "GET",
+      "path": "/api/v1/seller-info",
+      "source": "https://dev.wildberries.ru/ru/openapi/api-information",
+      "response": {
+        "name": "Synthetic Seller",
+        "sid": "00000000-0000-4000-8000-000000000001"
+      }
+    },
+    "ping": {
+      "method": "GET",
+      "path": "/ping",
+      "source": "https://dev.wildberries.ru/ru/openapi/api-information",
+      "response": {
+        "TS": "2026-07-28T00:00:00.000Z",
+        "Status": "OK"
+      }
+    }
+  }
+}

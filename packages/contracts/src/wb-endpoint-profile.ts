@@ -54,6 +54,10 @@ export interface EndpointProfile {
   readonly checkedAt: string;
   /** Endpoint-level request limits for the Personal production token profile. */
   readonly personalProductionLimits: Readonly<Record<EndpointKey, RateLimitProfile>>;
+  /** Conservative read-only Base-token limits, never used to enable APPLY. */
+  readonly baseProductionLimits: Readonly<Record<EndpointKey, RateLimitProfile>>;
+  /** Sandbox Test-token limits capped by the documented one-request-per-second contour rule. */
+  readonly testSandboxLimits: Readonly<Record<EndpointKey, RateLimitProfile>>;
   /** Immutable profile identifier selected by configuration. */
   readonly profileId: string;
   /** Official sources used for the read-only documentation check. */
@@ -80,10 +84,44 @@ const PER_SECOND_5_BURST_10: RateLimitProfile = Object.freeze({
   requests: 5,
 });
 
+const PER_SECOND_1: RateLimitProfile = Object.freeze({
+  burst: 1,
+  intervalMs: 1_000,
+  requests: 1,
+});
+
+const SLOW_ENDPOINT_LIMITS = Object.freeze({
+  bidRecommendations: Object.freeze({ burst: 1, intervalMs: 60_000, requests: 5 }),
+  campaignStatistics: Object.freeze({ burst: 1, intervalMs: 60_000, requests: 3 }),
+  cardMinimumBids: Object.freeze({ burst: 1, intervalMs: 60_000, requests: 20 }),
+  clusterStatistics: Object.freeze({ burst: 1, intervalMs: 60_000, requests: 10 }),
+  ping: Object.freeze({ burst: 1, intervalMs: 30_000, requests: 3 }),
+  sellerInfo: Object.freeze({ burst: 1, intervalMs: 60_000, requests: 1 }),
+});
+
+const CONSERVATIVE_AUXILIARY_LIMITS: Readonly<Record<EndpointKey, RateLimitProfile>> =
+  Object.freeze({
+    bidRecommendations: SLOW_ENDPOINT_LIMITS.bidRecommendations,
+    campaignBudget: PER_SECOND_1,
+    campaignCount: PER_SECOND_1,
+    campaignDetails: PER_SECOND_1,
+    campaignStatistics: SLOW_ENDPOINT_LIMITS.campaignStatistics,
+    cardMinimumBids: SLOW_ENDPOINT_LIMITS.cardMinimumBids,
+    cardWriteBids: PER_SECOND_1,
+    clusterCurrentBids: PER_SECOND_1,
+    clusterDeleteBids: PER_SECOND_1,
+    clusterList: PER_SECOND_1,
+    clusterStatistics: SLOW_ENDPOINT_LIMITS.clusterStatistics,
+    clusterWriteBids: PER_SECOND_1,
+    ping: SLOW_ENDPOINT_LIMITS.ping,
+    sellerInfo: SLOW_ENDPOINT_LIMITS.sellerInfo,
+  });
+
 /**
  * Current checked-in profile. Cluster, budget, and same-day semantics intentionally fail closed.
  */
 export const CURRENT_ENDPOINT_PROFILE: EndpointProfile = Object.freeze({
+  baseProductionLimits: CONSERVATIVE_AUXILIARY_LIMITS,
   checkedAt: '2026-07-28T00:00:00.000Z',
   personalProductionLimits: Object.freeze({
     bidRecommendations: Object.freeze({ burst: 5, intervalMs: 60_000, requests: 5 }),
@@ -110,6 +148,7 @@ export const CURRENT_ENDPOINT_PROFILE: EndpointProfile = Object.freeze({
     'https://dev.wildberries.ru/sandbox',
     'https://dev.wildberries.ru/release-notes',
   ]),
+  testSandboxLimits: CONSERVATIVE_AUXILIARY_LIMITS,
   wireContracts: Object.freeze({
     budgetSemantics: Object.freeze({
       note: 'cash/netting/total are stored diagnostically and are not treated as remaining balance.',

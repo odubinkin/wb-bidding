@@ -1,0 +1,26 @@
+{
+  "name": "@wb-bidder/wb-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@wb-bidder/contracts": "workspace:*",
+    "decimal.js": "10.6.0",
+    "jose": "6.1.2",
+    "pg": "8.16.3",
+    "zod": "4.4.3"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --clean",
+    "clean": "rimraf dist",
+    "typecheck": "tsc --noEmit"
+  }
+}

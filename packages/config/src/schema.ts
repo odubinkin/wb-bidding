@@ -32,10 +32,24 @@ export interface AppConfiguration {
   readonly wb: {
     /** Base URL selected for the current mode. */
     readonly baseUrl: URL;
+    /** Connection establishment timeout in milliseconds. */
+    readonly connectTimeoutMs: number;
     /** Pinned immutable endpoint-profile identifier. */
     readonly endpointProfileVersion: string;
+    /** Account-wide request burst cap. */
+    readonly globalRateLimitBurst: number;
+    /** Account-wide request interval in milliseconds. */
+    readonly globalRateLimitIntervalMs: number;
+    /** Account-wide requests per interval. */
+    readonly globalRateLimitRequests: number;
+    /** Maximum simultaneous WB HTTP calls. */
+    readonly maxInFlight: number;
     /** Integration mode. */
     readonly mode: WbApiMode;
+    /** Operator endpoint override JSON, checked again against the embedded profile. */
+    readonly rateLimitOverrides: Readonly<Record<string, unknown>>;
+    /** Per-attempt total HTTP timeout in milliseconds. */
+    readonly timeoutMs: number;
     /** Secret token used only at the transport boundary. */
     readonly token: string;
     /** Expected decoded token type. */
@@ -92,10 +106,17 @@ const rawSchema = z.object({
   METRICS_ENABLED: booleanFromString,
   PORT: z.coerce.number().int().min(1).max(65_535).default(3000),
   SCHEDULER_ENABLED: booleanFromString,
+  WB_API_CONNECT_TIMEOUT_MS: z.coerce.number().int().min(100).max(60_000).default(2_000),
+  WB_API_GLOBAL_RATE_LIMIT_BURST: z.coerce.number().int().min(1).max(1_000).default(5),
+  WB_API_GLOBAL_RATE_LIMIT_INTERVAL_MS: z.coerce.number().int().min(1).max(60_000).default(1_000),
+  WB_API_GLOBAL_RATE_LIMIT_REQUESTS: z.coerce.number().int().min(1).max(1_000).default(5),
+  WB_API_MAX_IN_FLIGHT: z.coerce.number().int().min(1).max(100).default(5),
   WB_API_MOCK_BASE_URL: z.url().default('http://wb-mock:3001'),
   WB_API_MODE: z.enum(['mock', 'sandbox', 'prod']).default('mock'),
   WB_API_PROD_BASE_URL: z.url().default('https://advert-api.wildberries.ru'),
+  WB_API_RATE_LIMITS_JSON: z.string().default('{}'),
   WB_API_SANDBOX_BASE_URL: z.url().default('https://advert-api-sandbox.wildberries.ru'),
+  WB_API_TIMEOUT_MS: z.coerce.number().int().min(100).max(120_000).default(15_000),
   WB_API_TOKEN: z.string().min(1),
   WB_API_WRITE_ENABLED: booleanFromString,
   WB_ENDPOINT_PROFILE_VERSION: z.string().min(1),
@@ -140,6 +161,7 @@ export function loadConfiguration(
   validateTokenPlaceholder(value.WB_API_MODE, value.WB_API_TOKEN);
 
   const writesEnabled = calculateWriteGate(value);
+  const rateLimitOverrides = parseRateLimitOverrides(value.WB_API_RATE_LIMITS_JSON);
 
   return Object.freeze({
     accountCurrency: value.ACCOUNT_CURRENCY,
@@ -151,13 +173,42 @@ export function loadConfiguration(
     schedulerEnabled: value.SCHEDULER_ENABLED,
     wb: Object.freeze({
       baseUrl,
+      connectTimeoutMs: value.WB_API_CONNECT_TIMEOUT_MS,
       endpointProfileVersion: value.WB_ENDPOINT_PROFILE_VERSION,
+      globalRateLimitBurst: value.WB_API_GLOBAL_RATE_LIMIT_BURST,
+      globalRateLimitIntervalMs: value.WB_API_GLOBAL_RATE_LIMIT_INTERVAL_MS,
+      globalRateLimitRequests: value.WB_API_GLOBAL_RATE_LIMIT_REQUESTS,
+      maxInFlight: value.WB_API_MAX_IN_FLIGHT,
       mode: value.WB_API_MODE,
+      rateLimitOverrides,
+      timeoutMs: value.WB_API_TIMEOUT_MS,
       token: value.WB_API_TOKEN,
       tokenType: value.WB_EXPECTED_TOKEN_TYPE,
       writesEnabled,
     }),
   });
+}
+
+/**
+ * Parses endpoint override JSON without accepting arrays or primitives.
+ *
+ * Semantic strictness against the embedded profile is enforced by the WB rate-limit module.
+ *
+ * @param source - Operator JSON text.
+ * @returns Frozen plain-object overrides.
+ * @throws {ConfigurationError} When JSON is malformed or not an object.
+ */
+function parseRateLimitOverrides(source: string): Readonly<Record<string, unknown>> {
+  let value: unknown;
+  try {
+    value = JSON.parse(source);
+  } catch {
+    throw new ConfigurationError('WB_API_RATE_LIMITS_JSON must be valid JSON');
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new ConfigurationError('WB_API_RATE_LIMITS_JSON must be a JSON object');
+  }
+  return Object.freeze({ ...value });
 }
 
 /**

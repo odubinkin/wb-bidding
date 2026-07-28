@@ -38,10 +38,11 @@
     "prisma:migrate:deploy": "prisma migrate deploy",
     "profile:checksum": "node scripts/verify-endpoint-profile.mjs",
     "verify:deprecated-endpoints": "node scripts/verify-deprecated-endpoints.mjs",
+    "verify:wb-contract-fixtures": "node scripts/verify-wb-contract-fixtures.mjs",
     "docs:check": "node scripts/test-placeholder.mjs docs",
     "security:scan": "pnpm audit --audit-level=high",
     "smoke:built": "node scripts/smoke-built-apps.mjs",
-    "quality": "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run test:unit && pnpm run test:openapi && pnpm run prisma:validate && pnpm run profile:checksum && pnpm run verify:deprecated-endpoints"
+    "quality": "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run test:unit && pnpm run test:openapi && pnpm run test:contract && pnpm run prisma:validate && pnpm run profile:checksum && pnpm run verify:wb-contract-fixtures && pnpm run verify:deprecated-endpoints"
   },
   "dependencies": {
     "@nestjs/common": "11.1.28",

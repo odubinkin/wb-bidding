@@ -22,7 +22,8 @@
     "noUnusedParameters": true,
     "paths": {
       "@wb-bidder/config": ["packages/config/src/index.ts"],
-      "@wb-bidder/contracts": ["packages/contracts/src/index.ts"]
+      "@wb-bidder/contracts": ["packages/contracts/src/index.ts"],
+      "@wb-bidder/wb-api": ["packages/wb-api/src/index.ts"]
     },
     "resolveJsonModule": true,
     "skipLibCheck": true,

@@ -66,7 +66,7 @@ services:
       SCHEDULER_ENABLED: 'true'
       WB_API_MOCK_BASE_URL: http://wb-mock:3001
       WB_API_MODE: mock
-      WB_API_TOKEN: synthetic-test-token
+      WB_API_TOKEN: mock-test-token
       WB_API_WRITE_ENABLED: 'true'
       WB_ENDPOINT_PROFILE_VERSION: wb-promotion-2026-07-28-v1
       WB_EXPECTED_TOKEN_TYPE: TEST
