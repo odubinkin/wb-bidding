@@ -4,7 +4,7 @@ title: "Revise bidding specification from WB API review"
 status: "DOING"
 priority: "high"
 owner: "DOCS"
-revision: 10
+revision: 12
 origin:
   system: "manual"
 depends_on: []
@@ -18,10 +18,32 @@ plan_approval:
   note: null
 verification:
   state: "ok"
-  updated_at: "2026-07-28T10:41:55.630Z"
+  updated_at: "2026-07-28T10:43:44.386Z"
   updated_by: "DOCS"
-  note: "All specification, semantic, routing, workspace, and scoped-status checks passed; official WB content was verified via browser fallback because direct portal fetches return 498."
+  note: "Verification and EVALUATOR quality review passed; official WB content was verified through browser fallback because direct portal fetches return 498."
   attempts: 0
+quality_review:
+  state: "pass"
+  updated_at: "2026-07-28T10:43:27.865Z"
+  updated_by: "EVALUATOR"
+  note: "The revised specification satisfies the approved WB API, estimator, sync, mock/sandbox, traceability, and documentation quality contract."
+  evaluated_sha: "0624672e19595ffbfcd3ebf241e4aa13e0bbb724"
+  blueprint_digest: "90b3813bbe5d387152d425c69bd0f74e6e4bb05cbcf4a190a67d259837b11ffe"
+  evidence_refs:
+    - ".agentplane/tasks/202607281022-V0JW74/README.md"
+    - ".agentplane/tasks/202607281022-V0JW74/quality/20260728-104327865-recovery-context/quality-report.json"
+    - ".agentplane/tasks/202607281022-V0JW74/quality/20260728-104327865-recovery-context/evaluator-prompt.md"
+    - ".agentplane/tasks/202607281022-V0JW74/quality/20260728-104327865-recovery-context/evaluator-opinion.md"
+    - ".agentplane/tasks/202607281022-V0JW74/blueprint/resolved-snapshot.json"
+    - "docs/technical-specification.md"
+    - "git diff --check: pass"
+    - "semantic marker/obsolete identifier assertion: 6 required, 0 obsolete, AC-01..AC-22"
+    - "node .agentplane/policy/check-routing.mjs: policy routing OK"
+    - "ap doctor: OK, errors=0 warnings=0"
+  findings:
+    - "Approved scope is respected: the reviewed commit changes docs/technical-specification.md and the active task artifact subtree only."
+    - "The estimator is implementable and internally aligned across data model, deterministic formulas, PAVA/interpolation, exploration state, reason model, tests, acceptance criteria, risks, and DoD."
+    - "WB constraints are handled fail-closed through the placement/cluster capability matrix, endpoint-specific throughput, optional recommendations, daily sandbox behavior, and target-level freshness."
 commit: null
 comments:
   -
@@ -47,8 +69,14 @@ events:
     author: "DOCS"
     state: "ok"
     note: "All specification, semantic, routing, workspace, and scoped-status checks passed; official WB content was verified via browser fallback because direct portal fetches return 498."
+  -
+    type: "verify"
+    at: "2026-07-28T10:43:44.386Z"
+    author: "DOCS"
+    state: "ok"
+    note: "Verification and EVALUATOR quality review passed; official WB content was verified through browser fallback because direct portal fetches return 498."
 doc_version: 3
-doc_updated_at: "2026-07-28T10:41:55.706Z"
+doc_updated_at: "2026-07-28T10:43:44.467Z"
 doc_updated_by: "DOCS"
 description: "Update docs/technical-specification.md with the approved deterministic daily estimator, WB API capability matrix, exploration lifecycle, complete policy and decision semantics, target-level sync freshness, mock virtual-time acceleration, sandbox smoke/soak behavior, and aligned tests/acceptance criteria."
 sections:
@@ -99,6 +127,36 @@ sections:
     Attempts: 0
 
     VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-28T10:41:21.614Z, excerpt_hash=sha256:d5f10e080498990e6af78a045d3be8f9f263bbfef1b4ef1a7526fd326aef4528
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607281022-V0JW74/blueprint/resolved-snapshot.json
+    - old_digest: 90b3813bbe5d387152d425c69bd0f74e6e4bb05cbcf4a190a67d259837b11ffe
+    - current_digest: 90b3813bbe5d387152d425c69bd0f74e6e4bb05cbcf4a190a67d259837b11ffe
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202607281022-V0JW74
+
+    DecisionContextRef:
+    - operator_action: stop
+    - can_execute_now: false
+    - safe_command: none
+    - diagnostic_command: agentplane task next-action 202607281022-V0JW74 --explain
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: false
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: unsafe_shell_chain_route
+
+    ### 2026-07-28T10:43:44.386Z — VERIFY — ok
+
+    By: DOCS
+
+    Note: Verification and EVALUATOR quality review passed; official WB content was verified through browser fallback because direct portal fetches return 498.
+    Attempts: 0
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-28T10:41:55.706Z, excerpt_hash=sha256:d5f10e080498990e6af78a045d3be8f9f263bbfef1b4ef1a7526fd326aef4528
 
     Details:
 
@@ -185,6 +243,36 @@ Note: All specification, semantic, routing, workspace, and scoped-status checks 
 Attempts: 0
 
 VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-28T10:41:21.614Z, excerpt_hash=sha256:d5f10e080498990e6af78a045d3be8f9f263bbfef1b4ef1a7526fd326aef4528
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607281022-V0JW74/blueprint/resolved-snapshot.json
+- old_digest: 90b3813bbe5d387152d425c69bd0f74e6e4bb05cbcf4a190a67d259837b11ffe
+- current_digest: 90b3813bbe5d387152d425c69bd0f74e6e4bb05cbcf4a190a67d259837b11ffe
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202607281022-V0JW74
+
+DecisionContextRef:
+- operator_action: stop
+- can_execute_now: false
+- safe_command: none
+- diagnostic_command: agentplane task next-action 202607281022-V0JW74 --explain
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: false
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: unsafe_shell_chain_route
+
+### 2026-07-28T10:43:44.386Z — VERIFY — ok
+
+By: DOCS
+
+Note: Verification and EVALUATOR quality review passed; official WB content was verified through browser fallback because direct portal fetches return 498.
+Attempts: 0
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-28T10:41:55.706Z, excerpt_hash=sha256:d5f10e080498990e6af78a045d3be8f9f263bbfef1b4ef1a7526fd326aef4528
 
 Details:
 
