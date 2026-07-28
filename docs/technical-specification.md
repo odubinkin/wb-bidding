@@ -1038,6 +1038,17 @@ Mock применяет token bucket и возвращает документи�
 - задать `X-Ratelimit-Retry/Reset/Limit`;
 - проверить, что bidder не повторяет запрос раньше срока.
 
+### 15.5. Swagger и OpenAPI
+
+Mock-сервер ДОЛЖЕН предоставлять:
+
+- Swagger UI на `GET /docs`;
+- машиночитаемый документ OpenAPI 3.x в JSON на `GET /docs-json`.
+
+OpenAPI-документ ДОЛЖЕН включать всё реализованное совместимое подмножество WB API и все служебные endpoints `/__mock`, в том числе request/response schemas, обязательные path/query/body parameters, денежные единицы, headers, успешные ответы и предусмотренные ошибки.
+
+Документ генерируется из runtime DTO и metadata приложения и не ведётся как независимый статический контракт. Изменение mock endpoint, DTO или сценария, влияющего на HTTP-контракт, без соответствующего изменения OpenAPI-документа блокирует CI.
+
 ## 16. Docker и локальные окружения
 
 Обязательны три независимых compose-файла:
@@ -1083,6 +1094,10 @@ API version prefix: `/api/v1`.
 - audit events: фильтрация по campaign/target/correlation ID.
 
 Токен WB никогда не возвращается API. Все mutating endpoints должны быть аутентифицированы, авторизованы и создавать audit event. Конкретный корпоративный identity provider выбирается до production; до этого API слушает только localhost/private network и защищается service token.
+
+Bidder ДОЛЖЕН предоставлять Swagger UI на `GET /docs` и машиночитаемый документ OpenAPI 3.x в JSON на `GET /docs-json`. Документ ДОЛЖЕН покрывать все endpoints `/api/v1`, включая request/response schemas, параметры, единицы измерения, форматы дат, idempotency и conditional headers, permission requirements, security schemes, успешные ответы и `application/problem+json`.
+
+OpenAPI-документ генерируется из runtime DTO и metadata приложения и не ведётся как независимый статический контракт. Изменение endpoint или DTO без соответствующего изменения документа блокирует CI. Swagger UI и примеры OpenAPI не должны содержать WB token, service token, credentials, персональные данные или значения секретов. В production доступ к `/docs` и `/docs-json` ДОЛЖЕН быть ограничен не слабее, чем доступ к внутреннему REST API bidder.
 
 ### 17.1. Общий контракт product economics
 
@@ -1514,7 +1529,7 @@ JSDoc НЕ ДОЛЖЕН пересказывать очевидный код и�
 - `docs/runbook.md`;
 - `docs/adr/*.md` для значимых решений.
 
-Документация должна содержать Mermaid-диаграммы компонентов, последовательности sync/decision/execution, state machine очереди и ER-модель. Ссылки на WB API должны быть кликабельными и регулярно проверяться.
+`README.md` и `docs/mock-server.md` ДОЛЖНЫ содержать команды запуска и адреса Swagger UI/OpenAPI JSON для соответствующих compose-сценариев. Документация должна содержать Mermaid-диаграммы компонентов, последовательности sync/decision/execution, state machine очереди и ER-модель. Ссылки на WB API должны быть кликабельными и регулярно проверяться.
 
 ## 25. Стратегия тестирования
 
@@ -1589,6 +1604,8 @@ JSDoc НЕ ДОЛЖЕН пересказывать очевидный код и�
 
 Для внутренних product economics endpoints отдельные contract tests покрывают JSON schemas, decimal-string сериализацию `BIGINT`, conditional headers, idempotency, request-level и item-level ошибки, pagination и все состояния import job.
 
+Для bidder и mock-сервера contract tests отдельно проверяют доступность Swagger UI, валидность OpenAPI 3.x JSON, полноту списка реализованных paths и соответствие схем runtime DTO. Спецификация bidder проверяется на security requirements и отсутствие секретов в examples/defaults; спецификация mock-сервера — на наличие WB-compatible paths и всех endpoints `/__mock`.
+
 ### 25.4. End-to-end tests
 
 Через `docker-compose.mock.yml`:
@@ -1649,6 +1666,7 @@ Pull request блокируется, если не прошли:
 - integration tests PostgreSQL;
 - mock contract tests;
 - e2e smoke;
+- Swagger/OpenAPI contract validation для bidder и mock-сервера;
 - Prisma migration validation;
 - dependency/security scan;
 - Docker image build;
@@ -1741,6 +1759,10 @@ Lint подтверждает обязательный JSDoc; комплект �
 
 Deployment принимает один WB token и обрабатывает только кампании соответствующего seller account. Все денежные значения относятся к `ACCOUNT_CURRENCY`; internal API и таблицы не принимают и не хранят валюту на уровне отдельных записей. Отсутствующее или невалидное значение `ACCOUNT_CURRENCY` приводит к startup failure.
 
+### AC-19. Swagger и OpenAPI
+
+Bidder и mock-сервер возвращают Swagger UI по `GET /docs` и валидный OpenAPI 3.x JSON по `GET /docs-json`. Автоматический contract test запускает каждое приложение, проверяет HTTP `200`, валидирует OpenAPI schema и подтверждает наличие всех реализованных endpoints: `/api/v1` для bidder, совместимого подмножества WB API и `/__mock` для mock-сервера. Схемы, ошибки, security requirements и примеры соответствуют runtime DTO и не содержат секретов.
+
 ## 28. Матрица трассировки исходных требований
 
 | № | Исходное требование | Разделы | Критерии |
@@ -1762,6 +1784,7 @@ Deployment принимает один WB token и обрабатывает то
 | 15 | Максимизация прибыли продавца | 2.1, 8, 9 | AC-04, AC-05 |
 | 16 | Предоставление экономики множества позиций | 8, 17 | AC-17 |
 | 17 | Один продавец и тысячи его кампаний | 2, 3, 8, 11, 18 | AC-16, AC-18 |
+| 18 | Swagger UI и OpenAPI для bidder и mock-сервера | 15.5, 17, 24, 25 | AC-19 |
 
 ## 29. Этапы реализации
 
@@ -1772,6 +1795,7 @@ Deployment принимает один WB token и обрабатывает то
 - strict TypeScript, lint/JSDoc;
 - config;
 - Prisma/PostgreSQL;
+- Swagger UI и генерируемые OpenAPI-контракты для bidder и mock-сервера;
 - CI и compose skeleton.
 
 ### Этап 1. WB adapter и mock
