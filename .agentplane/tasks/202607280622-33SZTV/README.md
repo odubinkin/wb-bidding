@@ -1,10 +1,12 @@
 ---
 id: "202607280622-33SZTV"
 title: "Replace English glossary terms in Russian specification text"
-status: "DOING"
+result_summary: "Russian glossary equivalents replace English normative terms throughout specification prose."
+risk_level: "low"
+status: "DONE"
 priority: "med"
 owner: "DOCS"
-revision: 13
+revision: 14
 origin:
   system: "manual"
 depends_on: []
@@ -42,11 +44,16 @@ quality_review:
     - "ap doctor"
   findings:
     - "The diff contains exactly three SHOULD-to-СЛЕДУЕТ substitutions and one MAY-to-МОЖЕТ substitution in Russian prose; glossary mappings remain intact and no normative English term remains outside the glossary."
-commit: null
+commit:
+  hash: "35c5711ee2b2a13e306dbce7f78737492e40ab37"
+  message: "✅ 33SZTV docs: done"
 comments:
   -
     author: "DOCS"
     body: "Start: Replace the four approved English glossary terms in Russian prose and verify that only bilingual glossary definitions retain them."
+  -
+    author: "DOCS"
+    body: "Verified: terminology replacements preserve the defined normative meanings, the semantic evaluator passed, and all formal documentation checks succeeded."
 events:
   -
     type: "status"
@@ -61,8 +68,15 @@ events:
     author: "DOCS"
     state: "ok"
     note: "Verified: all four approved glossary-term replacements are present; English normative terms remain only in the bilingual glossary, and all required documentation checks pass."
+  -
+    type: "status"
+    at: "2026-07-28T06:25:02.202Z"
+    author: "DOCS"
+    from: "DOING"
+    to: "DONE"
+    note: "Verified: terminology replacements preserve the defined normative meanings, the semantic evaluator passed, and all formal documentation checks succeeded."
 doc_version: 3
-doc_updated_at: "2026-07-28T06:23:22.360Z"
+doc_updated_at: "2026-07-28T06:25:02.203Z"
 doc_updated_by: "DOCS"
 description: "Use the Russian equivalents defined by the glossary for normative English terms appearing in Russian prose in docs/technical-specification.md; preserve the bilingual glossary definitions and historical task records."
 sections:
@@ -116,6 +130,9 @@ sections:
   Rollback Plan: "Revert only the four approved term substitutions in docs/technical-specification.md; preserve all unrelated user changes."
   Findings: "No findings before implementation."
 extensions:
+  implementation_commit:
+    hash: "32923187ecadf60d2c96b386f310ef7238af8264"
+    message: "✅ 33SZTV docs: done"
   workflow_route_baseline:
     start_head_sha: "df81cfe542edd97355800a229373c5f32e332981"
     version: 1
