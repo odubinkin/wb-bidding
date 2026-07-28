@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "task_id": "202607280615-PRC6DA",
+  "evaluator_id": "recovery-context",
+  "evaluator_profile": "EVALUATOR",
+  "generated_at": "2026-07-28T06:20:08.667Z",
+  "provenance": "evaluator_supplied",
+  "verdict": "pass",
+  "summary": "The committed Swagger/OpenAPI specification change passes semantic quality review and all approved documentation checks.",
+  "evaluated_sha": "0cf90b49b359c3291e965a123c0ec84cebeb8626",
+  "blueprint_digest": "3cf0fe77ef0a583e6535cd8b5c38bb3ee9dc4c16a4f747519005a68224ca3770",
+  "findings": [
+    "The change mandates /docs and /docs-json for both applications, defines complete contract coverage, connects the requirement to tests and CI, adds AC-19 and traceability, and preserves bidder production access controls."
+  ],
+  "evidence_refs": [
+    ".agentplane/tasks/202607280615-PRC6DA/README.md",
+    ".agentplane/tasks/202607280615-PRC6DA/quality/20260728-061937344-recovery-context/quality-report.json",
+    "commit:0cf90b49b359c3291e965a123c0ec84cebeb8626",
+    "docs/technical-specification.md",
+    "node .agentplane/policy/check-routing.mjs: policy routing OK",
+    "ap doctor: OK, errors=0, warnings=0",
+    "git diff --check: pass"
+  ],
+  "missing_tests": [],
+  "hidden_assumptions": [],
+  "residual_risks": [
+    "Implementation and executable contract tests remain future work explicitly required by AC-19."
+  ]
+}

@@ -4,7 +4,7 @@ title: "Require Swagger and OpenAPI documentation endpoints"
 status: "DOING"
 priority: "med"
 owner: "DOCS"
-revision: 8
+revision: 13
 origin:
   system: "manual"
 depends_on: []
@@ -18,10 +18,32 @@ plan_approval:
   note: null
 verification:
   state: "ok"
-  updated_at: "2026-07-28T06:17:53.247Z"
-  updated_by: "DOCS"
-  note: "Command: rg -n \"(/docs|/docs-json|OpenAPI 3|Swagger)\" docs/technical-specification.md; node .agentplane/policy/check-routing.mjs; ap doctor; git diff --check; git status --short --untracked-files=all. Result: pass. Evidence: both bidder and mock requirements, AC-19, tests, CI, traceability, and implementation stage are present; routing reports OK; doctor reports errors=0 warnings=0; diff check is clean; changed paths are limited to docs/technical-specification.md and task 202607280615-PRC6DA artifacts. Scope: docs/technical-specification.md. Links: sections 15.5, 17, 24, 25, 26, 27, 28, and 29."
+  updated_at: "2026-07-28T06:19:45.690Z"
+  updated_by: "EVALUATOR"
+  note: "Semantic quality review passed against commit 0cf90b49b359 and all approved verification checks."
   attempts: 0
+quality_review:
+  state: "pass"
+  provenance: "evaluator_supplied"
+  updated_at: "2026-07-28T06:20:08.667Z"
+  updated_by: "EVALUATOR"
+  note: "The committed Swagger/OpenAPI specification change passes semantic quality review and all approved documentation checks."
+  evaluated_sha: "0cf90b49b359c3291e965a123c0ec84cebeb8626"
+  blueprint_digest: "3cf0fe77ef0a583e6535cd8b5c38bb3ee9dc4c16a4f747519005a68224ca3770"
+  evidence_refs:
+    - ".agentplane/tasks/202607280615-PRC6DA/README.md"
+    - ".agentplane/tasks/202607280615-PRC6DA/quality/20260728-062008667-recovery-context/quality-report.json"
+    - ".agentplane/tasks/202607280615-PRC6DA/quality/20260728-062008667-recovery-context/evaluator-prompt.md"
+    - ".agentplane/tasks/202607280615-PRC6DA/quality/20260728-062008667-recovery-context/evaluator-opinion.md"
+    - ".agentplane/tasks/202607280615-PRC6DA/blueprint/resolved-snapshot.json"
+    - ".agentplane/tasks/202607280615-PRC6DA/quality/20260728-061937344-recovery-context/quality-report.json"
+    - "commit:0cf90b49b359c3291e965a123c0ec84cebeb8626"
+    - "docs/technical-specification.md"
+    - "node .agentplane/policy/check-routing.mjs: policy routing OK"
+    - "ap doctor: OK, errors=0, warnings=0"
+    - "git diff --check: pass"
+  findings:
+    - "The change mandates /docs and /docs-json for both applications, defines complete contract coverage, connects the requirement to tests and CI, adds AC-19 and traceability, and preserves bidder production access controls."
 commit: null
 comments:
   -
@@ -41,8 +63,20 @@ events:
     author: "DOCS"
     state: "ok"
     note: "Command: rg -n \"(/docs|/docs-json|OpenAPI 3|Swagger)\" docs/technical-specification.md; node .agentplane/policy/check-routing.mjs; ap doctor; git diff --check; git status --short --untracked-files=all. Result: pass. Evidence: both bidder and mock requirements, AC-19, tests, CI, traceability, and implementation stage are present; routing reports OK; doctor reports errors=0 warnings=0; diff check is clean; changed paths are limited to docs/technical-specification.md and task 202607280615-PRC6DA artifacts. Scope: docs/technical-specification.md. Links: sections 15.5, 17, 24, 25, 26, 27, 28, and 29."
+  -
+    type: "verify"
+    at: "2026-07-28T06:19:22.370Z"
+    author: "EVALUATOR"
+    state: "ok"
+    note: "Semantic quality review passed against commit 0cf90b49b359 and all approved verification checks."
+  -
+    type: "verify"
+    at: "2026-07-28T06:19:45.690Z"
+    author: "EVALUATOR"
+    state: "ok"
+    note: "Semantic quality review passed against commit 0cf90b49b359 and all approved verification checks."
 doc_version: 3
-doc_updated_at: "2026-07-28T06:17:53.556Z"
+doc_updated_at: "2026-07-28T06:19:46.044Z"
 doc_updated_by: "DOCS"
 description: "Add mandatory Swagger UI and machine-readable OpenAPI documentation endpoints for both bidder and WB mock server to the technical specification."
 sections:
@@ -76,6 +110,66 @@ sections:
     Attempts: 0
 
     VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-28T06:16:08.544Z, excerpt_hash=sha256:46f60ecc1eb6d7833092b7af97e2885bc0e5fb652624e3c19cf0a0827342d1f7
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607280615-PRC6DA/blueprint/resolved-snapshot.json
+    - old_digest: 3cf0fe77ef0a583e6535cd8b5c38bb3ee9dc4c16a4f747519005a68224ca3770
+    - current_digest: 3cf0fe77ef0a583e6535cd8b5c38bb3ee9dc4c16a4f747519005a68224ca3770
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202607280615-PRC6DA
+
+    DecisionContextRef:
+    - operator_action: stop
+    - can_execute_now: false
+    - safe_command: none
+    - diagnostic_command: none
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: false
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: none
+
+    ### 2026-07-28T06:19:22.370Z — VERIFY — ok
+
+    By: EVALUATOR
+
+    Note: Semantic quality review passed against commit 0cf90b49b359 and all approved verification checks.
+    Attempts: 0
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-28T06:17:53.556Z, excerpt_hash=sha256:46f60ecc1eb6d7833092b7af97e2885bc0e5fb652624e3c19cf0a0827342d1f7
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607280615-PRC6DA/blueprint/resolved-snapshot.json
+    - old_digest: 3cf0fe77ef0a583e6535cd8b5c38bb3ee9dc4c16a4f747519005a68224ca3770
+    - current_digest: 3cf0fe77ef0a583e6535cd8b5c38bb3ee9dc4c16a4f747519005a68224ca3770
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202607280615-PRC6DA
+
+    DecisionContextRef:
+    - operator_action: stop
+    - can_execute_now: false
+    - safe_command: none
+    - diagnostic_command: none
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: false
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: none
+
+    ### 2026-07-28T06:19:45.690Z — VERIFY — ok
+
+    By: EVALUATOR
+
+    Note: Semantic quality review passed against commit 0cf90b49b359 and all approved verification checks.
+    Attempts: 0
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-28T06:19:22.672Z, excerpt_hash=sha256:46f60ecc1eb6d7833092b7af97e2885bc0e5fb652624e3c19cf0a0827342d1f7
 
     Details:
 
@@ -149,6 +243,66 @@ Note: Command: rg -n "(/docs|/docs-json|OpenAPI 3|Swagger)" docs/technical-speci
 Attempts: 0
 
 VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-28T06:16:08.544Z, excerpt_hash=sha256:46f60ecc1eb6d7833092b7af97e2885bc0e5fb652624e3c19cf0a0827342d1f7
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607280615-PRC6DA/blueprint/resolved-snapshot.json
+- old_digest: 3cf0fe77ef0a583e6535cd8b5c38bb3ee9dc4c16a4f747519005a68224ca3770
+- current_digest: 3cf0fe77ef0a583e6535cd8b5c38bb3ee9dc4c16a4f747519005a68224ca3770
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202607280615-PRC6DA
+
+DecisionContextRef:
+- operator_action: stop
+- can_execute_now: false
+- safe_command: none
+- diagnostic_command: none
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: false
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: none
+
+### 2026-07-28T06:19:22.370Z — VERIFY — ok
+
+By: EVALUATOR
+
+Note: Semantic quality review passed against commit 0cf90b49b359 and all approved verification checks.
+Attempts: 0
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-28T06:17:53.556Z, excerpt_hash=sha256:46f60ecc1eb6d7833092b7af97e2885bc0e5fb652624e3c19cf0a0827342d1f7
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607280615-PRC6DA/blueprint/resolved-snapshot.json
+- old_digest: 3cf0fe77ef0a583e6535cd8b5c38bb3ee9dc4c16a4f747519005a68224ca3770
+- current_digest: 3cf0fe77ef0a583e6535cd8b5c38bb3ee9dc4c16a4f747519005a68224ca3770
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202607280615-PRC6DA
+
+DecisionContextRef:
+- operator_action: stop
+- can_execute_now: false
+- safe_command: none
+- diagnostic_command: none
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: false
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: none
+
+### 2026-07-28T06:19:45.690Z — VERIFY — ok
+
+By: EVALUATOR
+
+Note: Semantic quality review passed against commit 0cf90b49b359 and all approved verification checks.
+Attempts: 0
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-28T06:19:22.672Z, excerpt_hash=sha256:46f60ecc1eb6d7833092b7af97e2885bc0e5fb652624e3c19cf0a0827342d1f7
 
 Details:
 
