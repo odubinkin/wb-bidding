@@ -473,14 +473,14 @@ Observation создаётся только из неотрицательных 
 - все рассчитанные метрики;
 - оценки и profit score рассмотренных candidate bids;
 - completeness flags;
-- input checksum;
+- `inputSnapshotChecksum`;
 - algorithm version;
 - `calculatedAt`;
 - immutable после создания.
 
 #### `BidDecision`
 
-- `id UUID`;
+- `id UUID PK`, значение UUIDv7 генерируется приложением;
 - target;
 - `action`;
 - `currentBidKopecks`;
@@ -491,13 +491,13 @@ Observation создаётся только из неотрицательных 
 - `metricSnapshotId`;
 - `policyVersion`;
 - `algorithmVersion`;
-- `idempotencyKey`;
+- `decisionInputChecksum`;
 - `createdAt`;
-- unique `idempotencyKey`.
+- unique `decisionInputChecksum`.
 
 #### `DecisionQueueItem`
 
-- `decisionId`;
+- `decisionId`, unique;
 - `status`;
 - `priority`;
 - `availableAt`;
@@ -564,9 +564,46 @@ Read-запросы не создают `WbWriteAttempt`. Их вызовы от
 
 - версию алгоритма;
 - версию политики;
-- checksum входных данных;
+- `inputSnapshotChecksum` и `decisionInputChecksum`;
 - весь набор промежуточных значений;
 - сработавшие guardrails.
+
+`inputSnapshotChecksum` однозначно идентифицирует нормализованный снимок данных, из которого рассчитан `MetricSnapshot`. Для `input-snapshot-v1` в canonical payload ДОЛЖНЫ входить все фактически использованные при расчёте значения:
+
+- естественный ключ target: `wbCampaignId`, `nmId`, `placement`, `normalizedNormQuery`;
+- границы статистических периодов, нормализованные значения использованных исходных записей и их source checksum;
+- выбранные `BidPerformanceObservation` с их естественными ключами, подтверждёнными ставками, интервалами, deltas, `exposureMinutes`, `qualityFlags` и `inputChecksum`;
+- текущая подтверждённая ставка, minimum bid WB и состояние подтверждения;
+- `productEconomicsVersion` и `expectedContributionBeforeAdsMinor`;
+- состояние бюджета, полнота, свежесть и иные входные flags, если они влияют на рассчитанные метрики.
+
+Рассчитанные метрики и candidate results в `inputSnapshotChecksum` не входят: это результаты преобразования входного снимка. Никакое прочитанное или вычисленное до построения `MetricSnapshot` значение, влияющее на его содержимое, не может оставаться за пределами canonical payload.
+
+`decisionInputChecksum` однозначно идентифицирует полный набор входов конкретного запуска Decision Engine. Для `bid-decision-v1` в canonical payload ДОЛЖНЫ входить:
+
+- `inputSnapshotChecksum`;
+- версия и полный разрешённый набор параметров действующей политики;
+- `algorithmVersion`;
+- единый `decisionAt` в UTC, зафиксированный в начале расчёта и повторно используемый при retry;
+- фактически использованные состояния cooldown, дневных ограничений, budget guardrail и остальных ограничений, если они ещё не представлены в `inputSnapshotChecksum`.
+
+Оба checksum вычисляются по одной формуле:
+
+```text
+lowerHex(SHA-256(UTF8(scope + "\n" + RFC8785(payload))))
+```
+
+Для `inputSnapshotChecksum` значение `scope` равно `input-snapshot-v1`, для `decisionInputChecksum` — `bid-decision-v1`. Результат — 64 lowercase hex-символа. Перед канонизацией применяются следующие правила:
+
+- `BIGINT`, денежные значения и идентификаторы сериализуются десятичными строками без ведущих нулей;
+- даты сериализуются в RFC 3339 UTC с миллисекундами и суффиксом `Z`;
+- отсутствующее nullable-поле представляется явным `null`;
+- неупорядоченные коллекции сортируются по естественному ключу, а значимый порядок сохраняется;
+- имена и значения enum используются в нормативном регистре;
+- UUID записей, `calculatedAt`, `syncRunId`, correlation ID и другие технические metadata исключаются, если они не влияют на результат;
+- любое время или metadata, фактически использованное для freshness, cooldown, календарного или budget-расчёта, включается как соответствующий нормализованный вход.
+
+Версия схемы является частью `scope`. Изменение состава или правил канонизации требует новой версии схемы и golden fixtures. Система ДОЛЖНА сохранять версию схемы и ссылки на immutable-входы, достаточные для повторного построения canonical payload; сам payload не должен попадать в логи или audit без применения общей redaction и retention policy.
 
 ### 9.2. Окна данных
 
@@ -759,23 +796,19 @@ QUEUED
 
 Переходы выполняются только разрешёнными методами доменного сервиса и в транзакции. Terminal states: `APPLIED`, `FAILED`, `SUPERSEDED`, `CANCELLED`.
 
-### 10.2. Idempotency key
+### 10.2. Идентификатор решения и идемпотентность
 
-Ключ строится из:
+`BidDecision.id` является UUIDv7 и используется как технический идентификатор решения в очереди, audit, логах и `WbWriteAttempt`. Случайность UUID не используется для дедупликации.
 
-```text
-wbCampaignId
-nmId
-placement
-normalizedNormQuery
-targetBidKopecks
-inputSnapshotChecksum
-productEconomicsVersion
-policyVersion
-algorithmVersion
-```
+Семантическую идемпотентность обеспечивает единственный `decisionInputChecksum`, определённый в разделе 9.1. Транзакция создания решения и очереди использует unique constraint `BidDecision.decisionInputChecksum`:
 
-Повторное вычисление тех же входов не создаёт вторую очередь.
+- если значения checksum ещё нет, создаются новый `BidDecision` и не более одного связанного `DecisionQueueItem`;
+- если checksum уже существует, используется существующий `BidDecision`, а второй `DecisionQueueItem` не создаётся;
+- если одинаковому checksum соответствует отличающийся результат решения, операция завершается ошибкой `DATA_INCONSISTENCY` как нарушение детерминированности.
+
+`targetBidKopecks` не входит в fingerprint как отдельное поле, поскольку это детерминированный результат, а не вход. Target, product economics, policy и algorithm не дублируются в механизме идемпотентности отдельными полями: они уже покрыты `decisionInputChecksum`.
+
+Retry постановки или отправки использует существующий `decisionId`; новый UUID для retry не генерируется. UUIDv5 от checksum и отдельный составной `idempotencyKey` для `BidDecision` не требуются.
 
 ### 10.3. Конкуренция
 
@@ -1572,7 +1605,10 @@ JSDoc НЕ ДОЛЖЕН пересказывать очевидный код и�
 - zero-conversion;
 - floor/cap/hysteresis/cooldown/daily cap;
 - разрешения policy precedence;
-- idempotency key;
+- канонизация `inputSnapshotChecksum` и `decisionInputChecksum`;
+- одинаковые decision inputs дают один `BidDecision` и не более одного `DecisionQueueItem`;
+- одинаковый `decisionInputChecksum` с отличающимся результатом даёт `DATA_INCONSISTENCY`;
+- retry использует существующий UUIDv7 `decisionId`;
 - state machine;
 - error classification;
 - retry/backoff/jitter с fake timers;
@@ -1602,7 +1638,7 @@ JSDoc НЕ ДОЛЖЕН пересказывать очевидный код и�
 - single update с optimistic locking;
 - идемпотентный batch import, dry-run, partial success и сериализация конкурирующих строк одного `nmId`;
 - транзакция decision + queue;
-- unique idempotency key;
+- unique `decisionInputChecksum` и unique `DecisionQueueItem.decisionId`;
 - `SKIP LOCKED` с несколькими workers;
 - lease expiry/recovery;
 - supersede rules;
