@@ -1,10 +1,11 @@
 ---
 id: "202607281322-QKFWZS"
 title: "Stage 1: WB adapter, rate limiter and deterministic mock"
-status: "DOING"
+result_summary: "Implemented and verified the versioned WB adapter, strict token/host/transport safety, PostgreSQL-coordinated rate limiting, bounded resilience, deterministic virtual-time WB mock, generated OpenAPI/runtime contracts, redacted fixtures and CI integration. Unverified WB semantics remain fail-closed; local Docker daemon absence is recorded and Docker builds remain CI gates."
+status: "DONE"
 priority: "high"
 owner: "CODER"
-revision: 7
+revision: 9
 origin:
   system: "manual"
 depends_on:
@@ -31,9 +32,9 @@ plan_approval:
   note: null
 verification:
   state: "ok"
-  updated_at: "2026-07-28T14:42:06.120Z"
+  updated_at: "2026-07-28T14:43:11.618Z"
   updated_by: "CODER"
-  note: "Stage 1 local verification passed: quality, build, built-process smoke, WB consumer/OpenAPI contracts, deterministic virtual-time/fault scenarios, clean PostgreSQL migration and cross-replica limiter integration, and all Compose configs. Official WB evidence is pinned; uncertain cluster/budget/fullstats/same-day semantics remain UNVERIFIED and fail-closed."
+  note: "Implemented and verified the versioned WB adapter, strict token/host/transport safety, PostgreSQL-coordinated rate limiting, bounded resilience, deterministic virtual-time WB mock, generated OpenAPI/runtime contracts, redacted fixtures and CI integration. Unverified WB semantics remain fail-closed; local Docker daemon absence is recorded and Docker builds remain CI gates."
   attempts: 0
 quality_review:
   state: "pass"
@@ -51,11 +52,16 @@ quality_review:
     - "pnpm run quality; pnpm run build; pnpm run smoke:built; pnpm run test:integration; docker compose -f docker-compose.mock-only.yml config"
   findings:
     - "Quality/build/smoke/contracts/OpenAPI and PostgreSQL limiter integration passed; Docker daemon is externally unavailable locally, while CI retains Docker build gates."
-commit: null
+commit:
+  hash: "c1cd822e7d32df10f2c6d1b6a02f8ac78309319e"
+  message: "✅ QKFWZS close: record Stage 1 evaluator pass"
 comments:
   -
     author: "CODER"
     body: "Start: continue direct-mode task in current checkout."
+  -
+    author: "CODER"
+    body: "Verified: Implemented and verified the versioned WB adapter, strict token/host/transport safety, PostgreSQL-coordinated rate limiting, bounded resilience, deterministic virtual-time WB mock, generated OpenAPI/runtime contracts, redacted fixtures and CI integration. Unverified WB semantics remain fail-closed; local Docker daemon absence is recorded and Docker builds remain CI gates.. Guided shortcut recorded verification and is closing the direct task with traceable commit metadata."
 events:
   -
     type: "status"
@@ -70,8 +76,21 @@ events:
     author: "CODER"
     state: "ok"
     note: "Stage 1 local verification passed: quality, build, built-process smoke, WB consumer/OpenAPI contracts, deterministic virtual-time/fault scenarios, clean PostgreSQL migration and cross-replica limiter integration, and all Compose configs. Official WB evidence is pinned; uncertain cluster/budget/fullstats/same-day semantics remain UNVERIFIED and fail-closed."
+  -
+    type: "verify"
+    at: "2026-07-28T14:43:11.618Z"
+    author: "CODER"
+    state: "ok"
+    note: "Implemented and verified the versioned WB adapter, strict token/host/transport safety, PostgreSQL-coordinated rate limiting, bounded resilience, deterministic virtual-time WB mock, generated OpenAPI/runtime contracts, redacted fixtures and CI integration. Unverified WB semantics remain fail-closed; local Docker daemon absence is recorded and Docker builds remain CI gates."
+  -
+    type: "status"
+    at: "2026-07-28T14:43:11.801Z"
+    author: "CODER"
+    from: "DOING"
+    to: "DONE"
+    note: "Verified: Implemented and verified the versioned WB adapter, strict token/host/transport safety, PostgreSQL-coordinated rate limiting, bounded resilience, deterministic virtual-time WB mock, generated OpenAPI/runtime contracts, redacted fixtures and CI integration. Unverified WB semantics remain fail-closed; local Docker daemon absence is recorded and Docker builds remain CI gates.. Guided shortcut recorded verification and is closing the direct task with traceable commit metadata."
 doc_version: 3
-doc_updated_at: "2026-07-28T14:42:06.201Z"
+doc_updated_at: "2026-07-28T14:43:11.801Z"
 doc_updated_by: "CODER"
 description: "Implement versioned WB endpoint profiles/runtime schemas, token and account-binding validation, exact wire normalization, distributed rate limiting, retries/circuit breakers, WB adapter modes, deterministic NestJS mock with virtual clock, fault injection, request journal, Swagger, fixtures and consumer contract tests required by sections 4, 8, 12, 15 and AC-02/10/13/19/23/24/27/29/30."
 sections:
@@ -129,6 +148,36 @@ sections:
     - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
     - risks: none
 
+    ### 2026-07-28T14:43:11.618Z — VERIFY — ok
+
+    By: CODER
+
+    Note: Implemented and verified the versioned WB adapter, strict token/host/transport safety, PostgreSQL-coordinated rate limiting, bounded resilience, deterministic virtual-time WB mock, generated OpenAPI/runtime contracts, redacted fixtures and CI integration. Unverified WB semantics remain fail-closed; local Docker daemon absence is recorded and Docker builds remain CI gates.
+    Attempts: 0
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-28T14:42:06.201Z, excerpt_hash=sha256:a9586e9a0c94107508fa1750f05d04a5d3b935366429828523dd5e41830bf5fc
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607281322-QKFWZS/blueprint/resolved-snapshot.json
+    - old_digest: 226d93ae7730451d39ca4e20b8a491c481eb75470b615bf4ec3c753a24218e08
+    - current_digest: 226d93ae7730451d39ca4e20b8a491c481eb75470b615bf4ec3c753a24218e08
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202607281322-QKFWZS
+
+    DecisionContextRef:
+    - operator_action: stop
+    - can_execute_now: false
+    - safe_command: none
+    - diagnostic_command: agentplane task next-action 202607281322-QKFWZS --explain
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: false
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: unsafe_shell_chain_route
+
     <!-- END VERIFICATION RESULTS -->
   Rollback Plan: |-
     - Revert task-related commit(s).
@@ -137,6 +186,10 @@ sections:
     - Observation: Docker CLI is present but the local Docker daemon is unavailable, so image build and container runtime were not executable in this environment.
       Impact: Local verification used compiled-process smoke and static Compose validation; CI remains the authoritative Docker image/runtime gate.
       Resolution: CI builds both Dockerfiles against PostgreSQL 18; no production write capability is enabled by this local limitation.
+extensions:
+  implementation_commit:
+    hash: "1c5d82e00a9aceb982bb0c0b5e7666a4ca8fbd50"
+    message: "🚧 QKFWZS task: implement WB adapter and deterministic mock"
 id_source: "generated"
 ---
 ## Summary
@@ -201,6 +254,36 @@ DecisionContextRef:
 - repeat_allowed: true
 - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
 - risks: none
+
+### 2026-07-28T14:43:11.618Z — VERIFY — ok
+
+By: CODER
+
+Note: Implemented and verified the versioned WB adapter, strict token/host/transport safety, PostgreSQL-coordinated rate limiting, bounded resilience, deterministic virtual-time WB mock, generated OpenAPI/runtime contracts, redacted fixtures and CI integration. Unverified WB semantics remain fail-closed; local Docker daemon absence is recorded and Docker builds remain CI gates.
+Attempts: 0
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-28T14:42:06.201Z, excerpt_hash=sha256:a9586e9a0c94107508fa1750f05d04a5d3b935366429828523dd5e41830bf5fc
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607281322-QKFWZS/blueprint/resolved-snapshot.json
+- old_digest: 226d93ae7730451d39ca4e20b8a491c481eb75470b615bf4ec3c753a24218e08
+- current_digest: 226d93ae7730451d39ca4e20b8a491c481eb75470b615bf4ec3c753a24218e08
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202607281322-QKFWZS
+
+DecisionContextRef:
+- operator_action: stop
+- can_execute_now: false
+- safe_command: none
+- diagnostic_command: agentplane task next-action 202607281322-QKFWZS --explain
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: false
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: unsafe_shell_chain_route
 
 <!-- END VERIFICATION RESULTS -->
 
