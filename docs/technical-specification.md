@@ -380,7 +380,7 @@ Executor ДОЛЖЕН:
 - `spendMinor`, `attributedRevenueMinor`;
 - `fetchedAt`, `sourceVersion`, `syncRunId`;
 - составной unique по измерениям дня;
-- партиционирование по `date` SHOULD применяться при подтверждённом объёме.
+- партиционирование по `date` СЛЕДУЕТ применять при подтверждённом объёме.
 
 #### `BidPerformanceObservation`
 
@@ -684,7 +684,7 @@ Exploration является ограниченным способом полу�
 - суммарное изменение от первой подтверждённой ставки текущих суток ограничено `maxDailyIncreasePpm` и `maxDailyDecreasePpm`;
 - policy min/max применяются после расчёта, но до округления к допустимой ставке;
 - внезапное изменение product economics или policy version снимает cooldown только при явном флаге администратора;
-- защитное снижение при превышении бюджета MAY игнорировать обычный cooldown, но не идемпотентность.
+- защитное снижение при превышении бюджета МОЖЕТ игнорировать обычный cooldown, но не идемпотентность.
 
 ### 9.9. Budget guardrail
 
@@ -1650,7 +1650,7 @@ JSDoc НЕ ДОЛЖЕН пересказывать очевидный код и�
 - остальные domain/application modules: не менее 85% branches и 90% lines;
 - generated Prisma client, bootstrap wiring и декларативные migrations исключаются с обоснованием;
 - глобальный процент не заменяет обязательные сценарии;
-- mutation testing SHOULD применяться к формулам и guardrails; целевой mutation score не ниже 80%.
+- mutation testing СЛЕДУЕТ применять к формулам и guardrails; целевой mutation score не ниже 80%.
 
 Любой `istanbul ignore` требует комментария с причиной. Snapshot-only tests для бизнес-логики запрещены.
 
@@ -1675,7 +1675,7 @@ Pull request блокируется, если не прошли:
 - Markdown links/lint;
 - проверка отсутствия deprecated WB endpoints.
 
-Production deployment SHOULD включать:
+Production deployment СЛЕДУЕТ включать:
 
 1. migration job;
 2. запуск в `OBSERVE_ONLY`;
