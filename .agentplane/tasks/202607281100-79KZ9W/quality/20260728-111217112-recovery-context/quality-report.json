@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "task_id": "202607281100-79KZ9W",
+  "evaluator_id": "recovery-context",
+  "evaluator_profile": "EVALUATOR",
+  "generated_at": "2026-07-28T11:12:17.112Z",
+  "verdict": "pass",
+  "summary": "Commit 84f66f9 satisfies the approved P0-P2 documentation scope and verification contract.",
+  "evaluated_sha": "84f66f9af0e8d97f11245407180fb3092a1a2c47",
+  "blueprint_digest": "92c37c15ca54c3c1fc221600cf81780fda2bc0e812d7cdb187eb081bc66c9b0b",
+  "findings": [
+    "The specification removes the reviewed contradictions, makes uncertain WB contracts fail closed, completes the Admin API and safety semantics, and adds traceable AC-23 through AC-30; independent structural, invariant, routing, and doctor checks pass."
+  ],
+  "evidence_refs": [
+    ".agentplane/tasks/202607281100-79KZ9W/README.md",
+    "docs/technical-specification.md",
+    "git show --check 84f66f9"
+  ],
+  "missing_tests": [],
+  "hidden_assumptions": [],
+  "residual_risks": [
+    "Wildberries may change API contracts after the stated review date; the specification mitigates this through pinned endpoint profiles, checksums, contract tests, and UNVERIFIED write gates."
+  ]
+}
