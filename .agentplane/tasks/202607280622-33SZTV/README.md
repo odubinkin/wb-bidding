@@ -4,7 +4,7 @@ title: "Replace English glossary terms in Russian specification text"
 status: "DOING"
 priority: "med"
 owner: "DOCS"
-revision: 12
+revision: 13
 origin:
   system: "manual"
 depends_on: []
@@ -22,6 +22,26 @@ verification:
   updated_by: "DOCS"
   note: "Verified: all four approved glossary-term replacements are present; English normative terms remain only in the bilingual glossary, and all required documentation checks pass."
   attempts: 0
+quality_review:
+  state: "pass"
+  provenance: "evaluator_supplied"
+  updated_at: "2026-07-28T06:24:37.854Z"
+  updated_by: "EVALUATOR"
+  note: "The approved terminology normalization is complete and semantically preserves all four normative requirements."
+  evaluated_sha: "32923187ecadf60d2c96b386f310ef7238af8264"
+  blueprint_digest: "31147b92f7a77e09c778a377da36267cd131baa89814d34fa9b606922c8de346"
+  evidence_refs:
+    - ".agentplane/tasks/202607280622-33SZTV/README.md"
+    - ".agentplane/tasks/202607280622-33SZTV/quality/20260728-062437854-recovery-context/quality-report.json"
+    - ".agentplane/tasks/202607280622-33SZTV/quality/20260728-062437854-recovery-context/evaluator-prompt.md"
+    - ".agentplane/tasks/202607280622-33SZTV/quality/20260728-062437854-recovery-context/evaluator-opinion.md"
+    - ".agentplane/tasks/202607280622-33SZTV/blueprint/resolved-snapshot.json"
+    - "git show 32923187ecad -- docs/technical-specification.md"
+    - "rg -n '(MUST NOT|MUST|SHOULD|MAY)' docs/technical-specification.md"
+    - "node .agentplane/policy/check-routing.mjs"
+    - "ap doctor"
+  findings:
+    - "The diff contains exactly three SHOULD-to-СЛЕДУЕТ substitutions and one MAY-to-МОЖЕТ substitution in Russian prose; glossary mappings remain intact and no normative English term remains outside the glossary."
 commit: null
 comments:
   -
