@@ -2,66 +2,65 @@
 
 ## Функциональные расхождения
 
-Известных функциональных расхождений с описанным поведением ТЗ после реализации отдельного
-immutable `verified-mock` cluster profile не осталось. Synthetic contract фиксирует minor unit,
-minimum, quantum, `EXPLICIT|ABSENT`, delete effect и checksum/version; он разрешён адаптером
-только для loopback/`wb-mock` HTTP origin. Production/sandbox profile от этого не меняется.
+Известных расхождений с требуемым поведением ТЗ нет. Immutable `verified-mock` cluster profile
+фиксирует minor unit, minimum, quantum, `EXPLICIT|ABSENT`, delete effect и checksum/version; он
+разрешён только для loopback/`wb-mock` origin и не изменяет production/sandbox profile.
 
 ### Топология функциональных E2E
 
-ТЗ формулирует все 51 сценарий как проходящие через `docker-compose.mock.yml`. Реализация
-запускает Compose build/health/readiness/HTTP smoke отдельно, а функциональные suites используют
-те же приложения с in-process HTTP mock и временными PostgreSQL databases. Причина — изоляция,
-точная fault injection и быстрый deterministic teardown; локальная среда также не имела Docker
-daemon. Поведение card full-cycle доказано, но буквальная топология требования отличается.
+ТЗ буквально требует запускать все 51 сценарий через `docker-compose.mock.yml`. Реализация
+проверяет Compose build, health, readiness и HTTP smoke в контейнерах, а функциональные suites
+запускает с теми же приложениями, in-process HTTP mock и временными PostgreSQL databases. Это
+сознательное отличие тестовой топологии для точной fault injection и deterministic teardown, а
+не отличие пользовательского поведения. Docker Compose smoke сейчас проходит; отличие остаётся
+только в буквальном способе запуска 51 функционального сценария.
 
 ### Неподтверждённые production-контракты
 
-Неподтверждённые контракты не заменены предположениями:
-
-- production cluster unit/minimum/absence/write/delete остаются `UNVERIFIED`, поэтому production
-  cluster automation работает только observation-only; manual CPM cluster `APPLY` реализован
-  только в изолированном verified mock profile;
+- production cluster unit/minimum/absence/write/delete остаются `UNVERIFIED`, поэтому cluster
+  automation fail-closed и observation-only; manual CPM cluster `APPLY` разрешён только в
+  изолированном verified-mock profile;
 - fullstats money/aggregation и same-day reporting lag остаются `UNVERIFIED`; данные сохраняются,
   но production increase закрыт;
 - budget fields сохраняются диагностически и не называются остатком.
 
-Это требуемое fail-closed поведение ТЗ. Для production-включения нужен новый pinned profile, официальный
-source, воспроизводимые fixtures и подписанный release-owner evidence report.
+Это требуемое fail-closed поведение ТЗ. Для production-включения нужны новый pinned profile,
+официальный source, воспроизводимые fixtures и подписанный API release-owner evidence report.
 
-Corporate identity provider не выбран владельцем продукта. Реализован предусмотренный ТЗ
-промежуточный service-token boundary: permissions, constant-time comparison, private-network
-deployment assumptions, audit actor и redaction. Замена provider должна сохранить permissions и
-audit contract.
+Corporate identity provider не выбран. Реализован предусмотренный ТЗ service-token boundary:
+permissions, constant-time comparison, private-network assumptions, audit actor и redaction.
 
-## Внешние незакрытые gates
+## Закрытые локальные gates (2026-07-30)
 
-На дату документа отсутствуют предоставленные пользователем:
+- полный `pnpm audit --audit-level=high` и production audit проходят без известных уязвимостей;
+- оба non-root Docker image собраны; `pnpm run smoke:compose` прошёл для mock-only и full-mock;
+- Trivy 0.69.3 с pinned image digest не нашёл HIGH/CRITICAL уязвимостей в обоих runtime images;
+- `docker compose config --quiet` прошёл для production, full-mock и mock-only topology.
 
-1. внешний sandbox fixture manifest и Test credential для обязательного smoke;
-2. зафиксированное владельцем продукта решение о production writes и пунктах раздела 30;
-3. подписанный release-owner evidence report для переходов `UNVERIFIED → VERIFIED`.
+Ненужные npm/corepack из final runtime stages удалены, так как первоначальный Trivy scan нашёл
+уязвимости именно в этих неиспользуемых global packages. Build stages остаются неизменны.
 
-Код harness и команды готовы, но эти результаты нельзя изготовить синтетически или считать
+## Внешние незакрытые gates и вынужденные расхождения
+
+1. **DoD 31.4 — обязательный WB sandbox smoke не выполнен.** Пользователь подтвердил, что
+   sandbox credentials не существуют и предоставлены не будут. Поэтому нет manifest/Test token и
+   нельзя честно выполнить `smoke:sandbox`. Это вынужденное материальное расхождение с буквальным
+   DoD, а не waiver: production writes остаются выключены, и release нельзя маркировать как
+   полностью соответствующий пункту 31.
+2. **DoD 31.3 — нет hosted CI run.** По указанию пользователя GitHub не используется, потому что
+   проект ещё не опубликован. Полный локальный CI-equivalent набор выполнен, но зелёный run
+   внешнего CI и immutable release artifact отсутствуют; их нельзя подменять локальным выводом.
+3. **DoD 31.10 и раздел 30 — нет зафиксированного product-owner/API release-owner решения.**
+   Значение по умолчанию `WB_API_WRITE_ENABLED=false` остаётся обязательным. Никто не должен
+   включать production writes или переводить `UNVERIFIED → VERIFIED` до документированного решения
+   владельца продукта и отдельного evidence report владельца API.
+
+Harness и команды готовы, однако указанные результаты нельзя изготовить синтетически или считать
 пройденными без внешнего evidence.
-
-## Ограничение локальной среды
-
-Локальный Docker CLI доступен, но daemon во время разработки был недоступен. Compose-файлы и
-non-root images проверяются статически, workspace собирается, built entrypoints проходят smoke
-с реальным локальным PostgreSQL и HTTP mock. Docker build/Compose runtime и container scan
-остаются обязательными CI/release gates; отличие относится к среде верификации, а не к поведению.
-
-Полный dependency audit обнаружил high advisory `brace-expansion` только в dev-графе
-ESLint/Testcontainers. Эти пакеты не входят в результат `pnpm deploy --prod`; production-граф
-локально очищен от найденных vulnerable `lodash`/`js-yaml` удалением неиспользуемого
-`@nestjs/config` и совместимым pinned override, подтверждённым quality/OpenAPI/build/built-smoke.
-Закрытие all-dependencies audit требует обновления родительских dev tools через registry и остаётся
-CI/tooling gate; исключение advisory или скрытый waiver не добавлялись.
 
 ## Вывод о готовности
 
-Локально реализованное поведение соответствует ТЗ, включая E2E-24 и E2E-49. Release всё ещё
-нельзя объявить полностью production-ready без зелёного Compose runtime/CI evidence, sandbox
-smoke и решений product/API release owners. Оставшиеся ограничения являются внешними gates или
-буквальным отличием тестовой топологии, перечисленным выше; скрытых waivers документ не вводит.
+Реализованная система безопасна для локального и production-like observe-only запуска: локальные
+runtime, security и функциональные проверки зелёные, а небезопасные пути fail-closed. Полный
+production release по буквальному разделу 31 пока **не сертифицируется** из-за трёх внешних gates
+выше. Этот документ фиксирует все известные вынужденные расхождения; скрытых waivers нет.

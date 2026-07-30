@@ -19,8 +19,12 @@ pnpm run smoke:built
 pnpm run smoke:compose
 ```
 
-Для integration/e2e/load/runbook задаётся `DATABASE_URL` на отдельную PostgreSQL 18. Suites,
-которым нужна чистая схема, создают временную БД, применяют полный migration chain и удаляют её.
+Для integration/e2e/load/runbook задаётся `DATABASE_URL` на отдельную PostgreSQL 18. Перед
+повторным полным integration-прогоном source database должна быть новой: часть integration fixtures
+намеренно сохраняет audit/version history, чтобы проверить append-only инварианты. Suites, которым
+нужна отдельная схема, создают временную БД, применяют полный migration chain и удаляют её.
+CI использует новый PostgreSQL service на каждый run; локально для того же свойства нужно создать
+новую test database и применить `pnpm prisma migrate deploy` перед запуском набора.
 
 ## Контуры
 

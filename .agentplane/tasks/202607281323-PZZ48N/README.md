@@ -4,7 +4,7 @@ title: "Stage 5: production readiness and complete DoD audit"
 status: "DOING"
 priority: "high"
 owner: "CODER"
-revision: 7
+revision: 29
 origin:
   system: "manual"
 depends_on:
@@ -49,6 +49,54 @@ comments:
   -
     author: "CODER"
     body: "Start: continue direct-mode task in current checkout."
+  -
+    author: "CODER"
+    body: "Blocked: Docker runtime build exposed pnpm 10 deploy incompatibility; fixing the approved Dockerfile command is required before image verification can continue."
+  -
+    author: "CODER"
+    body: "Start: continue direct-mode task in current checkout."
+  -
+    author: "CODER"
+    body: "Blocked: Compose mock-only smoke exposed an Authorization header mismatch; correcting the approved runtime smoke contract is required before container verification can continue."
+  -
+    author: "CODER"
+    body: "Start: continue direct-mode task in current checkout."
+  -
+    author: "CODER"
+    body: "Blocked: Trivy scanner container cannot access Docker Desktop's local image socket; the approved socket-mounted scan must replace the failed invocation."
+  -
+    author: "CODER"
+    body: "Start: continue direct-mode task in current checkout."
+  -
+    author: "CODER"
+    body: "Blocked: Trivy found HIGH/CRITICAL packages in unused runtime npm; final images require npm/corepack removal before release verification can continue."
+  -
+    author: "CODER"
+    body: "Start: continue direct-mode task in current checkout."
+  -
+    author: "CODER"
+    body: "Blocked: Trivy template rendering did not match this scanner version; rerunning the approved scan with a compatible root-array template is required."
+  -
+    author: "CODER"
+    body: "Start: continue direct-mode task in current checkout."
+  -
+    author: "CODER"
+    body: "Blocked: PostgreSQL-backed integration execution found three deterministic Stage 5 failures in decision-engine invariants. Observation: database constraints on ProductEconomics and BiddingPolicy conflict with repository version-creation and activation semantics; the affected import reports two failures instead of one. Impact: section 31.3 and production readiness cannot be claimed. Resolution: align repository logic and migration constraints with immutable append-only versioning, add regression coverage, then rerun the full PostgreSQL suite. Fixability: local."
+  -
+    author: "CODER"
+    body: "Start: continue direct-mode task in current checkout."
+  -
+    author: "CODER"
+    body: "Blocked: final quality run stopped at Prettier because the rewritten acceptance-evidence document is not formatted. Impact: no source or runtime failure occurred, but the quality gate cannot be recorded green. Resolution: apply the repository formatter to that document and rerun quality. Fixability: local."
+  -
+    author: "CODER"
+    body: "Start: continue direct-mode task in current checkout."
+  -
+    author: "CODER"
+    body: "Blocked: workspace build succeeded, but smoke:built was invoked without its required DATABASE_URL. Impact: the application entrypoint was not exercised in that invocation, so the gate is not green. Resolution: rerun smoke:built against the isolated PostgreSQL 18 verification database after confirming the script requirements. Fixability: local."
+  -
+    author: "CODER"
+    body: "Start: continue direct-mode task in current checkout."
 events:
   -
     type: "status"
@@ -69,8 +117,120 @@ events:
     author: "CODER"
     state: "needs_rework"
     note: "Local functional scope complete: 51/51 scenarios, quality/integration/e2e/load/runbook/property/mutation/build/built-smoke/docs/secrets/container-policy/compose-config green; release remains externally gated."
+  -
+    type: "status"
+    at: "2026-07-30T04:43:17.568Z"
+    author: "CODER"
+    from: "DOING"
+    to: "BLOCKED"
+    note: "Blocked: Docker runtime build exposed pnpm 10 deploy incompatibility; fixing the approved Dockerfile command is required before image verification can continue."
+  -
+    type: "status"
+    at: "2026-07-30T04:43:26.309Z"
+    author: "CODER"
+    from: "BLOCKED"
+    to: "DOING"
+    note: "Start: continue direct-mode task in current checkout."
+  -
+    type: "status"
+    at: "2026-07-30T04:49:54.009Z"
+    author: "CODER"
+    from: "DOING"
+    to: "BLOCKED"
+    note: "Blocked: Compose mock-only smoke exposed an Authorization header mismatch; correcting the approved runtime smoke contract is required before container verification can continue."
+  -
+    type: "status"
+    at: "2026-07-30T04:50:05.308Z"
+    author: "CODER"
+    from: "BLOCKED"
+    to: "DOING"
+    note: "Start: continue direct-mode task in current checkout."
+  -
+    type: "status"
+    at: "2026-07-30T04:58:13.990Z"
+    author: "CODER"
+    from: "DOING"
+    to: "BLOCKED"
+    note: "Blocked: Trivy scanner container cannot access Docker Desktop's local image socket; the approved socket-mounted scan must replace the failed invocation."
+  -
+    type: "status"
+    at: "2026-07-30T04:58:23.906Z"
+    author: "CODER"
+    from: "BLOCKED"
+    to: "DOING"
+    note: "Start: continue direct-mode task in current checkout."
+  -
+    type: "status"
+    at: "2026-07-30T05:00:53.686Z"
+    author: "CODER"
+    from: "DOING"
+    to: "BLOCKED"
+    note: "Blocked: Trivy found HIGH/CRITICAL packages in unused runtime npm; final images require npm/corepack removal before release verification can continue."
+  -
+    type: "status"
+    at: "2026-07-30T05:01:03.361Z"
+    author: "CODER"
+    from: "BLOCKED"
+    to: "DOING"
+    note: "Start: continue direct-mode task in current checkout."
+  -
+    type: "status"
+    at: "2026-07-30T05:05:43.889Z"
+    author: "CODER"
+    from: "DOING"
+    to: "BLOCKED"
+    note: "Blocked: Trivy template rendering did not match this scanner version; rerunning the approved scan with a compatible root-array template is required."
+  -
+    type: "status"
+    at: "2026-07-30T05:05:52.287Z"
+    author: "CODER"
+    from: "BLOCKED"
+    to: "DOING"
+    note: "Start: continue direct-mode task in current checkout."
+  -
+    type: "status"
+    at: "2026-07-30T05:13:18.751Z"
+    author: "CODER"
+    from: "DOING"
+    to: "BLOCKED"
+    note: "Blocked: PostgreSQL-backed integration execution found three deterministic Stage 5 failures in decision-engine invariants. Observation: database constraints on ProductEconomics and BiddingPolicy conflict with repository version-creation and activation semantics; the affected import reports two failures instead of one. Impact: section 31.3 and production readiness cannot be claimed. Resolution: align repository logic and migration constraints with immutable append-only versioning, add regression coverage, then rerun the full PostgreSQL suite. Fixability: local."
+  -
+    type: "status"
+    at: "2026-07-30T05:13:28.621Z"
+    author: "CODER"
+    from: "BLOCKED"
+    to: "DOING"
+    note: "Start: continue direct-mode task in current checkout."
+  -
+    type: "status"
+    at: "2026-07-30T05:19:33.036Z"
+    author: "CODER"
+    from: "DOING"
+    to: "BLOCKED"
+    note: "Blocked: final quality run stopped at Prettier because the rewritten acceptance-evidence document is not formatted. Impact: no source or runtime failure occurred, but the quality gate cannot be recorded green. Resolution: apply the repository formatter to that document and rerun quality. Fixability: local."
+  -
+    type: "status"
+    at: "2026-07-30T05:19:43.049Z"
+    author: "CODER"
+    from: "BLOCKED"
+    to: "DOING"
+    note: "Start: continue direct-mode task in current checkout."
+  -
+    type: "status"
+    at: "2026-07-30T05:21:24.948Z"
+    author: "CODER"
+    from: "DOING"
+    to: "BLOCKED"
+    note: "Blocked: workspace build succeeded, but smoke:built was invoked without its required DATABASE_URL. Impact: the application entrypoint was not exercised in that invocation, so the gate is not green. Resolution: rerun smoke:built against the isolated PostgreSQL 18 verification database after confirming the script requirements. Fixability: local."
+  -
+    type: "status"
+    at: "2026-07-30T05:21:34.575Z"
+    author: "CODER"
+    from: "BLOCKED"
+    to: "DOING"
+    note: "Start: continue direct-mode task in current checkout."
 doc_version: 3
-doc_updated_at: "2026-07-28T20:04:45.425Z"
+doc_updated_at: "2026-07-30T05:22:23.612Z"
 doc_updated_by: "CODER"
 description: "Complete security hardening, observability, retention, non-root Docker images, all Compose scenarios, full CI gates, load, graceful-shutdown, outage, rollback and kill-switch validation, Russian documentation and Mermaid diagrams, endpoint-profile evidence, AC-01 through AC-30 traceability, section 31 evidence, sandbox smoke harness and explicit deviations register. Production remains write-disabled until separately approved."
 sections:
@@ -167,13 +327,18 @@ sections:
     - Revert task-related commit(s).
     - Re-run required checks to confirm rollback safety.
   Findings: |-
-    - Observation: E2E-24 and E2E-49 lack a verified mock-only cluster profile/executor; Docker runtime/image/dependency scans, sandbox smoke, and product/API owner decisions have no evidence.
-      Impact: AC-14, AC-24, AC-30 and DoD 31.1/31.3/31.4/31.10 cannot be marked complete; production writes remain disabled.
-      Resolution: Implement the immutable verified mock cluster contract and cluster write/delete pipeline; then obtain green CI/Docker, sandbox manifest/Test credential evidence, and signed owner decisions.
+    ### Resolved local findings
 
-    - Observation: Docker runtime/image scan unavailable; full all-dependencies audit retains dev-only brace-expansion advisory; sandbox fixture/Test credential and product/API release-owner evidence were not supplied.
-      Impact: DoD section 31 and production release cannot be marked complete or task finished without external CI/sandbox/owner evidence.
-      Resolution: Run CI Docker/Trivy and parent dev-tool dependency upgrades, provide sandbox manifest/Test credential with approval, and attach signed product/API release-owner decisions.
+    - pnpm deploy now uses pnpm 10 legacy deploy mode in both Dockerfiles; both non-root runtime images build successfully.
+    - Compose smoke now uses the verified raw mock authorization contract; mock-only and full-mock topologies pass.
+    - Full and production dependency audits are clean. HIGH/CRITICAL runtime image scans are clean after unused npm and corepack are removed only from final stages.
+    - PostgreSQL integration, contract, E2E, load and runbook suites passed against a new PostgreSQL 18 database with all seven migrations. A prior failed integration rerun used persisted append-only fixtures; testing guidance now requires a new source database for repeated full integration runs.
+
+    ### Remaining external release gates
+
+    - Section 31.4 sandbox smoke cannot run: the user confirmed that WB sandbox credentials and fixture manifest do not exist and will not be supplied. This is a documented forced gap, never a mock substitute or waiver.
+    - No hosted CI run or immutable release artifact exists because the user explicitly excluded GitHub while the project is unpublished. Local CI-equivalent checks passed, but this does not claim a hosted CI result.
+    - Product-owner approval for production writes and API release-owner evidence for UNVERIFIED to VERIFIED promotion are absent. Production writes remain disabled.
 id_source: "generated"
 ---
 ## Summary
@@ -282,10 +447,15 @@ DecisionContextRef:
 
 ## Findings
 
-- Observation: E2E-24 and E2E-49 lack a verified mock-only cluster profile/executor; Docker runtime/image/dependency scans, sandbox smoke, and product/API owner decisions have no evidence.
-  Impact: AC-14, AC-24, AC-30 and DoD 31.1/31.3/31.4/31.10 cannot be marked complete; production writes remain disabled.
-  Resolution: Implement the immutable verified mock cluster contract and cluster write/delete pipeline; then obtain green CI/Docker, sandbox manifest/Test credential evidence, and signed owner decisions.
+### Resolved local findings
 
-- Observation: Docker runtime/image scan unavailable; full all-dependencies audit retains dev-only brace-expansion advisory; sandbox fixture/Test credential and product/API release-owner evidence were not supplied.
-  Impact: DoD section 31 and production release cannot be marked complete or task finished without external CI/sandbox/owner evidence.
-  Resolution: Run CI Docker/Trivy and parent dev-tool dependency upgrades, provide sandbox manifest/Test credential with approval, and attach signed product/API release-owner decisions.
+- pnpm deploy now uses pnpm 10 legacy deploy mode in both Dockerfiles; both non-root runtime images build successfully.
+- Compose smoke now uses the verified raw mock authorization contract; mock-only and full-mock topologies pass.
+- Full and production dependency audits are clean. HIGH/CRITICAL runtime image scans are clean after unused npm and corepack are removed only from final stages.
+- PostgreSQL integration, contract, E2E, load and runbook suites passed against a new PostgreSQL 18 database with all seven migrations. A prior failed integration rerun used persisted append-only fixtures; testing guidance now requires a new source database for repeated full integration runs.
+
+### Remaining external release gates
+
+- Section 31.4 sandbox smoke cannot run: the user confirmed that WB sandbox credentials and fixture manifest do not exist and will not be supplied. This is a documented forced gap, never a mock substitute or waiver.
+- No hosted CI run or immutable release artifact exists because the user explicitly excluded GitHub while the project is unpublished. Local CI-equivalent checks passed, but this does not claim a hosted CI result.
+- Product-owner approval for production writes and API release-owner evidence for UNVERIFIED to VERIFIED promotion are absent. Production writes remain disabled.

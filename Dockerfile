@@ -27,11 +27,18 @@ RUN pnpm --filter @wb-bidder/config build \
     && pnpm --filter @wb-bidder/decision-engine build \
     && pnpm --filter @wb-bidder/write-pipeline build \
     && pnpm --filter @wb-bidder/bidder build
-RUN pnpm deploy --filter @wb-bidder/bidder --prod /runtime
+RUN pnpm deploy --legacy --filter @wb-bidder/bidder --prod /runtime
 
 FROM node:24-bookworm-slim AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
+RUN rm -rf /usr/local/lib/node_modules/npm \
+    /usr/local/lib/node_modules/corepack \
+    /usr/local/bin/npm \
+    /usr/local/bin/npx \
+    /usr/local/bin/corepack \
+    /usr/local/bin/pnpm \
+    /usr/local/bin/pnpx
 COPY --from=build --chown=node:node /runtime/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/apps/bidder/dist ./dist
 COPY --from=build --chown=node:node /app/package.json ./package.json

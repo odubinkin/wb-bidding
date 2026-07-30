@@ -14,6 +14,12 @@ for (const dockerfile of ['Dockerfile', 'Dockerfile.mock']) {
     failures.push(`${dockerfile}: install не использует frozen lockfile`);
   }
   if (/COPY \.env/u.test(source)) failures.push(`${dockerfile}: образ копирует .env`);
+  if (
+    !source.includes('/usr/local/lib/node_modules/npm') ||
+    !source.includes('/usr/local/lib/node_modules/corepack')
+  ) {
+    failures.push(`${dockerfile}: runtime хранит неиспользуемые npm/corepack зависимости`);
+  }
 }
 
 const productionCompose = await readFile(path.join(repositoryRoot, 'docker-compose.yml'), 'utf8');

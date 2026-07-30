@@ -8,7 +8,7 @@ await smokeTopology({
     { url: 'http://127.0.0.1:3001/health/live' },
     { url: 'http://127.0.0.1:3001/docs-json' },
     {
-      headers: { Authorization: 'Bearer mock-test-token' },
+      headers: { Authorization: 'mock-test-token' },
       url: 'http://127.0.0.1:3001/adv/v1/promotion/count',
     },
   ],
