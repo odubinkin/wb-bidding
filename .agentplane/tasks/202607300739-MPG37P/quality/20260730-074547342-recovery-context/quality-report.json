@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "task_id": "202607300739-MPG37P",
+  "evaluator_id": "recovery-context",
+  "evaluator_profile": "EVALUATOR",
+  "generated_at": "2026-07-30T07:45:47.342Z",
+  "verdict": "pass",
+  "summary": "Документация получила самостоятельный вводный слой и единообразно объясняет предметные понятия, назначение модулей, основания решений и операционные последствия.",
+  "evaluated_sha": "badeede9f9902dc77ec43572fe8953e5f37b441e",
+  "blueprint_digest": "f497f46e6aa0d166ad271cc5aa2d610a69dd3eb0f5c5977cfd4c7123e31e2dc4",
+  "findings": [
+    "README направляет нового читателя в docs/project-guide.md; путеводитель раскрывает бизнес-задачу, границы, режимы, термины, сквозной пример и ролевые маршруты чтения.",
+    "Каждый профильный документ дополнен русскоязычным вводным контекстом и ссылкой на исходные определения; технические идентификаторы сохранены на английском."
+  ],
+  "evidence_refs": [
+    ".agentplane/tasks/202607300739-MPG37P/README.md",
+    "pnpm run docs:check: 23 обязательных документов, локальные ссылки, Mermaid и трассировка пройдены",
+    "pnpm exec prettier --check README.md docs scripts/verify-docs.mjs: pass",
+    "node .agentplane/policy/check-routing.mjs и ap doctor: pass"
+  ],
+  "missing_tests": [],
+  "hidden_assumptions": [],
+  "residual_risks": [
+    "Понятность для конкретной аудитории требует пользовательского чтения, но структура и полнота вводных разделов автоматически контролируются."
+  ]
+}
