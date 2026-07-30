@@ -1,10 +1,11 @@
 ---
 id: "202607300838-RWH54Y"
 title: "Explain every data model table and column"
-status: "DOING"
+result_summary: "Модель данных дополнена конкретным описанием всех таблиц и хранимых столбцов, их источников и роли в процессах системы."
+status: "DONE"
 priority: "high"
 owner: "CODER"
-revision: 10
+revision: 12
 origin:
   system: "manual"
 depends_on: []
@@ -18,9 +19,9 @@ plan_approval:
   note: null
 verification:
   state: "ok"
-  updated_at: "2026-07-30T08:42:27.133Z"
+  updated_at: "2026-07-30T08:42:47.697Z"
   updated_by: "CODER"
-  note: "Модель данных дополнена построчным справочником: назначение, источник, жизненный цикл и применение объяснены для всех таблиц и хранимых Prisma-колонок."
+  note: "Модель данных дополнена конкретным описанием всех таблиц и хранимых столбцов, их источников и роли в процессах системы."
   attempts: 0
 quality_review:
   state: "pass"
@@ -40,11 +41,16 @@ quality_review:
   findings:
     - "Добавлен построчный справочник: бизнес-роль таблицы, источник/владелец, жизненный цикл и назначение колонок охватывают binding, sync, evidence, economics, decision, queue, write, audit и rate limit."
     - "Проверка документации требует подробный справочник и наличие назначения всех Prisma-моделей."
-commit: null
+commit:
+  hash: "b1ee1802b678f6a58c6e326cece89e0a4012eaab"
+  message: "📝 RWH54Y docs: расшифровать модель данных"
 comments:
   -
     author: "CODER"
     body: "Start: расширяю описание каждой таблицы и каждого столбца модели данных по утверждённой Prisma-схеме."
+  -
+    author: "CODER"
+    body: "Verified: справочник покрывает 28 Prisma-моделей и все хранимые колонки; документационные и policy-проверки пройдены."
 events:
   -
     type: "status"
@@ -59,8 +65,21 @@ events:
     author: "CODER"
     state: "ok"
     note: "Модель данных дополнена построчным справочником: назначение, источник, жизненный цикл и применение объяснены для всех таблиц и хранимых Prisma-колонок."
+  -
+    type: "verify"
+    at: "2026-07-30T08:42:47.697Z"
+    author: "CODER"
+    state: "ok"
+    note: "Модель данных дополнена конкретным описанием всех таблиц и хранимых столбцов, их источников и роли в процессах системы."
+  -
+    type: "status"
+    at: "2026-07-30T08:42:47.810Z"
+    author: "CODER"
+    from: "DOING"
+    to: "DONE"
+    note: "Verified: справочник покрывает 28 Prisma-моделей и все хранимые колонки; документационные и policy-проверки пройдены."
 doc_version: 3
-doc_updated_at: "2026-07-30T08:42:27.203Z"
+doc_updated_at: "2026-07-30T08:42:47.810Z"
 doc_updated_by: "CODER"
 description: "Expand the Russian data model documentation with concrete purpose, lifecycle, source and use of every Prisma table and field, without changing the schema."
 sections:
@@ -112,6 +131,36 @@ sections:
     - repeat_allowed: true
     - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
     - risks: none
+
+    ### 2026-07-30T08:42:47.697Z — VERIFY — ok
+
+    By: CODER
+
+    Note: Модель данных дополнена конкретным описанием всех таблиц и хранимых столбцов, их источников и роли в процессах системы.
+    Attempts: 0
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-30T08:42:27.203Z, excerpt_hash=sha256:c554207a9c73b28f1b206f4ed825a1bce4a9661c70d833adbab65325c0320de4
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607300838-RWH54Y/blueprint/resolved-snapshot.json
+    - old_digest: e50c6e89ef2cae82a795c8cc937dd171bcc65c9f4a2e9538b30794184244526e
+    - current_digest: e50c6e89ef2cae82a795c8cc937dd171bcc65c9f4a2e9538b30794184244526e
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202607300838-RWH54Y
+
+    DecisionContextRef:
+    - operator_action: stop
+    - can_execute_now: false
+    - safe_command: none
+    - diagnostic_command: agentplane task next-action 202607300838-RWH54Y --explain
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: false
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: unsafe_shell_chain_route
 
     <!-- END VERIFICATION RESULTS -->
   Rollback Plan: "Откатить только коммиты этой задачи; документация и проверка вернутся к предыдущей версии. Схема PostgreSQL, миграции и данные не меняются."
@@ -181,6 +230,36 @@ DecisionContextRef:
 - repeat_allowed: true
 - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
 - risks: none
+
+### 2026-07-30T08:42:47.697Z — VERIFY — ok
+
+By: CODER
+
+Note: Модель данных дополнена конкретным описанием всех таблиц и хранимых столбцов, их источников и роли в процессах системы.
+Attempts: 0
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-30T08:42:27.203Z, excerpt_hash=sha256:c554207a9c73b28f1b206f4ed825a1bce4a9661c70d833adbab65325c0320de4
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607300838-RWH54Y/blueprint/resolved-snapshot.json
+- old_digest: e50c6e89ef2cae82a795c8cc937dd171bcc65c9f4a2e9538b30794184244526e
+- current_digest: e50c6e89ef2cae82a795c8cc937dd171bcc65c9f4a2e9538b30794184244526e
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202607300838-RWH54Y
+
+DecisionContextRef:
+- operator_action: stop
+- can_execute_now: false
+- safe_command: none
+- diagnostic_command: agentplane task next-action 202607300838-RWH54Y --explain
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: false
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: unsafe_shell_chain_route
 
 <!-- END VERIFICATION RESULTS -->
 
