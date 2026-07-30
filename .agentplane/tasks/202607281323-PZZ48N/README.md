@@ -4,7 +4,7 @@ title: "Stage 5: production readiness and complete DoD audit"
 status: "DOING"
 priority: "high"
 owner: "CODER"
-revision: 43
+revision: 46
 origin:
   system: "manual"
 depends_on:
@@ -40,10 +40,29 @@ plan_approval:
   note: null
 verification:
   state: "ok"
-  updated_at: "2026-07-30T05:48:47.575Z"
+  updated_at: "2026-07-30T05:50:11.655Z"
   updated_by: "CODER"
-  note: "Локальный контракт закрытия выполнен: русская документация, карта модулей и английский JSDoc проверены quality, docs:check, routing и doctor без блокирующих ошибок."
+  note: "Русская документация, карта модулей и JSDoc публичных контрактов завершены и проверены локально"
   attempts: 0
+quality_review:
+  state: "pass"
+  updated_at: "2026-07-30T05:49:59.804Z"
+  updated_by: "EVALUATOR"
+  note: "Локальные документационные и качественные проверки завершились успешно."
+  evaluated_sha: "1e5d528d472591b83d9b28b9e31f1814592e8490"
+  blueprint_digest: "dd16438f127e6adb6f7a1435b7f7fc1e7ab22cfda2fe1298c4b616ac2f02c0ae"
+  evidence_refs:
+    - ".agentplane/tasks/202607281323-PZZ48N/README.md"
+    - ".agentplane/tasks/202607281323-PZZ48N/quality/20260730-054959804-recovery-context/quality-report.json"
+    - ".agentplane/tasks/202607281323-PZZ48N/quality/20260730-054959804-recovery-context/evaluator-prompt.md"
+    - ".agentplane/tasks/202607281323-PZZ48N/quality/20260730-054959804-recovery-context/evaluator-opinion.md"
+    - ".agentplane/tasks/202607281323-PZZ48N/blueprint/resolved-snapshot.json"
+    - "pnpm run quality"
+    - "pnpm run docs:check"
+    - "node .agentplane/policy/check-routing.mjs"
+    - "ap doctor"
+  findings:
+    - "Русская карта модулей охватывает приложения и пакеты; JSDoc добавлен к ранее неописанным публичным контрактам."
 commit: null
 comments:
   -
@@ -297,8 +316,20 @@ events:
     author: "CODER"
     state: "ok"
     note: "Локальный контракт закрытия выполнен: русская документация, карта модулей и английский JSDoc проверены quality, docs:check, routing и doctor без блокирующих ошибок."
+  -
+    type: "verify"
+    at: "2026-07-30T05:49:43.136Z"
+    author: "CODER"
+    state: "ok"
+    note: "Русская документация, карта модулей и JSDoc публичных контрактов завершены и проверены локально"
+  -
+    type: "verify"
+    at: "2026-07-30T05:50:11.655Z"
+    author: "CODER"
+    state: "ok"
+    note: "Русская документация, карта модулей и JSDoc публичных контрактов завершены и проверены локально"
 doc_version: 3
-doc_updated_at: "2026-07-30T05:48:47.742Z"
+doc_updated_at: "2026-07-30T05:50:11.763Z"
 doc_updated_by: "CODER"
 description: "Complete security hardening, observability, retention, non-root Docker images, all Compose scenarios, full CI gates, load, graceful-shutdown, outage, rollback and kill-switch validation, Russian documentation and Mermaid diagrams, endpoint-profile evidence, AC-01 through AC-30 traceability, section 31 evidence, sandbox smoke harness and explicit deviations register. Production remains write-disabled until separately approved."
 sections:
@@ -466,6 +497,66 @@ sections:
     - repeat_allowed: true
     - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
     - risks: none
+
+    ### 2026-07-30T05:49:43.136Z — VERIFY — ok
+
+    By: CODER
+
+    Note: Русская документация, карта модулей и JSDoc публичных контрактов завершены и проверены локально
+    Attempts: 0
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-30T05:48:47.742Z, excerpt_hash=sha256:1bc270f41ff435cc7226b0bf243688fae4829e409222b0af0dc67d3abf063085
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607281323-PZZ48N/blueprint/resolved-snapshot.json
+    - old_digest: dd16438f127e6adb6f7a1435b7f7fc1e7ab22cfda2fe1298c4b616ac2f02c0ae
+    - current_digest: dd16438f127e6adb6f7a1435b7f7fc1e7ab22cfda2fe1298c4b616ac2f02c0ae
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202607281323-PZZ48N
+
+    DecisionContextRef:
+    - operator_action: stop
+    - can_execute_now: false
+    - safe_command: none
+    - diagnostic_command: agentplane task next-action 202607281323-PZZ48N --explain
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: false
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: unsafe_shell_chain_route
+
+    ### 2026-07-30T05:50:11.655Z — VERIFY — ok
+
+    By: CODER
+
+    Note: Русская документация, карта модулей и JSDoc публичных контрактов завершены и проверены локально
+    Attempts: 0
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-30T05:49:43.256Z, excerpt_hash=sha256:1bc270f41ff435cc7226b0bf243688fae4829e409222b0af0dc67d3abf063085
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607281323-PZZ48N/blueprint/resolved-snapshot.json
+    - old_digest: dd16438f127e6adb6f7a1435b7f7fc1e7ab22cfda2fe1298c4b616ac2f02c0ae
+    - current_digest: dd16438f127e6adb6f7a1435b7f7fc1e7ab22cfda2fe1298c4b616ac2f02c0ae
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202607281323-PZZ48N
+
+    DecisionContextRef:
+    - operator_action: stop
+    - can_execute_now: false
+    - safe_command: none
+    - diagnostic_command: agentplane task next-action 202607281323-PZZ48N --explain
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: false
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: unsafe_shell_chain_route
 
     <!-- END VERIFICATION RESULTS -->
   Rollback Plan: |-
@@ -668,6 +759,66 @@ DecisionContextRef:
 - repeat_allowed: true
 - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
 - risks: none
+
+### 2026-07-30T05:49:43.136Z — VERIFY — ok
+
+By: CODER
+
+Note: Русская документация, карта модулей и JSDoc публичных контрактов завершены и проверены локально
+Attempts: 0
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-30T05:48:47.742Z, excerpt_hash=sha256:1bc270f41ff435cc7226b0bf243688fae4829e409222b0af0dc67d3abf063085
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607281323-PZZ48N/blueprint/resolved-snapshot.json
+- old_digest: dd16438f127e6adb6f7a1435b7f7fc1e7ab22cfda2fe1298c4b616ac2f02c0ae
+- current_digest: dd16438f127e6adb6f7a1435b7f7fc1e7ab22cfda2fe1298c4b616ac2f02c0ae
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202607281323-PZZ48N
+
+DecisionContextRef:
+- operator_action: stop
+- can_execute_now: false
+- safe_command: none
+- diagnostic_command: agentplane task next-action 202607281323-PZZ48N --explain
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: false
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: unsafe_shell_chain_route
+
+### 2026-07-30T05:50:11.655Z — VERIFY — ok
+
+By: CODER
+
+Note: Русская документация, карта модулей и JSDoc публичных контрактов завершены и проверены локально
+Attempts: 0
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-30T05:49:43.256Z, excerpt_hash=sha256:1bc270f41ff435cc7226b0bf243688fae4829e409222b0af0dc67d3abf063085
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607281323-PZZ48N/blueprint/resolved-snapshot.json
+- old_digest: dd16438f127e6adb6f7a1435b7f7fc1e7ab22cfda2fe1298c4b616ac2f02c0ae
+- current_digest: dd16438f127e6adb6f7a1435b7f7fc1e7ab22cfda2fe1298c4b616ac2f02c0ae
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202607281323-PZZ48N
+
+DecisionContextRef:
+- operator_action: stop
+- can_execute_now: false
+- safe_command: none
+- diagnostic_command: agentplane task next-action 202607281323-PZZ48N --explain
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: false
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: unsafe_shell_chain_route
 
 <!-- END VERIFICATION RESULTS -->
 

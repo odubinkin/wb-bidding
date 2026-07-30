@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "task_id": "202607281323-PZZ48N",
+  "evaluator_id": "recovery-context",
+  "evaluator_profile": "EVALUATOR",
+  "generated_at": "2026-07-30T05:49:59.804Z",
+  "verdict": "pass",
+  "summary": "Локальные документационные и качественные проверки завершились успешно.",
+  "evaluated_sha": "1e5d528d472591b83d9b28b9e31f1814592e8490",
+  "blueprint_digest": "dd16438f127e6adb6f7a1435b7f7fc1e7ab22cfda2fe1298c4b616ac2f02c0ae",
+  "findings": [
+    "Русская карта модулей охватывает приложения и пакеты; JSDoc добавлен к ранее неописанным публичным контрактам."
+  ],
+  "evidence_refs": [
+    ".agentplane/tasks/202607281323-PZZ48N/README.md",
+    "pnpm run quality",
+    "pnpm run docs:check",
+    "node .agentplane/policy/check-routing.mjs",
+    "ap doctor"
+  ],
+  "missing_tests": [],
+  "hidden_assumptions": [],
+  "residual_risks": []
+}
