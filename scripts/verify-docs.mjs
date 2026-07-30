@@ -6,6 +6,7 @@ const requiredDocuments = [
   'README.md',
   'docs/architecture.md',
   'docs/modules.md',
+  'docs/implementation-reference.md',
   'docs/configuration.md',
   'docs/data-synchronization.md',
   'docs/decision-engine.md',
