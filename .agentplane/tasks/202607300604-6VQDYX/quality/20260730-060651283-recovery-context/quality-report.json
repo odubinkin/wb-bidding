@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "task_id": "202607300604-6VQDYX",
+  "evaluator_id": "recovery-context",
+  "evaluator_profile": "EVALUATOR",
+  "generated_at": "2026-07-30T06:06:51.283Z",
+  "verdict": "pass",
+  "summary": "Справочник реализации покрывает все оставшиеся системы и ссылается на исходники и тесты.",
+  "evaluated_sha": "675a73e0c1169531d2d10bd972e1e3959fb5b533",
+  "blueprint_digest": "ed72b32d70600f086bd9ea86ea844aac7dd4c34508397f901af9ec7b59ab9963",
+  "findings": [
+    "Документация дополнена точным порядком startup, API, sync, transport, write pipeline, mock, delivery и operations."
+  ],
+  "evidence_refs": [
+    ".agentplane/tasks/202607300604-6VQDYX/README.md",
+    "pnpm run docs:check",
+    "pnpm exec prettier --check README.md docs/modules.md docs/implementation-reference.md",
+    "node .agentplane/policy/check-routing.mjs",
+    "ap doctor"
+  ],
+  "missing_tests": [],
+  "hidden_assumptions": [],
+  "residual_risks": []
+}
