@@ -123,6 +123,43 @@ if (mermaidCount < 4) {
 if (!dataModel.includes('```mermaid')) {
   failures.push('docs/data-model.md: отсутствует Mermaid ER-модель');
 }
+if (!dataModel.includes('## Построчный справочник таблиц и столбцов')) {
+  failures.push('docs/data-model.md: отсутствует подробный справочник таблиц и столбцов');
+}
+for (const modelName of [
+  'DeploymentAccountBinding',
+  'Campaign',
+  'CampaignTarget',
+  'CampaignStatDaily',
+  'BidPerformanceDay',
+  'ProductEconomics',
+  'ProductEconomicsImport',
+  'ProductEconomicsImportItem',
+  'BiddingPolicy',
+  'MetricSnapshot',
+  'BidDecision',
+  'BidExperiment',
+  'DecisionQueueItem',
+  'WbWriteAttempt',
+  'WbWriteAttemptItem',
+  'DeploymentControl',
+  'CampaignAutomation',
+  'TargetAutomation',
+  'ManualJob',
+  'ReconciliationRead',
+  'AuditEvent',
+  'SchedulerRun',
+  'SyncCheckpoint',
+  'BidStateObservation',
+  'SyncSourceSnapshot',
+  'TargetDataSnapshot',
+  'IdempotencyRecord',
+  'WbRateLimitBucket',
+]) {
+  if (!dataModel.includes(`\`${modelName}\``)) {
+    failures.push(`docs/data-model.md: нет назначения модели ${modelName}`);
+  }
+}
 
 const evidence = await readFile(path.join(repositoryRoot, 'docs/acceptance-evidence.md'), 'utf8');
 for (let index = 1; index <= 30; index += 1) {
