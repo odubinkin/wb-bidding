@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "task_id": "202607300553-ZHRKSR",
+  "evaluator_id": "recovery-context",
+  "evaluator_profile": "EVALUATOR",
+  "generated_at": "2026-07-30T05:57:33.916Z",
+  "verdict": "pass",
+  "summary": "Документация точно отражает исходники decision-engine и Prisma-схему.",
+  "evaluated_sha": "beef48920df350542039fb6c7f8a57ac68ed2975",
+  "blueprint_digest": "7cf3ace9e03597459f95c8256145a12e7dce131e1778b05f01b6898b8d6d9ae1",
+  "findings": [
+    "Добавлены полные описания алгоритма, сущностей, индексов, ограничений и жизненных циклов."
+  ],
+  "evidence_refs": [
+    ".agentplane/tasks/202607300553-ZHRKSR/README.md",
+    "pnpm run docs:check",
+    "pnpm exec prettier --check docs/bidding-algorithm.md docs/data-model.md",
+    "node .agentplane/policy/check-routing.mjs",
+    "ap doctor"
+  ],
+  "missing_tests": [],
+  "hidden_assumptions": [],
+  "residual_risks": []
+}

@@ -4,7 +4,7 @@ title: "Exhaustive Russian bidding algorithm and data model documentation"
 status: "DOING"
 priority: "high"
 owner: "CODER"
-revision: 7
+revision: 8
 origin:
   system: "manual"
 depends_on: []
@@ -22,6 +22,25 @@ verification:
   updated_by: "CODER"
   note: "Алгоритм биддинга и модель данных расширены до исчерпывающих русских справочников; форматирование, docs:check, routing и doctor завершились без блокирующих ошибок."
   attempts: 0
+quality_review:
+  state: "pass"
+  updated_at: "2026-07-30T05:57:33.916Z"
+  updated_by: "EVALUATOR"
+  note: "Документация точно отражает исходники decision-engine и Prisma-схему."
+  evaluated_sha: "beef48920df350542039fb6c7f8a57ac68ed2975"
+  blueprint_digest: "7cf3ace9e03597459f95c8256145a12e7dce131e1778b05f01b6898b8d6d9ae1"
+  evidence_refs:
+    - ".agentplane/tasks/202607300553-ZHRKSR/README.md"
+    - ".agentplane/tasks/202607300553-ZHRKSR/quality/20260730-055733916-recovery-context/quality-report.json"
+    - ".agentplane/tasks/202607300553-ZHRKSR/quality/20260730-055733916-recovery-context/evaluator-prompt.md"
+    - ".agentplane/tasks/202607300553-ZHRKSR/quality/20260730-055733916-recovery-context/evaluator-opinion.md"
+    - ".agentplane/tasks/202607300553-ZHRKSR/blueprint/resolved-snapshot.json"
+    - "pnpm run docs:check"
+    - "pnpm exec prettier --check docs/bidding-algorithm.md docs/data-model.md"
+    - "node .agentplane/policy/check-routing.mjs"
+    - "ap doctor"
+  findings:
+    - "Добавлены полные описания алгоритма, сущностей, индексов, ограничений и жизненных циклов."
 commit: null
 comments:
   -
