@@ -4,7 +4,7 @@ title: "Stage 5: production readiness and complete DoD audit"
 status: "DOING"
 priority: "high"
 owner: "CODER"
-revision: 29
+revision: 32
 origin:
   system: "manual"
 depends_on:
@@ -40,10 +40,10 @@ plan_approval:
   note: null
 verification:
   state: "needs_rework"
-  updated_at: "2026-07-28T20:04:45.360Z"
+  updated_at: "2026-07-30T05:24:12.465Z"
   updated_by: "CODER"
-  note: "Local functional scope complete: 51/51 scenarios, quality/integration/e2e/load/runbook/property/mutation/build/built-smoke/docs/secrets/container-policy/compose-config green; release remains externally gated."
-  attempts: 2
+  note: "Local implementation and CI-equivalent verification are green at commit 4fd46f2: quality, PostgreSQL integration/contract/E2E/load/runbook, property/mutation, build/built smoke, full and prod audit, secret/container policy, Docker Compose smoke, Trivy, docs, routing and doctor. Strict release DoD remains open only for external gates: WB sandbox smoke cannot run because credentials/manifest do not exist, no hosted CI run because GitHub is explicitly out of scope, and product/API release-owner decisions are absent. Production writes remain disabled; deviations are documented."
+  attempts: 3
 commit: null
 comments:
   -
@@ -94,6 +94,12 @@ comments:
   -
     author: "CODER"
     body: "Blocked: workspace build succeeded, but smoke:built was invoked without its required DATABASE_URL. Impact: the application entrypoint was not exercised in that invocation, so the gate is not green. Resolution: rerun smoke:built against the isolated PostgreSQL 18 verification database after confirming the script requirements. Fixability: local."
+  -
+    author: "CODER"
+    body: "Start: continue direct-mode task in current checkout."
+  -
+    author: "CODER"
+    body: "Blocked: the verification-evidence commit was rejected by the repository commit policy because the verify scope is not allowed for this task. Impact: the local verification record is staged but not yet committed. Resolution: retain the exact staged task evidence and commit it with an allowed release scope. Fixability: local."
   -
     author: "CODER"
     body: "Start: continue direct-mode task in current checkout."
@@ -229,8 +235,28 @@ events:
     from: "BLOCKED"
     to: "DOING"
     note: "Start: continue direct-mode task in current checkout."
+  -
+    type: "verify"
+    at: "2026-07-30T05:24:12.465Z"
+    author: "CODER"
+    state: "needs_rework"
+    note: "Local implementation and CI-equivalent verification are green at commit 4fd46f2: quality, PostgreSQL integration/contract/E2E/load/runbook, property/mutation, build/built smoke, full and prod audit, secret/container policy, Docker Compose smoke, Trivy, docs, routing and doctor. Strict release DoD remains open only for external gates: WB sandbox smoke cannot run because credentials/manifest do not exist, no hosted CI run because GitHub is explicitly out of scope, and product/API release-owner decisions are absent. Production writes remain disabled; deviations are documented."
+  -
+    type: "status"
+    at: "2026-07-30T05:24:49.853Z"
+    author: "CODER"
+    from: "DOING"
+    to: "BLOCKED"
+    note: "Blocked: the verification-evidence commit was rejected by the repository commit policy because the verify scope is not allowed for this task. Impact: the local verification record is staged but not yet committed. Resolution: retain the exact staged task evidence and commit it with an allowed release scope. Fixability: local."
+  -
+    type: "status"
+    at: "2026-07-30T05:24:59.717Z"
+    author: "CODER"
+    from: "BLOCKED"
+    to: "DOING"
+    note: "Start: continue direct-mode task in current checkout."
 doc_version: 3
-doc_updated_at: "2026-07-30T05:22:23.612Z"
+doc_updated_at: "2026-07-30T05:24:59.717Z"
 doc_updated_by: "CODER"
 description: "Complete security hardening, observability, retention, non-root Docker images, all Compose scenarios, full CI gates, load, graceful-shutdown, outage, rollback and kill-switch validation, Russian documentation and Mermaid diagrams, endpoint-profile evidence, AC-01 through AC-30 traceability, section 31 evidence, sandbox smoke harness and explicit deviations register. Production remains write-disabled until separately approved."
 sections:
@@ -300,6 +326,36 @@ sections:
     Attempts: 2
 
     VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-28T19:24:51.564Z, excerpt_hash=sha256:0f7ebe81cafca4ae9eda8825f8edf22adeacc6abe07cae0aa0bc3ca8b936f5a3
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607281323-PZZ48N/blueprint/resolved-snapshot.json
+    - old_digest: dd16438f127e6adb6f7a1435b7f7fc1e7ab22cfda2fe1298c4b616ac2f02c0ae
+    - current_digest: dd16438f127e6adb6f7a1435b7f7fc1e7ab22cfda2fe1298c4b616ac2f02c0ae
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202607281323-PZZ48N
+
+    DecisionContextRef:
+    - operator_action: run_exact_argv
+    - can_execute_now: true
+    - safe_command: agentplane task verify-show 202607281323-PZZ48N
+    - diagnostic_command: none
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: true
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: none
+
+    ### 2026-07-30T05:24:12.465Z — VERIFY — needs_rework
+
+    By: CODER
+
+    Note: Local implementation and CI-equivalent verification are green at commit 4fd46f2: quality, PostgreSQL integration/contract/E2E/load/runbook, property/mutation, build/built smoke, full and prod audit, secret/container policy, Docker Compose smoke, Trivy, docs, routing and doctor. Strict release DoD remains open only for external gates: WB sandbox smoke cannot run because credentials/manifest do not exist, no hosted CI run because GitHub is explicitly out of scope, and product/API release-owner decisions are absent. Production writes remain disabled; deviations are documented.
+    Attempts: 3
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-30T05:22:23.612Z, excerpt_hash=sha256:0f7ebe81cafca4ae9eda8825f8edf22adeacc6abe07cae0aa0bc3ca8b936f5a3
 
     Details:
 
@@ -416,6 +472,36 @@ Note: Local functional scope complete: 51/51 scenarios, quality/integration/e2e/
 Attempts: 2
 
 VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-28T19:24:51.564Z, excerpt_hash=sha256:0f7ebe81cafca4ae9eda8825f8edf22adeacc6abe07cae0aa0bc3ca8b936f5a3
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607281323-PZZ48N/blueprint/resolved-snapshot.json
+- old_digest: dd16438f127e6adb6f7a1435b7f7fc1e7ab22cfda2fe1298c4b616ac2f02c0ae
+- current_digest: dd16438f127e6adb6f7a1435b7f7fc1e7ab22cfda2fe1298c4b616ac2f02c0ae
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202607281323-PZZ48N
+
+DecisionContextRef:
+- operator_action: run_exact_argv
+- can_execute_now: true
+- safe_command: agentplane task verify-show 202607281323-PZZ48N
+- diagnostic_command: none
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: true
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: none
+
+### 2026-07-30T05:24:12.465Z — VERIFY — needs_rework
+
+By: CODER
+
+Note: Local implementation and CI-equivalent verification are green at commit 4fd46f2: quality, PostgreSQL integration/contract/E2E/load/runbook, property/mutation, build/built smoke, full and prod audit, secret/container policy, Docker Compose smoke, Trivy, docs, routing and doctor. Strict release DoD remains open only for external gates: WB sandbox smoke cannot run because credentials/manifest do not exist, no hosted CI run because GitHub is explicitly out of scope, and product/API release-owner decisions are absent. Production writes remain disabled; deviations are documented.
+Attempts: 3
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-30T05:22:23.612Z, excerpt_hash=sha256:0f7ebe81cafca4ae9eda8825f8edf22adeacc6abe07cae0aa0bc3ca8b936f5a3
 
 Details:
 
