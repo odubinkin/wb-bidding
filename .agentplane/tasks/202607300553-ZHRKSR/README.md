@@ -1,10 +1,11 @@
 ---
 id: "202607300553-ZHRKSR"
 title: "Exhaustive Russian bidding algorithm and data model documentation"
-status: "DOING"
+result_summary: "Полные русские справочники алгоритма биддинга и модели данных завершены и проверены"
+status: "DONE"
 priority: "high"
 owner: "CODER"
-revision: 8
+revision: 10
 origin:
   system: "manual"
 depends_on: []
@@ -18,9 +19,9 @@ plan_approval:
   note: null
 verification:
   state: "ok"
-  updated_at: "2026-07-30T05:57:14.523Z"
+  updated_at: "2026-07-30T05:57:49.460Z"
   updated_by: "CODER"
-  note: "Алгоритм биддинга и модель данных расширены до исчерпывающих русских справочников; форматирование, docs:check, routing и doctor завершились без блокирующих ошибок."
+  note: "Полные русские справочники алгоритма биддинга и модели данных завершены и проверены"
   attempts: 0
 quality_review:
   state: "pass"
@@ -41,11 +42,16 @@ quality_review:
     - "ap doctor"
   findings:
     - "Добавлены полные описания алгоритма, сущностей, индексов, ограничений и жизненных циклов."
-commit: null
+commit:
+  hash: "beef48920df350542039fb6c7f8a57ac68ed2975"
+  message: "📝 ZHRKSR docs: document bidding algorithm and data model"
 comments:
   -
     author: "CODER"
     body: "Start: expand implementation-faithful algorithm and data-model documentation."
+  -
+    author: "CODER"
+    body: "Verified: exhaustive Russian bidding-algorithm and data-model documentation is implementation-faithful and passed formatting, docs, routing, and Agentplane checks."
 events:
   -
     type: "status"
@@ -60,8 +66,21 @@ events:
     author: "CODER"
     state: "ok"
     note: "Алгоритм биддинга и модель данных расширены до исчерпывающих русских справочников; форматирование, docs:check, routing и doctor завершились без блокирующих ошибок."
+  -
+    type: "verify"
+    at: "2026-07-30T05:57:49.460Z"
+    author: "CODER"
+    state: "ok"
+    note: "Полные русские справочники алгоритма биддинга и модели данных завершены и проверены"
+  -
+    type: "status"
+    at: "2026-07-30T05:57:49.614Z"
+    author: "CODER"
+    from: "DOING"
+    to: "DONE"
+    note: "Verified: exhaustive Russian bidding-algorithm and data-model documentation is implementation-faithful and passed formatting, docs, routing, and Agentplane checks."
 doc_version: 3
-doc_updated_at: "2026-07-30T05:57:14.608Z"
+doc_updated_at: "2026-07-30T05:57:49.615Z"
 doc_updated_by: "CODER"
 description: "Expand the Russian documentation into implementation-faithful, exhaustive descriptions of the bidding algorithm and PostgreSQL data model, with source and test traceability."
 sections:
@@ -109,6 +128,36 @@ sections:
     - repeat_allowed: true
     - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
     - risks: none
+
+    ### 2026-07-30T05:57:49.460Z — VERIFY — ok
+
+    By: CODER
+
+    Note: Полные русские справочники алгоритма биддинга и модели данных завершены и проверены
+    Attempts: 0
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-30T05:57:14.608Z, excerpt_hash=sha256:a8013d4227bc4047e7faa089860142b1fe8425004016c65e30e11410332eacf7
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607300553-ZHRKSR/blueprint/resolved-snapshot.json
+    - old_digest: 7cf3ace9e03597459f95c8256145a12e7dce131e1778b05f01b6898b8d6d9ae1
+    - current_digest: 7cf3ace9e03597459f95c8256145a12e7dce131e1778b05f01b6898b8d6d9ae1
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202607300553-ZHRKSR
+
+    DecisionContextRef:
+    - operator_action: stop
+    - can_execute_now: false
+    - safe_command: none
+    - diagnostic_command: agentplane task next-action 202607300553-ZHRKSR --explain
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: false
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: unsafe_shell_chain_route
 
     <!-- END VERIFICATION RESULTS -->
   Rollback Plan: |-
@@ -174,6 +223,36 @@ DecisionContextRef:
 - repeat_allowed: true
 - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
 - risks: none
+
+### 2026-07-30T05:57:49.460Z — VERIFY — ok
+
+By: CODER
+
+Note: Полные русские справочники алгоритма биддинга и модели данных завершены и проверены
+Attempts: 0
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-30T05:57:14.608Z, excerpt_hash=sha256:a8013d4227bc4047e7faa089860142b1fe8425004016c65e30e11410332eacf7
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607300553-ZHRKSR/blueprint/resolved-snapshot.json
+- old_digest: 7cf3ace9e03597459f95c8256145a12e7dce131e1778b05f01b6898b8d6d9ae1
+- current_digest: 7cf3ace9e03597459f95c8256145a12e7dce131e1778b05f01b6898b8d6d9ae1
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202607300553-ZHRKSR
+
+DecisionContextRef:
+- operator_action: stop
+- can_execute_now: false
+- safe_command: none
+- diagnostic_command: agentplane task next-action 202607300553-ZHRKSR --explain
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: false
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: unsafe_shell_chain_route
 
 <!-- END VERIFICATION RESULTS -->
 
