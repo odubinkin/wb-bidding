@@ -1,4 +1,4 @@
-/* eslint-disable jsdoc/require-jsdoc */
+/** Durable lifecycle states of a decision queue item. */
 export type QueueStatus =
   | 'QUEUED'
   | 'LEASED'
@@ -10,10 +10,13 @@ export type QueueStatus =
   | 'SUPERSEDED'
   | 'CANCELLED';
 
+/** Durable outcome states of one remote WB write attempt. */
 export type AttemptStatus = 'PREPARED' | 'DISPATCHING' | 'ACCEPTED' | 'REJECTED' | 'UNKNOWN';
 
+/** Operator-selected write authority for a deployment, campaign, or target. */
 export type AutomationMode = 'DISABLED' | 'OBSERVE_ONLY' | 'APPLY';
 
+/** Queue item leased by one executor together with its immutable decision context. */
 export interface ClaimedQueueItem {
   readonly queueItemId: string;
   readonly decisionId: string;
@@ -35,6 +38,7 @@ export interface ClaimedQueueItem {
   readonly metricSnapshotId: string;
 }
 
+/** Fresh live bid state read from WB immediately before validation or reconciliation. */
 export interface LiveBidState {
   readonly bidMinor: bigint | null;
   readonly explicit: boolean;
@@ -42,12 +46,14 @@ export interface LiveBidState {
   readonly sourceMarker: string;
 }
 
+/** Persisted dispatch reservation that may be sent after its transaction commits. */
 export interface PreparedWrite {
   readonly attemptId: string;
   readonly correlationId: string;
   readonly items: readonly PreparedWriteItem[];
 }
 
+/** One indexed queue item inside a prepared remote write request. */
 export interface PreparedWriteItem {
   readonly attemptItemId: string;
   readonly decisionId: string;
@@ -57,6 +63,7 @@ export interface PreparedWriteItem {
   readonly attemptNumber: number;
 }
 
+/** Per-item result returned by a batched WB dispatch request. */
 export interface DispatchItemResult {
   readonly requestIndex: number;
   readonly accepted: boolean;
@@ -65,6 +72,7 @@ export interface DispatchItemResult {
   readonly responseFragment?: unknown;
 }
 
+/** Transport-level and per-item result of a WB dispatch attempt. */
 export interface DispatchResult {
   readonly httpStatus: number;
   readonly wbRequestId?: string;
@@ -72,6 +80,7 @@ export interface DispatchResult {
   readonly items: readonly DispatchItemResult[];
 }
 
+/** Rate-limit reservation held while dispatching one homogeneous write batch. */
 export interface DispatchReservation {
   dispatch(
     items: readonly {
@@ -90,6 +99,7 @@ export interface DispatchReservation {
   release(): void;
 }
 
+/** Boundary through which the executor reads and mutates WB bid state. */
 export interface WriteGateway {
   readLiveState(item: ClaimedQueueItem): Promise<LiveBidState>;
   reserveDispatch(endpointKey: string): Promise<DispatchReservation>;
@@ -110,6 +120,7 @@ export interface WriteGateway {
   ): Promise<DispatchResult>;
 }
 
+/** Fail-closed validator that approves a queued write against current durable evidence. */
 export interface PreDispatchValidator {
   validate(
     item: ClaimedQueueItem,
@@ -117,9 +128,11 @@ export interface PreDispatchValidator {
   ): Promise<{ readonly valid: true } | { readonly valid: false; readonly code: string }>;
 }
 
+/** Classification of a post-dispatch live state relative to desired and old states. */
 export type ReconciliationClassification =
   'DESIRED_STATE' | 'STABLE_OLD_STATE' | 'THIRD_STATE' | 'INCONCLUSIVE';
 
+/** Evidence collected while reconciling an accepted, rejected, or unknown write. */
 export interface ReconciliationObservation {
   readonly classification: ReconciliationClassification;
   readonly stateChecksum: string;

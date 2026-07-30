@@ -10,6 +10,7 @@ import type {
   WriteGateway,
 } from './types.js';
 
+/** Immutable runtime limits governing leasing, batching, dispatch, and reconciliation. */
 export interface ExecutorOptions {
   readonly endpointKey: string;
   readonly leaseSeconds: number;

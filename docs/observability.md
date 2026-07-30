@@ -3,7 +3,7 @@
 Bidder выдаёт Prometheus-метрики с bounded labels и структурированные JSON-логи. Campaign,
 target, decision и seller IDs разрешены в audit/log context, но запрещены как metric labels.
 
-## Endpoints
+## Конечные точки
 
 | Endpoint            | Назначение                                                 |
 | ------------------- | ---------------------------------------------------------- |

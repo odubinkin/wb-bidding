@@ -1,4 +1,3 @@
-/* eslint-disable jsdoc/require-jsdoc */
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   ArrayMaxSize,
@@ -21,6 +20,7 @@ import { Type } from 'class-transformer';
 const DECIMAL = /^-?[0-9]+$/u;
 const POSITIVE_DECIMAL = /^[1-9][0-9]*$/u;
 
+/** Replaces one versioned product-economics value through the Admin API. */
 export class EconomicsUpdateDto {
   @ApiProperty({ example: '137500', description: 'Signed ACCOUNT_CURRENCY minor units.' })
   @Matches(DECIMAL)
@@ -53,6 +53,7 @@ export class EconomicsUpdateDto {
   public changeReason!: string;
 }
 
+/** Describes one optimistic-concurrency row in a product-economics import. */
 export class EconomicsImportItemDto {
   @ApiProperty()
   @IsString()
@@ -92,6 +93,7 @@ export class EconomicsImportItemDto {
   public sourceUpdatedAt?: string;
 }
 
+/** Creates a validated batch import, optionally without persisting its rows. */
 export class EconomicsImportDto {
   @ApiProperty()
   @IsBoolean()
@@ -109,6 +111,7 @@ export class EconomicsImportDto {
   public items!: EconomicsImportItemDto[];
 }
 
+/** Creates an immutable bidding-policy version for one permitted scope. */
 export class PolicyCreateDto {
   @ApiProperty({ enum: ['DEPLOYMENT', 'CAMPAIGN', 'TARGET'] })
   @IsIn(['DEPLOYMENT', 'CAMPAIGN', 'TARGET'])
@@ -138,6 +141,7 @@ export class PolicyCreateDto {
   public changeReason!: string;
 }
 
+/** Supplies the mandatory human-readable audit reason for a mutation. */
 export class ReasonDto {
   @ApiProperty()
   @IsString()
@@ -146,24 +150,28 @@ export class ReasonDto {
   public changeReason!: string;
 }
 
+/** Assigns a policy version to its campaign or target scope. */
 export class AssignmentDto extends ReasonDto {
   @ApiProperty({ format: 'uuid' })
   @IsUUID()
   public policyId!: string;
 }
 
+/** Changes the automation mode while preserving an audit reason. */
 export class AutomationDto extends ReasonDto {
   @ApiProperty({ enum: ['DISABLED', 'OBSERVE_ONLY', 'APPLY'] })
   @IsIn(['DISABLED', 'OBSERVE_ONLY', 'APPLY'])
   public mode!: 'APPLY' | 'DISABLED' | 'OBSERVE_ONLY';
 }
 
+/** Enables or disables the deployment-wide automation kill switch. */
 export class GlobalKillDto extends ReasonDto {
   @ApiProperty()
   @IsBoolean()
   public enabled!: boolean;
 }
 
+/** Selects the bounded data scope for an operator-triggered runtime job. */
 export class ManualJobDto {
   @ApiPropertyOptional({ type: [String], format: 'uuid' })
   @IsOptional()
@@ -206,8 +214,10 @@ export class ManualJobDto {
   public changeReason!: string;
 }
 
+/** Confirms a safe queue retry with the required audit reason. */
 export class RetryDto extends ReasonDto {}
 
+/** RFC 9457-compatible error body returned by the Admin API. */
 export class ProblemDetailsDto {
   @ApiProperty({ example: 'VERSION_MISMATCH' })
   public code!: string;
@@ -228,6 +238,7 @@ export class ProblemDetailsDto {
   public type!: string;
 }
 
+/** Generic cursor-pagination envelope returned by list endpoints. */
 export class CursorPageDto {
   @ApiProperty({ type: [Object] })
   public items!: Record<string, unknown>[];
@@ -236,6 +247,7 @@ export class CursorPageDto {
   public nextCursor!: string | null;
 }
 
+/** Serializes one immutable product-economics version for HTTP clients. */
 export class ProductEconomicsResponseDto {
   @ApiProperty({ format: 'uuid' })
   public id!: string;
@@ -274,6 +286,7 @@ export class ProductEconomicsResponseDto {
   public createdByActor!: string;
 }
 
+/** Reports aggregate progress and outcome counters for an economics import. */
 export class EconomicsImportResponseDto {
   @ApiProperty({ format: 'uuid' })
   public importId!: string;
@@ -305,6 +318,7 @@ export class EconomicsImportResponseDto {
   public createdAt!: string;
 }
 
+/** Serializes one persisted policy version without internal metadata. */
 export class PolicyResponseDto {
   @ApiProperty({ format: 'uuid' })
   public id!: string;
@@ -328,11 +342,13 @@ export class PolicyResponseDto {
   public validTo!: string | null;
 }
 
+/** Returns the new optimistic-concurrency version after a mutation. */
 export class VersionedMutationResponseDto {
   @ApiProperty({ pattern: '^[0-9]+$', description: 'BIGINT version as a decimal string.' })
   public version!: string;
 }
 
+/** Identifies a manually scheduled job and its initial lifecycle status. */
 export class ManualJobResponseDto {
   @ApiProperty({ format: 'uuid' })
   public jobId!: string;
@@ -341,6 +357,7 @@ export class ManualJobResponseDto {
   public status!: string;
 }
 
+/** Serializes a decision together with its explanation and write attempts. */
 export class DecisionResponseDto {
   @ApiProperty({ format: 'uuid' })
   public id!: string;
@@ -352,6 +369,7 @@ export class DecisionResponseDto {
   public attempts!: Record<string, unknown>[];
 }
 
+/** Returns effective automation controls grouped by their administrative scope. */
 export class AutomationResponseDto {
   @ApiProperty({ type: Object, additionalProperties: true })
   public deployment!: Record<string, unknown>;

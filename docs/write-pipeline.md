@@ -1,6 +1,6 @@
-# Надёжный write pipeline и Admin API
+# Надёжный конвейер записи и административный API
 
-## Safety model
+## Модель безопасности
 
 Любая WB mutation проходит `DecisionQueueItem`. Executor берёт bounded page через
 `FOR UPDATE SKIP LOCKED`, выдаёт lease и сериализует активную работу по target. После fresh WB
@@ -18,7 +18,7 @@ read и полной policy validation он резервирует limiter/in-fl
 повторить не более `WB_WRITE_PRE_BYTE_MAX_RETRIES` в том же attempt; прочий timeout/reset/`5xx`
 после dispatch не retry-ится вслепую.
 
-## Reconciliation
+## Сверка результата
 
 Verification начинается после visibility delay:
 
@@ -40,7 +40,7 @@ dispatch transactions; global kill имеет приоритет. `APPLY` не �
 runtime binding/integration/capacity и live minimum/policy/economics/snapshot gates. Cluster
 write/delete закрыты при `UNVERIFIED` contract.
 
-## Admin API
+## Административный API
 
 `/api/v1` использует service-token authentication и permissions:
 

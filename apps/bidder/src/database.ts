@@ -5,8 +5,10 @@ import { Pool } from 'pg';
 import { APP_CONFIGURATION } from './application-config.js';
 import type { AppConfiguration } from '@wb-bidder/config';
 
+/** Nest dependency-injection token for the shared PostgreSQL connection pool. */
 export const DATABASE_POOL = Symbol('DATABASE_POOL');
 
+/** Builds the bounded PostgreSQL pool from already validated configuration. */
 export const databasePoolProvider = {
   provide: DATABASE_POOL,
   inject: [APP_CONFIGURATION],

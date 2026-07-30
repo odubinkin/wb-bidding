@@ -669,6 +669,7 @@ export class AdminService {
   }
 }
 
+/** Optional cursor and page-size query parameters accepted by list endpoints. */
 export interface ListQuery {
   readonly cursor?: string;
   readonly limit?: string;
@@ -804,6 +805,16 @@ function serialize(value: unknown): any {
   return value;
 }
 
+/**
+ * Parses a resource ETag into its optimistic-concurrency version.
+ *
+ * @param ifMatch - Value of the `If-Match` header.
+ * @param prefix - Resource prefix used in the ETag format.
+ * @param allowNoneMatch - Whether an `If-None-Match: *` create precondition is accepted.
+ * @param ifNoneMatch - Value of the `If-None-Match` header.
+ * @returns Parsed non-negative database version.
+ * @throws {AdminApiError} When the conditional headers are missing or malformed.
+ */
 export function parseExpectedVersion(
   ifMatch: string | undefined,
   prefix: string,
@@ -819,6 +830,13 @@ export function parseExpectedVersion(
   return BigInt(match[1]);
 }
 
+/**
+ * Requires a non-empty idempotency key for a durable administrative mutation.
+ *
+ * @param value - Request `Idempotency-Key` header value.
+ * @returns Validated key unchanged.
+ * @throws {AdminApiError} When the key is absent or empty.
+ */
 export function requireIdempotency(value: string | undefined): string {
   if (value === undefined || value.length < 1)
     throw new AdminApiError(428, 'PRECONDITION_REQUIRED', 'Idempotency-Key is required.');

@@ -28,7 +28,7 @@ Deprecated пары централизованы в registry и запрещен
 запрещён `POST /adv/v1/promotion/adverts`; текущий details endpoint —
 `GET /api/advert/v2/adverts`.
 
-## Token и host safety
+## Токен и безопасность хоста
 
 До integration startup локально разбираются `sid`, `exp`, `acc`, `for`, `t`, bitmask `s`,
 promotion bit и read-only bit. Поддерживаются:
@@ -46,7 +46,7 @@ Production promotion host фиксирован как `https://advert-api.wildbe
 host — `https://common-api.wildberries.ru`. Redirect с `Authorization`, userinfo, другой host,
 нестандартный port и отключение TLS validation запрещены.
 
-## Quota и retries
+## Квоты и повторные попытки
 
 Limiter имеет общий account bucket и endpoint bucket. Production shared store расположен в
 PostgreSQL (`wb_rate_limit_bucket`) и использует transaction advisory lock; in-memory store
@@ -75,7 +75,7 @@ Production transport использует отдельные границы:
 CI поднимает PostgreSQL, применяет полный migration chain и проверяет, что два экземпляра
 limiter с одним account key атомарно делят bucket и server-directed freeze.
 
-## Sandbox smoke
+## Проверка sandbox-контура
 
 Bidder не создаёт token, campaign или budget. Внешний владелец готовит manifest по
 `fixtures/sandbox/manifest.example.json` (без credential), затем отдельно инжектирует Test token:

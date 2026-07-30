@@ -1,4 +1,4 @@
-# Evidence report WB Promotion profile `wb-promotion-2026-07-28-v1`
+# Отчёт о доказательствах для профиля WB Promotion `wb-promotion-2026-07-28-v1`
 
 Статус отчёта: техническая сверка завершена, утверждение release owner не предоставлено.
 Дата read-only сверки: 2026-07-29.

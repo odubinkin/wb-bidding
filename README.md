@@ -1,12 +1,24 @@
-# WB Bidder
+# WB Bidder — сервис управления ставками
 
 WB Bidder — self-hosted backend одного продавца для детерминированного управления ставками
 WB Продвижение. Цель алгоритма — максимизация ожидаемой маржинальной прибыли после рекламы
 при соблюдении ограничений риска, бюджета и подтверждённых возможностей WB API.
 
 Проект находится в активной разработке по
-[техническому заданию](docs/technical-specification.md). Production-запись по умолчанию
-выключена. Неподтверждённые wire-контракты работают fail closed.
+[техническому заданию](docs/technical-specification.md). Запись в production по умолчанию
+выключена. Неподтверждённые wire-контракты безопасно запрещают запись.
+
+## Документация
+
+- [Карта модулей](docs/modules.md) — точка входа к каждому приложению, пакету и файлу реализации;
+- [архитектура](docs/architecture.md) и [модель данных](docs/data-model.md) — компоненты, потоки и БД;
+- [конфигурация](docs/configuration.md), [безопасность](docs/security.md),
+  [наблюдаемость](docs/observability.md) и [runbook](docs/runbook.md) — эксплуатация;
+- [интеграция WB API](docs/wb-api-integration.md), [mock-сервер](docs/mock-server.md),
+  [синхронизация](docs/data-synchronization.md), [алгоритм](docs/decision-engine.md) и
+  [конвейер записи](docs/write-pipeline.md) — поведение системы;
+- [тестирование](docs/testing.md), [приёмочные доказательства](docs/acceptance-evidence.md) и
+  [реестр расхождений](docs/implementation-deviations.md) — границы подтверждённой готовности.
 
 ## Требования
 
@@ -36,7 +48,7 @@ docker compose -f docker-compose.mock.yml up --build
 docker compose -f docker-compose.mock.yml down
 ```
 
-## Production-топология в безопасном read-only режиме
+## Рабочая топология в безопасном режиме только чтения
 
 Скопируйте `.env.example` во внешнее секретное хранилище/локальный `.env`, замените все
 `replace-*`/`missing-token` и оставьте `WB_API_WRITE_ENABLED=false`:
@@ -89,13 +101,13 @@ docker compose -f docker-compose.mock-only.yml down
 Сценарии и служебные запросы описаны в [документации mock-сервера](docs/mock-server.md).
 Профиль интеграции, статусы `VERIFIED | UNVERIFIED | DEPRECATED` и правила fail-closed
 описаны в [документации WB API](docs/wb-api-integration.md).
-Архитектура jobs, checkpoints, target snapshots и статистических evidence описана в
+Архитектура заданий, контрольных точек, снимков target и статистических данных описана в
 [документации синхронизации](docs/data-synchronization.md).
-Алгоритм прибыли, exact arithmetic, bounds и exploration описаны в
-[документации Decision Engine](docs/decision-engine.md).
+Алгоритм прибыли, точная арифметика, границы и исследовательские эксперименты описаны в
+[документации модуля принятия решений](docs/decision-engine.md).
 Общая схема компонентов приведена в [архитектуре](docs/architecture.md), эксплуатация — в
 [runbook](docs/runbook.md), а текущий статус приёмки — в
-[матрице evidence](docs/acceptance-evidence.md).
+[матрице доказательств](docs/acceptance-evidence.md).
 
 ## Локальная проверка
 

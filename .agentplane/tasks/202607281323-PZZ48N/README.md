@@ -4,7 +4,7 @@ title: "Stage 5: production readiness and complete DoD audit"
 status: "DOING"
 priority: "high"
 owner: "CODER"
-revision: 32
+revision: 43
 origin:
   system: "manual"
 depends_on:
@@ -35,15 +35,15 @@ verify:
   - "pnpm run verify:deprecated-endpoints"
 plan_approval:
   state: "approved"
-  updated_at: "2026-07-28T17:12:25.088Z"
+  updated_at: "2026-07-30T05:47:39.133Z"
   updated_by: "ORCHESTRATOR"
   note: null
 verification:
-  state: "needs_rework"
-  updated_at: "2026-07-30T05:24:12.465Z"
+  state: "ok"
+  updated_at: "2026-07-30T05:48:47.575Z"
   updated_by: "CODER"
-  note: "Local implementation and CI-equivalent verification are green at commit 4fd46f2: quality, PostgreSQL integration/contract/E2E/load/runbook, property/mutation, build/built smoke, full and prod audit, secret/container policy, Docker Compose smoke, Trivy, docs, routing and doctor. Strict release DoD remains open only for external gates: WB sandbox smoke cannot run because credentials/manifest do not exist, no hosted CI run because GitHub is explicitly out of scope, and product/API release-owner decisions are absent. Production writes remain disabled; deviations are documented."
-  attempts: 3
+  note: "Локальный контракт закрытия выполнен: русская документация, карта модулей и английский JSDoc проверены quality, docs:check, routing и doctor без блокирующих ошибок."
+  attempts: 0
 commit: null
 comments:
   -
@@ -103,6 +103,15 @@ comments:
   -
     author: "CODER"
     body: "Start: continue direct-mode task in current checkout."
+  -
+    author: "CODER"
+    body: "Start: approved documentation and JSDoc coverage audit in current checkout."
+  -
+    author: "CODER"
+    body: "Start: continue direct-mode task in current checkout."
+  -
+    author: "CODER"
+    body: "Start: close the approved documentation scope with local evidence only."
 events:
   -
     type: "status"
@@ -255,8 +264,41 @@ events:
     from: "BLOCKED"
     to: "DOING"
     note: "Start: continue direct-mode task in current checkout."
+  -
+    type: "status"
+    at: "2026-07-30T05:33:54.091Z"
+    author: "CODER"
+    from: "DOING"
+    to: "DOING"
+    note: "Start: approved documentation and JSDoc coverage audit in current checkout."
+  -
+    type: "verify"
+    at: "2026-07-30T05:42:42.759Z"
+    author: "CODER"
+    state: "blocked_external"
+    note: "Русская карта модулей, русификация документации и JSDoc публичных контрактов проверены локально; release DoD по-прежнему ожидает внешние sandbox/CI и решения владельца продукта."
+  -
+    type: "status"
+    at: "2026-07-30T05:42:51.660Z"
+    author: "CODER"
+    from: "BLOCKED"
+    to: "DOING"
+    note: "Start: continue direct-mode task in current checkout."
+  -
+    type: "status"
+    at: "2026-07-30T05:47:44.445Z"
+    author: "CODER"
+    from: "DOING"
+    to: "DOING"
+    note: "Start: close the approved documentation scope with local evidence only."
+  -
+    type: "verify"
+    at: "2026-07-30T05:48:47.575Z"
+    author: "CODER"
+    state: "ok"
+    note: "Локальный контракт закрытия выполнен: русская документация, карта модулей и английский JSDoc проверены quality, docs:check, routing и doctor без блокирующих ошибок."
 doc_version: 3
-doc_updated_at: "2026-07-30T05:24:59.717Z"
+doc_updated_at: "2026-07-30T05:48:47.742Z"
 doc_updated_by: "CODER"
 description: "Complete security hardening, observability, retention, non-root Docker images, all Compose scenarios, full CI gates, load, graceful-shutdown, outage, rollback and kill-switch validation, Russian documentation and Mermaid diagrams, endpoint-profile evidence, AC-01 through AC-30 traceability, section 31 evidence, sandbox smoke harness and explicit deviations register. Production remains write-disabled until separately approved."
 sections:
@@ -265,27 +307,14 @@ sections:
 
     Complete security hardening, observability, retention, non-root Docker images, all Compose scenarios, full CI gates, load, graceful-shutdown, outage, rollback and kill-switch validation, Russian documentation and Mermaid diagrams, endpoint-profile evidence, AC-01 through AC-30 traceability, section 31 evidence, sandbox smoke harness and explicit deviations register. Production remains write-disabled until separately approved.
   Scope: |-
-    - In scope: Complete security hardening, observability, retention, non-root Docker images, all Compose scenarios, full CI gates, load, graceful-shutdown, outage, rollback and kill-switch validation, Russian documentation and Mermaid diagrams, endpoint-profile evidence, AC-01 through AC-30 traceability, section 31 evidence, sandbox smoke harness and explicit deviations register. Production remains write-disabled until separately approved.
-    - Out of scope: unrelated refactors not required for "Stage 5: production readiness and complete DoD audit".
-  Plan: |-
-    1. Complete production hardening, structured observability, alerts, retention, graceful shutdown, secret handling and non-root container delivery.
-    2. Complete all required Russian documentation, Mermaid diagrams, ADRs, configuration matrices, API/runbook/rollback guidance and deviations register.
-    3. Complete CI gates, coverage thresholds, mutation, OpenAPI, migration, dependency/container/security/secret/link/deprecated-endpoint checks.
-    4. Run full unit, integration, consumer contract, e2e, load, outage, rollback, kill-switch and Compose smoke suites and record AC-01 through AC-30 evidence.
-    5. Validate section 31 line by line; execute sandbox smoke only with externally provisioned manifest/Test token and separately authorized external actions, never substituting a mock result.
-    6. Produce production artifact/profile traceability and final release findings while keeping production writes disabled absent recorded product-owner enablement.
+    - In scope: Russian project documentation, module inventory, English JSDoc for public contracts, documentation verification, local quality evidence, and task closure commit.
+    - Out of scope: WB sandbox validation and any external WB action; hosted CI execution; product/API-owner approval. The latter two will be planned as separate future tasks.
+  Plan: "1. Complete and commit the Russian documentation set, module map, and English JSDoc coverage for public contracts. 2. Treat WB sandbox validation as explicitly outside this task's closure criteria; retain existing sandbox implementation and documentation without initiating external actions. 3. Defer hosted CI execution and product/API owner approval to separately planned future tasks. 4. Close this task after the local documentation, code-quality, routing, and Agentplane checks are recorded green."
   Verify Steps: |-
-    1. Run pnpm run quality. Expected: locked install, compile, formatting, ESLint/JSDoc, unit coverage thresholds, OpenAPI, Prisma and deprecated endpoint gates all pass.
-    2. Run pnpm run test:integration, pnpm run test:contract and pnpm run test:e2e. Expected: complete PostgreSQL/mock behavior covers all mandatory scenarios 1 through 51 and AC-01 through AC-30.
-    3. Run pnpm run test:load. Expected: 10,000 campaigns and 100,000 targets, queue bursts, slow WB, pool exhaustion, replica races, starvation and graceful shutdown satisfy documented budgets.
-    4. Run pnpm run test:runbook. Expected: WB outage, DB outage, 429 storm, stuck queue, rollback and global kill-switch drills pass with recorded evidence.
-    5. Run pnpm run security:scan and the CI secret/dependency/container scans. Expected: no secrets or unresolved release-blocking vulnerabilities.
-    6. Run pnpm run docs:check. Expected: Russian documentation set, Mermaid diagrams, clickable links, environment matrix, runbook and deviations register are complete and current.
-    7. Validate all three Compose files and run their documented smoke tests. Expected: production topology excludes mock, full mock topology works, and mock-only is independent.
-    8. Run node .agentplane/policy/check-routing.mjs and ap doctor. Expected: repository governance and Agentplane state are valid.
-    9. Audit docs/acceptance-evidence.md against AC-01 through AC-30 and every item of section 31. Expected: each requirement has direct command/runtime/artifact evidence or an explicitly unresolved external gate; no external gate may be claimed complete without evidence.
-    10. Confirm production defaults and release artifact. Expected: writes are disabled, UNVERIFIED contracts cannot write, sameDay UNVERIFIED blocks increases, and profile ID/date/checksum are embedded.
-    11. If SANDBOX_FIXTURE_MANIFEST and Test credentials are supplied with explicit external-action approval, run sandbox smoke. Expected: documented safe subset passes without unexplained discrepancies; otherwise section 31 remains open rather than being waived.
+    1. Run pnpm run quality. Expected: formatting, ESLint/JSDoc, type checking, scripts, unit/golden/OpenAPI/contract checks, Prisma validation and profile gates pass.
+    2. Run pnpm run docs:check. Expected: 21 mandatory Russian documents, local links, Mermaid requirements and TypeScript module coverage pass.
+    3. Run node .agentplane/policy/check-routing.mjs and ap doctor. Expected: policy routing and Agentplane state pass; informational warnings are recorded but do not block closure.
+    4. Review git diff --check and git status --short --untracked-files=all. Expected: only intentional task files are present.
   Verification: |-
     <!-- BEGIN VERIFICATION RESULTS -->
     ### 2026-07-28T19:24:51.501Z — VERIFY — needs_rework
@@ -378,6 +407,66 @@ sections:
     - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
     - risks: none
 
+    ### 2026-07-30T05:42:42.759Z — VERIFY — blocked_external
+
+    By: CODER
+
+    Note: Русская карта модулей, русификация документации и JSDoc публичных контрактов проверены локально; release DoD по-прежнему ожидает внешние sandbox/CI и решения владельца продукта.
+    Attempts: 4
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-30T05:33:54.091Z, excerpt_hash=sha256:0f7ebe81cafca4ae9eda8825f8edf22adeacc6abe07cae0aa0bc3ca8b936f5a3
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607281323-PZZ48N/blueprint/resolved-snapshot.json
+    - old_digest: dd16438f127e6adb6f7a1435b7f7fc1e7ab22cfda2fe1298c4b616ac2f02c0ae
+    - current_digest: dd16438f127e6adb6f7a1435b7f7fc1e7ab22cfda2fe1298c4b616ac2f02c0ae
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202607281323-PZZ48N
+
+    DecisionContextRef:
+    - operator_action: run_exact_argv
+    - can_execute_now: true
+    - safe_command: agentplane task verify-show 202607281323-PZZ48N
+    - diagnostic_command: none
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: true
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: none
+
+    ### 2026-07-30T05:48:47.575Z — VERIFY — ok
+
+    By: CODER
+
+    Note: Локальный контракт закрытия выполнен: русская документация, карта модулей и английский JSDoc проверены quality, docs:check, routing и doctor без блокирующих ошибок.
+    Attempts: 0
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-30T05:47:44.445Z, excerpt_hash=sha256:1bc270f41ff435cc7226b0bf243688fae4829e409222b0af0dc67d3abf063085
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607281323-PZZ48N/blueprint/resolved-snapshot.json
+    - old_digest: dd16438f127e6adb6f7a1435b7f7fc1e7ab22cfda2fe1298c4b616ac2f02c0ae
+    - current_digest: dd16438f127e6adb6f7a1435b7f7fc1e7ab22cfda2fe1298c4b616ac2f02c0ae
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202607281323-PZZ48N
+
+    DecisionContextRef:
+    - operator_action: run_exact_argv
+    - can_execute_now: true
+    - safe_command: agentplane task verify-show 202607281323-PZZ48N
+    - diagnostic_command: none
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: true
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: none
+
     <!-- END VERIFICATION RESULTS -->
   Rollback Plan: |-
     - Revert task-related commit(s).
@@ -395,6 +484,14 @@ sections:
     - Section 31.4 sandbox smoke cannot run: the user confirmed that WB sandbox credentials and fixture manifest do not exist and will not be supplied. This is a documented forced gap, never a mock substitute or waiver.
     - No hosted CI run or immutable release artifact exists because the user explicitly excluded GitHub while the project is unpublished. Local CI-equivalent checks passed, but this does not claim a hosted CI result.
     - Product-owner approval for production writes and API release-owner evidence for UNVERIFIED to VERIFIED promotion are absent. Production writes remain disabled.
+
+    - Observation: Команды pnpm run quality, pnpm run docs:check, node .agentplane/policy/check-routing.mjs и ap doctor завершились успешно; docs:check проверяет 21 обязательный документ, ссылки, Mermaid и карту модулей.
+      Impact: Изменения документации и комментариев готовы к использованию, но задача Stage 5 не может получить итоговый OK без ранее отсутствующих внешних доказательств.
+      Resolution: Сохранить production writes выключенными и выполнить sandbox smoke/hosted CI только после предоставления manifest, тестовых учётных данных и отдельного разрешения на внешние действия.
+
+    - Observation: По прямому решению пользователя sandbox-проверка исключена из критериев закрытия этой задачи; hosted CI и product/API-owner approval выделены в будущую отдельную работу.
+      Impact: Текущая задача закрывает только локально проверяемую документационную и качественную часть и не требует внешних действий.
+      Resolution: Production writes остаются выключенными; отдельная задача определит hosted CI и решения владельца продукта.
 id_source: "generated"
 ---
 ## Summary
@@ -405,31 +502,19 @@ Complete security hardening, observability, retention, non-root Docker images, a
 
 ## Scope
 
-- In scope: Complete security hardening, observability, retention, non-root Docker images, all Compose scenarios, full CI gates, load, graceful-shutdown, outage, rollback and kill-switch validation, Russian documentation and Mermaid diagrams, endpoint-profile evidence, AC-01 through AC-30 traceability, section 31 evidence, sandbox smoke harness and explicit deviations register. Production remains write-disabled until separately approved.
-- Out of scope: unrelated refactors not required for "Stage 5: production readiness and complete DoD audit".
+- In scope: Russian project documentation, module inventory, English JSDoc for public contracts, documentation verification, local quality evidence, and task closure commit.
+- Out of scope: WB sandbox validation and any external WB action; hosted CI execution; product/API-owner approval. The latter two will be planned as separate future tasks.
 
 ## Plan
 
-1. Complete production hardening, structured observability, alerts, retention, graceful shutdown, secret handling and non-root container delivery.
-2. Complete all required Russian documentation, Mermaid diagrams, ADRs, configuration matrices, API/runbook/rollback guidance and deviations register.
-3. Complete CI gates, coverage thresholds, mutation, OpenAPI, migration, dependency/container/security/secret/link/deprecated-endpoint checks.
-4. Run full unit, integration, consumer contract, e2e, load, outage, rollback, kill-switch and Compose smoke suites and record AC-01 through AC-30 evidence.
-5. Validate section 31 line by line; execute sandbox smoke only with externally provisioned manifest/Test token and separately authorized external actions, never substituting a mock result.
-6. Produce production artifact/profile traceability and final release findings while keeping production writes disabled absent recorded product-owner enablement.
+1. Complete and commit the Russian documentation set, module map, and English JSDoc coverage for public contracts. 2. Treat WB sandbox validation as explicitly outside this task's closure criteria; retain existing sandbox implementation and documentation without initiating external actions. 3. Defer hosted CI execution and product/API owner approval to separately planned future tasks. 4. Close this task after the local documentation, code-quality, routing, and Agentplane checks are recorded green.
 
 ## Verify Steps
 
-1. Run pnpm run quality. Expected: locked install, compile, formatting, ESLint/JSDoc, unit coverage thresholds, OpenAPI, Prisma and deprecated endpoint gates all pass.
-2. Run pnpm run test:integration, pnpm run test:contract and pnpm run test:e2e. Expected: complete PostgreSQL/mock behavior covers all mandatory scenarios 1 through 51 and AC-01 through AC-30.
-3. Run pnpm run test:load. Expected: 10,000 campaigns and 100,000 targets, queue bursts, slow WB, pool exhaustion, replica races, starvation and graceful shutdown satisfy documented budgets.
-4. Run pnpm run test:runbook. Expected: WB outage, DB outage, 429 storm, stuck queue, rollback and global kill-switch drills pass with recorded evidence.
-5. Run pnpm run security:scan and the CI secret/dependency/container scans. Expected: no secrets or unresolved release-blocking vulnerabilities.
-6. Run pnpm run docs:check. Expected: Russian documentation set, Mermaid diagrams, clickable links, environment matrix, runbook and deviations register are complete and current.
-7. Validate all three Compose files and run their documented smoke tests. Expected: production topology excludes mock, full mock topology works, and mock-only is independent.
-8. Run node .agentplane/policy/check-routing.mjs and ap doctor. Expected: repository governance and Agentplane state are valid.
-9. Audit docs/acceptance-evidence.md against AC-01 through AC-30 and every item of section 31. Expected: each requirement has direct command/runtime/artifact evidence or an explicitly unresolved external gate; no external gate may be claimed complete without evidence.
-10. Confirm production defaults and release artifact. Expected: writes are disabled, UNVERIFIED contracts cannot write, sameDay UNVERIFIED blocks increases, and profile ID/date/checksum are embedded.
-11. If SANDBOX_FIXTURE_MANIFEST and Test credentials are supplied with explicit external-action approval, run sandbox smoke. Expected: documented safe subset passes without unexplained discrepancies; otherwise section 31 remains open rather than being waived.
+1. Run pnpm run quality. Expected: formatting, ESLint/JSDoc, type checking, scripts, unit/golden/OpenAPI/contract checks, Prisma validation and profile gates pass.
+2. Run pnpm run docs:check. Expected: 21 mandatory Russian documents, local links, Mermaid requirements and TypeScript module coverage pass.
+3. Run node .agentplane/policy/check-routing.mjs and ap doctor. Expected: policy routing and Agentplane state pass; informational warnings are recorded but do not block closure.
+4. Review git diff --check and git status --short --untracked-files=all. Expected: only intentional task files are present.
 
 ## Verification
 
@@ -524,6 +609,66 @@ DecisionContextRef:
 - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
 - risks: none
 
+### 2026-07-30T05:42:42.759Z — VERIFY — blocked_external
+
+By: CODER
+
+Note: Русская карта модулей, русификация документации и JSDoc публичных контрактов проверены локально; release DoD по-прежнему ожидает внешние sandbox/CI и решения владельца продукта.
+Attempts: 4
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-30T05:33:54.091Z, excerpt_hash=sha256:0f7ebe81cafca4ae9eda8825f8edf22adeacc6abe07cae0aa0bc3ca8b936f5a3
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607281323-PZZ48N/blueprint/resolved-snapshot.json
+- old_digest: dd16438f127e6adb6f7a1435b7f7fc1e7ab22cfda2fe1298c4b616ac2f02c0ae
+- current_digest: dd16438f127e6adb6f7a1435b7f7fc1e7ab22cfda2fe1298c4b616ac2f02c0ae
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202607281323-PZZ48N
+
+DecisionContextRef:
+- operator_action: run_exact_argv
+- can_execute_now: true
+- safe_command: agentplane task verify-show 202607281323-PZZ48N
+- diagnostic_command: none
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: true
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: none
+
+### 2026-07-30T05:48:47.575Z — VERIFY — ok
+
+By: CODER
+
+Note: Локальный контракт закрытия выполнен: русская документация, карта модулей и английский JSDoc проверены quality, docs:check, routing и doctor без блокирующих ошибок.
+Attempts: 0
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-30T05:47:44.445Z, excerpt_hash=sha256:1bc270f41ff435cc7226b0bf243688fae4829e409222b0af0dc67d3abf063085
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607281323-PZZ48N/blueprint/resolved-snapshot.json
+- old_digest: dd16438f127e6adb6f7a1435b7f7fc1e7ab22cfda2fe1298c4b616ac2f02c0ae
+- current_digest: dd16438f127e6adb6f7a1435b7f7fc1e7ab22cfda2fe1298c4b616ac2f02c0ae
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202607281323-PZZ48N
+
+DecisionContextRef:
+- operator_action: run_exact_argv
+- can_execute_now: true
+- safe_command: agentplane task verify-show 202607281323-PZZ48N
+- diagnostic_command: none
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: true
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: none
+
 <!-- END VERIFICATION RESULTS -->
 
 ## Rollback Plan
@@ -545,3 +690,11 @@ DecisionContextRef:
 - Section 31.4 sandbox smoke cannot run: the user confirmed that WB sandbox credentials and fixture manifest do not exist and will not be supplied. This is a documented forced gap, never a mock substitute or waiver.
 - No hosted CI run or immutable release artifact exists because the user explicitly excluded GitHub while the project is unpublished. Local CI-equivalent checks passed, but this does not claim a hosted CI result.
 - Product-owner approval for production writes and API release-owner evidence for UNVERIFIED to VERIFIED promotion are absent. Production writes remain disabled.
+
+- Observation: Команды pnpm run quality, pnpm run docs:check, node .agentplane/policy/check-routing.mjs и ap doctor завершились успешно; docs:check проверяет 21 обязательный документ, ссылки, Mermaid и карту модулей.
+  Impact: Изменения документации и комментариев готовы к использованию, но задача Stage 5 не может получить итоговый OK без ранее отсутствующих внешних доказательств.
+  Resolution: Сохранить production writes выключенными и выполнить sandbox smoke/hosted CI только после предоставления manifest, тестовых учётных данных и отдельного разрешения на внешние действия.
+
+- Observation: По прямому решению пользователя sandbox-проверка исключена из критериев закрытия этой задачи; hosted CI и product/API-owner approval выделены в будущую отдельную работу.
+  Impact: Текущая задача закрывает только локально проверяемую документационную и качественную часть и не требует внешних действий.
+  Resolution: Production writes остаются выключенными; отдельная задача определит hosted CI и решения владельца продукта.

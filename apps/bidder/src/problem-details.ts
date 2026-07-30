@@ -6,6 +6,7 @@ import type { Response } from 'express';
 
 import type { AdminRequest } from './admin-security.js';
 
+/** Typed application error that maps a known Admin API failure to an HTTP response. */
 export class AdminApiError extends Error {
   public constructor(
     public readonly status: number,

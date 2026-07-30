@@ -1,12 +1,16 @@
-import { access, readFile } from 'node:fs/promises';
+import { access, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 
 const repositoryRoot = path.resolve(import.meta.dirname, '..');
 const requiredDocuments = [
   'README.md',
   'docs/architecture.md',
+  'docs/modules.md',
   'docs/configuration.md',
+  'docs/data-synchronization.md',
+  'docs/decision-engine.md',
   'docs/wb-api-integration.md',
+  'docs/wb-api-evidence/wb-promotion-2026-07-28-v1.md',
   'docs/bidding-algorithm.md',
   'docs/data-model.md',
   'docs/mock-server.md',
@@ -14,12 +18,38 @@ const requiredDocuments = [
   'docs/observability.md',
   'docs/security.md',
   'docs/runbook.md',
+  'docs/technical-specification.md',
+  'docs/write-pipeline.md',
   'docs/implementation-deviations.md',
   'docs/acceptance-evidence.md',
   'docs/e2e-scenario-evidence.md',
   'docs/adr/0001-fail-closed-wb-contracts.md',
 ];
 const failures = [];
+
+/**
+ * Lists TypeScript source files below one documentation-covered directory.
+ *
+ * @param {string} directory - Absolute directory to traverse.
+ * @returns {Promise<string[]>} Repository-relative TypeScript paths.
+ */
+async function listTypeScriptSources(directory) {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const nested = await Promise.all(
+    entries.map(async (entry) => {
+      const absolute = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        return entry.name === 'dist' || entry.name === 'node_modules'
+          ? []
+          : listTypeScriptSources(absolute);
+      }
+      return entry.isFile() && entry.name.endsWith('.ts')
+        ? [path.relative(repositoryRoot, absolute)]
+        : [];
+    }),
+  );
+  return nested.flat();
+}
 
 for (const relativePath of requiredDocuments) {
   const absolutePath = path.join(repositoryRoot, relativePath);
@@ -56,7 +86,17 @@ for (const relativePath of requiredDocuments) {
 }
 
 const architecture = await readFile(path.join(repositoryRoot, 'docs/architecture.md'), 'utf8');
+const modules = await readFile(path.join(repositoryRoot, 'docs/modules.md'), 'utf8');
 const dataModel = await readFile(path.join(repositoryRoot, 'docs/data-model.md'), 'utf8');
+for (const sourceDirectory of ['apps', 'packages']) {
+  for (const relativePath of await listTypeScriptSources(
+    path.join(repositoryRoot, sourceDirectory),
+  )) {
+    if (!modules.includes(`\`${path.basename(relativePath)}\``)) {
+      failures.push(`docs/modules.md: отсутствует описание ${relativePath}`);
+    }
+  }
+}
 const mermaidCount = (architecture.match(/```mermaid/gu) ?? []).length;
 if (mermaidCount < 4) {
   failures.push(

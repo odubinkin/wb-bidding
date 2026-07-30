@@ -21,7 +21,7 @@ Production write по умолчанию выключен. Один `WB_API_WRIT
 account binding, fresh integration/capacity, active APPLY policy, automation и выключенный global
 kill. Cluster write/delete и increase при неподтверждённом соответствующем контракте fail closed.
 
-## Supply chain и CI
+## Цепочка поставки и CI
 
 Dependencies устанавливаются по `pnpm-lock.yaml` с `--frozen-lockfile`. CI выполняет dependency
 audit, secret scan и Trivy scan собранных non-root images. Локально:

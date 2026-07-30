@@ -40,7 +40,7 @@
 | AC-29    | AUTOMATED                 | error classifier, circuit/429, readiness и quota tests                                          |
 | AC-30    | EXTERNAL GATE             | harness `smoke:sandbox`; нужен manifest/Test token и release-owner evidence                     |
 
-## Definition of Done, раздел 31
+## Критерии готовности, раздел 31
 
 | Пункт     | Статус                    | Evidence / условие закрытия                                                               |
 | --------- | ------------------------- | ----------------------------------------------------------------------------------------- |
@@ -56,7 +56,7 @@
 | DoD-31.10 | EXTERNAL GATE             | требуется product-owner решение; до него writes остаются выключены                        |
 | DoD-31.11 | AUTOMATED                 | endpoint profile + adapter/pre-dispatch fail-closed tests                                 |
 
-## Release evidence
+## Доказательства готовности к выпуску
 
 В release bundle сохраняются:
 

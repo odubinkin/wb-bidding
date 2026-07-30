@@ -1,10 +1,10 @@
-# Синхронизация данных и statistical evidence
+# Синхронизация данных и статистические доказательства
 
 Быстрые current-state observations отделены от медленного account-wide сбора. PostgreSQL хранит
 ownership jobs, checkpoints, immutable source versions, target completeness и финализированное
 evidence.
 
-## Jobs и non-overlap
+## Задания и запрет перекрытия
 
 `CURRENT_STATE_SYNC` по умолчанию запускается каждые 15 минут с deadline 10 минут: обнаруживает
 кампании, обновляет details и текущие card bids. `DATA_SYNC` каждые 30 минут продвигает отдельные
@@ -54,7 +54,7 @@ Missing, stale, invalid или regime-incoherent evidence запрещает `AP
 gap. В `SHARED` mode требуется change-marker provenance. Late attribution создаёт новую source
 version, supersedes прежний performance day и меняет downstream checksum.
 
-## Capacity и fairness
+## Пропускная способность и справедливость
 
 Все запросы и DB reads bounded: campaign details/fullstats до 50 IDs, minimum bids до 100 nm,
 DB page `SYNC_PAGE_SIZE`. Checkpoint хранит cursor и wrap state, priority targets добавляются без

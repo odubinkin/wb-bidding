@@ -19,22 +19,31 @@ import type { AppConfiguration } from '@wb-bidder/config';
 
 const PERMISSION_METADATA = 'admin-permission';
 
+/** Authenticated administrative identity attached to one accepted request. */
 export interface AdminPrincipal {
   readonly actor: string;
   readonly permissions: ReadonlySet<string>;
 }
 
+/** Express request enriched with correlation and authenticated-admin context. */
 export type AdminRequest = Request & {
   adminPrincipal?: AdminPrincipal;
   correlationId?: string;
 };
 
+/**
+ * Declares the permission enforced by {@link AdminAuthGuard} for a controller handler.
+ *
+ * @param permission - Canonical administrative permission identifier.
+ * @returns Nest method decorator and OpenAPI extension metadata.
+ */
 export const RequirePermission = (permission: string): MethodDecorator =>
   applyDecorators(
     SetMetadata(PERMISSION_METADATA, permission),
     ApiExtension('x-required-permission', permission),
   );
 
+/** Extracts the authenticated administrative principal from a guarded request. */
 export const Principal = createParamDecorator(
   (_data: unknown, context: ExecutionContext): AdminPrincipal => {
     const principal = context.switchToHttp().getRequest<AdminRequest>().adminPrincipal;

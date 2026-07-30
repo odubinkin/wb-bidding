@@ -1,6 +1,6 @@
-# Decision Engine
+# Модуль принятия решений
 
-Decision Engine `rules-v1` — чистый детерминированный доменный модуль. Он не обращается к WB,
+Модуль принятия решений `rules-v1` — чистый детерминированный доменный модуль. Он не обращается к WB,
 не читает часы самостоятельно и не выполняет запись ставки. На вход передаётся один полный
 нормализованный target snapshot, на выходе получается объяснённое решение и semantic checksum.
 
@@ -20,7 +20,7 @@ expectedProfit =
 `expectedContributionBeforeAdsMinor` является signed величиной. Нулевой или отрицательный
 contribution запускает защитное движение к floor и никогда не приводит к повышению.
 
-## Evidence и estimator
+## Данные и оценщик
 
 Финализированные полные WB days группируются по точной подтверждённой ставке. CPM bucket требует
 days, views либо явно включённый spend threshold и ordered units; CPC использует clicks вместо
@@ -33,7 +33,7 @@ interpolation. Экстраполяция запрещена. Candidate с ма�
 
 Golden fixture: `tests/fixtures/decision-golden-v1.json`.
 
-## Checksums и идемпотентность
+## Контрольные суммы и идемпотентность
 
 `inputSnapshotChecksum` и `decisionInputChecksum` вычисляются как
 `lowerHex(SHA-256(UTF8(scope + "\n" + RFC8785(payload))))`. `bigint` сериализуется десятичной
@@ -41,7 +41,7 @@ Golden fixture: `tests/fixtures/decision-golden-v1.json`.
 Повтор одинакового решения возвращает существующий UUIDv7; отличающийся результат для того же
 checksum считается `DATA_INCONSISTENCY`.
 
-## Guardrails
+## Защитные ограничения
 
 Единственный порядок bounds:
 
@@ -59,7 +59,7 @@ Card write допускается только при подтверждённо
 versioned verification unit/minimum/absence contract. Неоднозначная placement attribution,
 неполный snapshot, отсутствующая economics или WB minimum также блокируют write.
 
-## Immutable versions и experiments
+## Неизменяемые версии и эксперименты
 
 Product economics и policies создаются версиями под PostgreSQL advisory lock. Conditional update
 проверяет ожидаемую текущую версию; idempotency key нельзя повторно использовать с другим

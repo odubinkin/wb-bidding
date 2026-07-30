@@ -728,7 +728,7 @@ Read-запросы не создают `WbWriteAttempt`. Их вызовы от
 - Миграции проверяются на чистой и на заполненной тестовой БД.
 - Денежные преобразования должны иметь отдельные тесты границ `BigInt`.
 
-## 9. Алгоритм Decision Engine
+## 9. Алгоритм модуля принятия решений
 
 ### 9.1. Версионирование
 
@@ -1270,7 +1270,7 @@ Retry постановки или отправки использует суще
 
 Первое чтение старого значения не является доказательством отсутствия записи: оно может попасть в WB propagation lag. Каждый reconciliation attempt сохраняет времена HTTP write, начала допустимого verification window, всех reads, source marker/checksum и классификацию. Новый write использует тот же `decisionId`, увеличивает `attemptNumber` и выполняется не более bounded retry count; исчерпание count переводит item в terminal `FAILED`, а не в бесконечный цикл.
 
-## 11. Scheduler и масштабирование
+## 11. Планировщик и масштабирование
 
 ### 11.1. Независимые задания
 
@@ -1336,7 +1336,7 @@ requiredMinBidSlaMinutes =
 - Горизонтальное масштабирование ограничивается общим rate limiter единственного WB-аккаунта, а не числом pod.
 - Наблюдаемость показывает возраст snapshot и прогноз завершения полного прохода отдельно по endpoint/data kind; target, который нарушил `targetSyncSla`, создаёт alert и не участвует в APPLY.
 
-## 12. WB API client и rate limiting
+## 12. Клиент WB API и ограничение частоты запросов
 
 ### 12.1. Режимы
 
@@ -1388,7 +1388,7 @@ Sandbox не считается ускоренной моделью production t
 
 Документированные standard promotion endpoint limits применяются к `Personal` token. `Base` и `Test` используют отдельные сниженные profiles WB; sandbox не наследует standard profile неявно. Фактические `X-Ratelimit-*` и `Retry-After` всегда имеют приоритет в сторону уменьшения доступной квоты.
 
-### 12.2. Rate limiter
+### 12.2. Ограничитель частоты запросов
 
 Нужны два уровня token bucket:
 
@@ -1461,7 +1461,7 @@ Retry policy задаётся отдельно для read, write и verify:
 - half-open probe не должен нарушать rate limit;
 - Decision Engine продолжает считать решения, но просроченные решения не отправляются после восстановления.
 
-## 13. Data Sync Worker
+## 13. Рабочий процесс синхронизации данных
 
 ### 13.1. Стадии
 
@@ -1501,7 +1501,7 @@ Decision Engine использует только snapshot, у которого:
 - увеличивается metric;
 - создаётся audit event.
 
-## 14. Executor Engine
+## 14. Исполнитель конвейера
 
 ### 14.1. Пакетирование
 
@@ -1637,7 +1637,7 @@ Mock должен быть детерминированным: один seed и 
 
 Seed generator обязан формировать API-compatible daily rows, а не готовый `BidPerformanceDay`: исключение частичных дней, связь с bid history, conversion cutoff и finalization проверяет bidder. Полный multi-day exploration test должен завершаться за минуты wall-clock time независимо от числа виртуальных дней.
 
-### 15.4. Rate limit mock
+### 15.4. Ограничение частоты в mock-сервере
 
 Mock применяет token bucket и возвращает документированные headers. Через `/__mock/faults` можно:
 
@@ -1934,7 +1934,7 @@ Authorization: Bearer <service-token>
 
 Для успешной записанной строки `status=SUCCEEDED`, `createdVersion` содержит созданную версию, а `code` и `detail` равны `null`. Успешная строка dry-run имеет `status=VALIDATED` и `createdVersion=null`. Результаты batch import хранятся не меньше срока, заданного audit retention policy.
 
-### 17.6. Конкуренция и влияние на Decision Engine
+### 17.6. Конкуренция и влияние на модуль принятия решений
 
 - Single update и строки batch import используют одну блокировку по `nmId` и не могут создать пересекающиеся версии.
 - Snapshot фиксирует `productEconomicsVersion`; изменение во время расчёта приводит к отмене результата и повторному расчёту.
@@ -1942,7 +1942,7 @@ Authorization: Bearer <service-token>
 - После `SENT` сначала завершается reconciliation; новая экономика применяется только к следующему решению.
 - Импорт не включает automation автоматически и не обходит `OBSERVE_ONLY`, cooldown, budget или write safety flags.
 
-### 17.7. Общие правила остальных Admin API
+### 17.7. Общие правила остальных административных API
 
 Все list endpoints используют cursor pagination: `limit=1..500`, default `100`, стабильную сортировку `(createdAt, id)` и ответ `{items, nextCursor}`. Фильтры валидируются fail closed. Mutating endpoints требуют `Idempotency-Key`, а операции над текущим состоянием — также `If-Match`; повтор ключа с другим payload возвращает `409 IDEMPOTENCY_KEY_REUSED`, stale ETag — `412 VERSION_MISMATCH`, отсутствующий обязательный conditional header — `428 PRECONDITION_REQUIRED`.
 
@@ -2129,7 +2129,7 @@ Audit events append-only. Изменение или удаление audit recor
 
 ## 20. Наблюдаемость
 
-### 20.1. Endpoints
+### 20.1. Конечные точки
 
 - `GET /health/live` — event loop и процесс живы; без тяжёлых внешних проверок;
 - `GET /health/ready` — БД доступна, миграции применены, конфигурация и account binding валидны; для prod используется кэшированное состояние последней auth/integration проверки и breakers без WB-вызова на каждый probe;
@@ -2473,7 +2473,7 @@ Contract suite проверяет version/checksum endpoint profile, exact wire 
 
 Любой `istanbul ignore` требует комментария с причиной. Snapshot-only tests для бизнес-логики запрещены.
 
-## 26. CI/CD quality gates
+## 26. Контроль качества CI/CD
 
 Pull request блокируется, если не прошли:
 
@@ -2514,11 +2514,11 @@ Production deployment СЛЕДУЕТ включать:
 
 `mock`, `sandbox`, `prod` выбирают корректные default URLs. Self-hosted production APPLY принимает `Personal` token, sandbox — `Test`; временный `Base` production profile принудительно `OBSERVE_ONLY`, а `Service` отклоняется. Mock/sandbox URL можно безопасно переопределить; production принимает только официальные HTTPS hosts без redirect. Production успешно стартует с writes disabled; write не включается неявно и требует одновременного прохождения всех gates раздела 12.1.
 
-### AC-03. Data Sync
+### AC-03. Синхронизация данных
 
 Повторная синхронизация одного периода не создаёт дубликатов, сохраняет freshness/completeness и соблюдает token-specific batch/rate limits. `Current state sync` работает независимо от медленного Data Sync; default 15-minute schedule, 10-minute run deadline и worst-case target observation gap не более 20 минут поддерживают заявленную freshness current bid. Если предыдущий run того же job не завершён, повторный запуск не создаётся; превышение deadline/SLA инвалидирует bid/config coverage и блокирует APPLY для затронутых targets. При полном Data Sync проходе дольше cron interval cursor продолжается, targets не голодают, а Decision Engine обрабатывает только согласованные target-level snapshots в пределах SLA. Для 10 000 кампаний `Personal` profile признаёт нижнюю границу minimum-bid pass 500 минут и default SLA 720 минут; меньшая невыполнимая настройка блокирует APPLY.
 
-### AC-04. Decision Engine
+### AC-04. Модуль принятия решений
 
 Для фиксированного fixture возвращает детерминированное решение с полным объяснением, включая eligible days/buckets, PAVA, safety adjustment, candidates и bounds; к WB API не обращается.
 
@@ -2526,7 +2526,7 @@ Production deployment СЛЕДУЕТ включать:
 
 Decision Engine выбирает допустимую обеспеченную данными ставку с максимальной детерминированно оценённой прибылью. Сумма локальных максимумов признаётся максимумом account score только при выполнении допущений separability из раздела 9.5; общий budget остаётся guardrail. Без действующего `expectedContributionBeforeAdsMinor` объект блокируется; переключение на другую цель не происходит. ACOS и ROAS используются только как диагностические метрики.
 
-### AC-06. Guardrails
+### AC-06. Защитные ограничения
 
 Невозможно применить ставку ниже WB minimum, выше policy maximum, сверх cycle/daily cap или при stale/invalid данных. Повышение также невозможно при `sameDaySpendContractStatus=UNVERIFIED` либо без свежего same-day spend signal, `dailySpendLimitMinor`, `maxSpendPerMinuteMinor`, verified coverage timestamp или подтверждённого profile reporting-lag bound и достаточного headroom после консервативного резерва. Этот blocker не запрещает observe или снижение, не требующее данного сигнала.
 
@@ -2542,7 +2542,7 @@ HTTP client вызывается только после commit `DISPATCHING`/qu
 
 Решение получает `APPLIED` только после чтения совпадающей фактической ставки.
 
-### AC-10. Rate limit
+### AC-10. Ограничение частоты запросов
 
 Соблюдаются deployment-wide и endpoint limits, при этом система не предполагает эксклюзивную account quota. После mock `429` следующий запрос не выполняется раньше `X-Ratelimit-Retry`; уменьшившиеся response headers замораживают/ограничивают bucket.
 
@@ -2554,7 +2554,7 @@ HTTP client вызывается только после commit `DISPATCHING`/qu
 
 Live, ready и metrics endpoints работают; readiness не вызывает WB на каждый probe и использует cached integration state. `/ping` не вызывается чаще 3 раз за 30 секунд и не трактуется как гарантия доступности всех сервисов. Ключевые stages имеют metrics; labels не содержат высококардинальные ID.
 
-### AC-13. Mock
+### AC-13. Mock-сервер
 
 Mock реализует согласованное подмножество WB API, детерминированные сценарии, delayed consistency, fault injection, rate-limit headers и virtual clock. Multi-day statistics, conversion lag и exploration проверяются без ожидания model time в wall clock.
 
@@ -2570,7 +2570,7 @@ Lint подтверждает обязательный JSDoc; комплект �
 
 Нагрузочный сценарий 10 000 кампаний / 100 000 targets завершается без потери данных, нарушения лимитов и неограниченного роста памяти.
 
-### AC-17. Product economics API
+### AC-17. API экономики товара
 
 Единичный `PUT` создаёт immutable-версию с conditional update и идемпотентностью. Batch endpoint принимает до 10 000 позиций, возвращает `202`, обрабатывает строки асинхронно и предоставляет агрегированный статус и построчные результаты. Dry-run не изменяет product economics; частичная ошибка не откатывает успешные строки.
 
@@ -2614,7 +2614,7 @@ Estimator использует только дни после enrollment/warm-up
 
 Contract tests подтверждают endpoint/field type, unit, rounding, date и aggregation semantics versioned profile. `fullstats` parent и child rows не суммируются дважды. WB budget fields не называются остатком и не влияют на решение до verified contract; `sameDaySpendContractStatus` независимо остаётся `UNVERIFIED`, пока evidence не подтвердит current-day/date/coverage/lag semantics, и в этом состоянии блокирует только повышение.
 
-### AC-28. Полнота Admin API
+### AC-28. Полнота административного API
 
 Policies, assignments, automation/kill switch, async resync/recalculate, decisions, queue failures и audit реализуют permissions, pagination, `application/problem+json`, audit, idempotency и conditional updates. Manual jobs не обходят locks, а `UNKNOWN`/небезопасный terminal result возвращает `RETRY_NOT_SAFE`.
 
@@ -2622,7 +2622,7 @@ Policies, assignments, automation/kill switch, async resync/recalculate, decisio
 
 `402`, `403`, `409`, `413`, `429`, `5xx` и transport failure классифицируются по разделу 12.4 с учётом read/write и границы `DISPATCHING`. `402` в self-hosted Promotion profile не трактуется как рекламный budget breach; `413` приводит к bounded split, auth/read-only denial не retry-ится как payload error, write `5xx` после dispatch сначала reconciles, response headers ограничивают account-wide quota, а readiness и `/ping` соблюдают контракт раздела 20.1.
 
-### AC-30. Sandbox и API profile traceability
+### AC-30. Sandbox и трассируемость профиля API
 
 Sandbox tests используют только внешний/manual fixture manifest и `Test` token, не создают кампании/бюджет внутри bidder, соблюдают максимум 50 кампаний, 30-дневное удаление, задержку исчезновения status и суточную статистику за последние 30 дней запущенной кампании. Build содержит дату/checksum endpoint profile и evidence report release owner; CI запрещает точную пару `POST /adv/v1/promotion/adverts` и остальные deprecated method/path pairs.
 
@@ -2682,7 +2682,7 @@ Sandbox tests используют только внешний/manual fixture ma
 - журнал `WbWriteAttempt`/`WbWriteAttemptItem`, structured request logs и redaction;
 - virtual clock, daily statistics generator, mock scenarios и contract tests.
 
-### Этап 2. Data Sync
+### Этап 2. Синхронизация данных
 
 - schema/migrations;
 - scheduler locks;
@@ -2690,7 +2690,7 @@ Sandbox tests используют только внешний/manual fixture ma
 - `BidPerformanceDay`, target-level freshness/completeness и late-attribution invalidation;
 - integration/load tests.
 
-### Этап 3. Decision Engine
+### Этап 3. Модуль принятия решений
 
 - product economics и batch import;
 - policy versioning;
@@ -2700,7 +2700,7 @@ Sandbox tests используют только внешний/manual fixture ma
 - explanation и property-based tests;
 - observe-only.
 
-### Этап 4. Queue и Executor
+### Этап 4. Очередь и исполнитель
 
 - transactional queue;
 - lease/concurrency;
@@ -2708,7 +2708,7 @@ Sandbox tests используют только внешний/manual fixture ma
 - verification/reconciliation;
 - failure injection e2e.
 
-### Этап 5. Production readiness
+### Этап 5. Готовность к рабочей эксплуатации
 
 - Admin API auth;
 - observability/runbook;
@@ -2770,7 +2770,7 @@ Sandbox tests используют только внешний/manual fixture ma
 18. release owner API-контрактов и evidence reports, достаточные для каждого перехода `UNVERIFIED → VERIFIED`;
 19. revert deadline и операционный runbook для `FAILED_REVERT_BLOCKED`.
 
-## 31. Definition of Done разработки
+## 31. Критерии готовности разработки
 
 Система считается готовой, только когда:
 
