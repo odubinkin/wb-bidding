@@ -4,7 +4,7 @@ title: "Remove stale Stage 0 reference from README"
 status: "DOING"
 priority: "low"
 owner: "CODER"
-revision: 9
+revision: 10
 origin:
   system: "manual"
 depends_on: []
@@ -22,6 +22,23 @@ verification:
   updated_by: "CODER"
   note: "Устаревшее упоминание Stage 0 удалено из README; mock описан через его текущий служебный API и возможности."
   attempts: 0
+quality_review:
+  state: "pass"
+  updated_at: "2026-07-30T08:04:10.320Z"
+  updated_by: "EVALUATOR"
+  note: "README больше не содержит устаревшего утверждения о Stage 0 и корректно описывает актуальный служебный API mock-сервера."
+  evaluated_sha: "445468e1e29c2dd9dda6dd10c47afca46a098f7d"
+  blueprint_digest: "58c16d0e914a5692d8ffc9cddfc740f67b180b62e80cf4baded935fe215a31f0"
+  evidence_refs:
+    - ".agentplane/tasks/202607300803-4QH686/README.md"
+    - ".agentplane/tasks/202607300803-4QH686/quality/20260730-080410320-recovery-context/quality-report.json"
+    - ".agentplane/tasks/202607300803-4QH686/quality/20260730-080410320-recovery-context/evaluator-prompt.md"
+    - ".agentplane/tasks/202607300803-4QH686/quality/20260730-080410320-recovery-context/evaluator-opinion.md"
+    - ".agentplane/tasks/202607300803-4QH686/blueprint/resolved-snapshot.json"
+    - "pnpm run docs:check: 23 обязательных документа и все локальные ссылки прошли проверку"
+    - "pnpm exec prettier --check README.md; node .agentplane/policy/check-routing.mjs; ap doctor: pass"
+  findings:
+    - "Проверены все упоминания этапов: единственная пользовательская устаревшая формулировка находилась в README; исторический roadmap и имена миграций сохранены без изменений."
 commit: null
 comments:
   -
