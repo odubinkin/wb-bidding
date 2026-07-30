@@ -4,6 +4,7 @@ import path from 'node:path';
 const repositoryRoot = path.resolve(import.meta.dirname, '..');
 const requiredDocuments = [
   'README.md',
+  'docs/project-guide.md',
   'docs/architecture.md',
   'docs/modules.md',
   'docs/implementation-reference.md',
@@ -89,6 +90,21 @@ for (const relativePath of requiredDocuments) {
 const architecture = await readFile(path.join(repositoryRoot, 'docs/architecture.md'), 'utf8');
 const modules = await readFile(path.join(repositoryRoot, 'docs/modules.md'), 'utf8');
 const dataModel = await readFile(path.join(repositoryRoot, 'docs/data-model.md'), 'utf8');
+const projectGuide = await readFile(path.join(repositoryRoot, 'docs/project-guide.md'), 'utf8');
+for (const requiredHeading of [
+  '## Какую задачу решает система',
+  '## Главные понятия',
+  '## Сквозной пример',
+  '## В каком порядке читать документацию',
+]) {
+  if (!projectGuide.includes(requiredHeading)) {
+    failures.push(`docs/project-guide.md: отсутствует вводный раздел ${requiredHeading}`);
+  }
+}
+const readme = await readFile(path.join(repositoryRoot, 'README.md'), 'utf8');
+if (!readme.includes('[путеводитель по проекту](docs/project-guide.md)')) {
+  failures.push('README.md: нет ссылки на вводный путеводитель');
+}
 for (const sourceDirectory of ['apps', 'packages']) {
   for (const relativePath of await listTypeScriptSources(
     path.join(repositoryRoot, sourceDirectory),
