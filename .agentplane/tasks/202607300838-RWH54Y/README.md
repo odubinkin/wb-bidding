@@ -4,7 +4,7 @@ title: "Explain every data model table and column"
 status: "DOING"
 priority: "high"
 owner: "CODER"
-revision: 9
+revision: 10
 origin:
   system: "manual"
 depends_on: []
@@ -22,6 +22,24 @@ verification:
   updated_by: "CODER"
   note: "Модель данных дополнена построчным справочником: назначение, источник, жизненный цикл и применение объяснены для всех таблиц и хранимых Prisma-колонок."
   attempts: 0
+quality_review:
+  state: "pass"
+  updated_at: "2026-07-30T08:42:41.093Z"
+  updated_by: "EVALUATOR"
+  note: "Документация модели данных теперь объясняет практическое назначение всех 28 таблиц и каждого хранимого Prisma-столбца, не расходясь со схемой."
+  evaluated_sha: "b1ee1802b678f6a58c6e326cece89e0a4012eaab"
+  blueprint_digest: "e50c6e89ef2cae82a795c8cc937dd171bcc65c9f4a2e9538b30794184244526e"
+  evidence_refs:
+    - ".agentplane/tasks/202607300838-RWH54Y/README.md"
+    - ".agentplane/tasks/202607300838-RWH54Y/quality/20260730-084241093-recovery-context/quality-report.json"
+    - ".agentplane/tasks/202607300838-RWH54Y/quality/20260730-084241093-recovery-context/evaluator-prompt.md"
+    - ".agentplane/tasks/202607300838-RWH54Y/quality/20260730-084241093-recovery-context/evaluator-opinion.md"
+    - ".agentplane/tasks/202607300838-RWH54Y/blueprint/resolved-snapshot.json"
+    - "Проверка по prisma/schema.prisma: все хранимые колонки упомянуты в справочнике, 28 моделей"
+    - "pnpm run docs:check; pnpm exec prettier --check docs/data-model.md scripts/verify-docs.mjs; node .agentplane/policy/check-routing.mjs; ap doctor: pass"
+  findings:
+    - "Добавлен построчный справочник: бизнес-роль таблицы, источник/владелец, жизненный цикл и назначение колонок охватывают binding, sync, evidence, economics, decision, queue, write, audit и rate limit."
+    - "Проверка документации требует подробный справочник и наличие назначения всех Prisma-моделей."
 commit: null
 comments:
   -
