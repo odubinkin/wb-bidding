@@ -95,8 +95,9 @@ docker compose down
 docker compose -f docker-compose.mock-only.yml up --build
 ```
 
-Mock не использует PostgreSQL или внешнее хранилище. На этапе Stage 0 доступен каркас
-служебного API. Реализованы все методы WB из таблицы 4.2 ТЗ, виртуальные часы, delayed
+Mock не использует PostgreSQL или внешнее хранилище. Он предоставляет служебный API для
+управления и наблюдения за тестовыми сценариями. Реализованы все методы WB из таблицы 4.2 ТЗ,
+виртуальные часы, delayed
 visibility ставок, fault injection, rate-limit headers и журнал синтетических
 request/response. Для WB-совместимых путей используйте только тестовый заголовок
 `Authorization: mock-test-token`.
