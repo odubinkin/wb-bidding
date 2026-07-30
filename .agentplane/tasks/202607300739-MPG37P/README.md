@@ -1,10 +1,11 @@
 ---
 id: "202607300739-MPG37P"
 title: "Rewrite documentation for newcomers"
-status: "DOING"
+result_summary: "Документация переработана для внешнего читателя: добавлены бизнес-контекст, словарь, сквозной пример и связанный маршрут к деталям реализации."
+status: "DONE"
 priority: "high"
 owner: "CODER"
-revision: 11
+revision: 13
 origin:
   system: "manual"
 depends_on: []
@@ -18,7 +19,7 @@ plan_approval:
   note: null
 verification:
   state: "ok"
-  updated_at: "2026-07-30T07:45:35.675Z"
+  updated_at: "2026-07-30T07:46:01.438Z"
   updated_by: "CODER"
   note: "Документация переработана для внешнего читателя: добавлены бизнес-контекст, словарь, сквозной пример и связанный маршрут к деталям реализации."
   attempts: 0
@@ -41,11 +42,16 @@ quality_review:
   findings:
     - "README направляет нового читателя в docs/project-guide.md; путеводитель раскрывает бизнес-задачу, границы, режимы, термины, сквозной пример и ролевые маршруты чтения."
     - "Каждый профильный документ дополнен русскоязычным вводным контекстом и ссылкой на исходные определения; технические идентификаторы сохранены на английском."
-commit: null
+commit:
+  hash: "badeede9f9902dc77ec43572fe8953e5f37b441e"
+  message: "📝 MPG37P docs: вводный маршрут документации"
 comments:
   -
     author: "CODER"
     body: "Start: переписываю документацию для внешнего читателя по утверждённому маршруту, без изменения поведения системы."
+  -
+    author: "CODER"
+    body: "Verified: документация ведёт читателя от предметной задачи и терминов к архитектуре, реализации, эксплуатации и evidence; все локальные проверки пройдены."
 events:
   -
     type: "status"
@@ -66,8 +72,21 @@ events:
     author: "CODER"
     state: "ok"
     note: "Документация переработана для внешнего читателя: добавлены бизнес-контекст, словарь, сквозной пример и связанный маршрут к деталям реализации."
+  -
+    type: "verify"
+    at: "2026-07-30T07:46:01.438Z"
+    author: "CODER"
+    state: "ok"
+    note: "Документация переработана для внешнего читателя: добавлены бизнес-контекст, словарь, сквозной пример и связанный маршрут к деталям реализации."
+  -
+    type: "status"
+    at: "2026-07-30T07:46:01.541Z"
+    author: "CODER"
+    from: "DOING"
+    to: "DONE"
+    note: "Verified: документация ведёт читателя от предметной задачи и терминов к архитектуре, реализации, эксплуатации и evidence; все локальные проверки пройдены."
 doc_version: 3
-doc_updated_at: "2026-07-30T07:45:35.734Z"
+doc_updated_at: "2026-07-30T07:46:01.542Z"
 doc_updated_by: "CODER"
 description: "Reorganize and expand Russian project documentation so an external reader can understand the business context, terms, architecture, design decisions, and operational behavior progressively."
 sections:
@@ -129,6 +148,36 @@ sections:
     Attempts: 0
 
     VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-30T07:44:59.972Z, excerpt_hash=sha256:04509560ce6d14913ffa2259e9a10ce9aedf080775f1c6eb13fcfc3c19ccdcf8
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607300739-MPG37P/blueprint/resolved-snapshot.json
+    - old_digest: f497f46e6aa0d166ad271cc5aa2d610a69dd3eb0f5c5977cfd4c7123e31e2dc4
+    - current_digest: f497f46e6aa0d166ad271cc5aa2d610a69dd3eb0f5c5977cfd4c7123e31e2dc4
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202607300739-MPG37P
+
+    DecisionContextRef:
+    - operator_action: stop
+    - can_execute_now: false
+    - safe_command: none
+    - diagnostic_command: agentplane task next-action 202607300739-MPG37P --explain
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: false
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: unsafe_shell_chain_route
+
+    ### 2026-07-30T07:46:01.438Z — VERIFY — ok
+
+    By: CODER
+
+    Note: Документация переработана для внешнего читателя: добавлены бизнес-контекст, словарь, сквозной пример и связанный маршрут к деталям реализации.
+    Attempts: 0
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-30T07:45:35.734Z, excerpt_hash=sha256:04509560ce6d14913ffa2259e9a10ce9aedf080775f1c6eb13fcfc3c19ccdcf8
 
     Details:
 
@@ -229,6 +278,36 @@ Note: Документация переработана для внешнего 
 Attempts: 0
 
 VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-30T07:44:59.972Z, excerpt_hash=sha256:04509560ce6d14913ffa2259e9a10ce9aedf080775f1c6eb13fcfc3c19ccdcf8
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607300739-MPG37P/blueprint/resolved-snapshot.json
+- old_digest: f497f46e6aa0d166ad271cc5aa2d610a69dd3eb0f5c5977cfd4c7123e31e2dc4
+- current_digest: f497f46e6aa0d166ad271cc5aa2d610a69dd3eb0f5c5977cfd4c7123e31e2dc4
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202607300739-MPG37P
+
+DecisionContextRef:
+- operator_action: stop
+- can_execute_now: false
+- safe_command: none
+- diagnostic_command: agentplane task next-action 202607300739-MPG37P --explain
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: false
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: unsafe_shell_chain_route
+
+### 2026-07-30T07:46:01.438Z — VERIFY — ok
+
+By: CODER
+
+Note: Документация переработана для внешнего читателя: добавлены бизнес-контекст, словарь, сквозной пример и связанный маршрут к деталям реализации.
+Attempts: 0
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-30T07:45:35.734Z, excerpt_hash=sha256:04509560ce6d14913ffa2259e9a10ce9aedf080775f1c6eb13fcfc3c19ccdcf8
 
 Details:
 
