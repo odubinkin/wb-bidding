@@ -1,10 +1,11 @@
 ---
 id: "202607300803-4QH686"
 title: "Remove stale Stage 0 reference from README"
-status: "DOING"
+result_summary: "Устаревшее упоминание Stage 0 удалено из README; mock описан через актуальный служебный API."
+status: "DONE"
 priority: "low"
 owner: "CODER"
-revision: 10
+revision: 12
 origin:
   system: "manual"
 depends_on: []
@@ -18,9 +19,9 @@ plan_approval:
   note: null
 verification:
   state: "ok"
-  updated_at: "2026-07-30T08:03:59.929Z"
+  updated_at: "2026-07-30T08:04:16.846Z"
   updated_by: "CODER"
-  note: "Устаревшее упоминание Stage 0 удалено из README; mock описан через его текущий служебный API и возможности."
+  note: "Устаревшее упоминание Stage 0 удалено из README; mock описан через актуальный служебный API."
   attempts: 0
 quality_review:
   state: "pass"
@@ -39,11 +40,16 @@ quality_review:
     - "pnpm exec prettier --check README.md; node .agentplane/policy/check-routing.mjs; ap doctor: pass"
   findings:
     - "Проверены все упоминания этапов: единственная пользовательская устаревшая формулировка находилась в README; исторический roadmap и имена миграций сохранены без изменений."
-commit: null
+commit:
+  hash: "445468e1e29c2dd9dda6dd10c47afca46a098f7d"
+  message: "📝 4QH686 docs: убрать устаревший Stage 0"
 comments:
   -
     author: "CODER"
     body: "Start: исправляю единственное устаревшее упоминание Stage 0 в README без изменения исторического roadmap."
+  -
+    author: "CODER"
+    body: "Verified: формулировка README соответствует текущему состоянию mock-сервера, проверки документации и policy пройдены."
 events:
   -
     type: "status"
@@ -58,8 +64,21 @@ events:
     author: "CODER"
     state: "ok"
     note: "Устаревшее упоминание Stage 0 удалено из README; mock описан через его текущий служебный API и возможности."
+  -
+    type: "verify"
+    at: "2026-07-30T08:04:16.846Z"
+    author: "CODER"
+    state: "ok"
+    note: "Устаревшее упоминание Stage 0 удалено из README; mock описан через актуальный служебный API."
+  -
+    type: "status"
+    at: "2026-07-30T08:04:16.949Z"
+    author: "CODER"
+    from: "DOING"
+    to: "DONE"
+    note: "Verified: формулировка README соответствует текущему состоянию mock-сервера, проверки документации и policy пройдены."
 doc_version: 3
-doc_updated_at: "2026-07-30T08:03:59.987Z"
+doc_updated_at: "2026-07-30T08:04:16.949Z"
 doc_updated_by: "CODER"
 description: "Replace the obsolete Stage 0 wording in the mock-server description with an accurate statement of the current service API."
 sections:
@@ -109,6 +128,36 @@ sections:
     - repeat_allowed: true
     - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
     - risks: none
+
+    ### 2026-07-30T08:04:16.846Z — VERIFY — ok
+
+    By: CODER
+
+    Note: Устаревшее упоминание Stage 0 удалено из README; mock описан через актуальный служебный API.
+    Attempts: 0
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-30T08:03:59.987Z, excerpt_hash=sha256:c03207addb102b36d140d0407b295ec6e72a871ea37b3675e003e48e94b21f3c
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607300803-4QH686/blueprint/resolved-snapshot.json
+    - old_digest: 58c16d0e914a5692d8ffc9cddfc740f67b180b62e80cf4baded935fe215a31f0
+    - current_digest: 58c16d0e914a5692d8ffc9cddfc740f67b180b62e80cf4baded935fe215a31f0
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202607300803-4QH686
+
+    DecisionContextRef:
+    - operator_action: stop
+    - can_execute_now: false
+    - safe_command: none
+    - diagnostic_command: agentplane task next-action 202607300803-4QH686 --explain
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: false
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: unsafe_shell_chain_route
 
     <!-- END VERIFICATION RESULTS -->
   Rollback Plan: "Откатить только коммиты этой задачи; будет восстановлена прежняя строка README. Рабочий код и данные не затрагиваются."
@@ -176,6 +225,36 @@ DecisionContextRef:
 - repeat_allowed: true
 - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
 - risks: none
+
+### 2026-07-30T08:04:16.846Z — VERIFY — ok
+
+By: CODER
+
+Note: Устаревшее упоминание Stage 0 удалено из README; mock описан через актуальный служебный API.
+Attempts: 0
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-30T08:03:59.987Z, excerpt_hash=sha256:c03207addb102b36d140d0407b295ec6e72a871ea37b3675e003e48e94b21f3c
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607300803-4QH686/blueprint/resolved-snapshot.json
+- old_digest: 58c16d0e914a5692d8ffc9cddfc740f67b180b62e80cf4baded935fe215a31f0
+- current_digest: 58c16d0e914a5692d8ffc9cddfc740f67b180b62e80cf4baded935fe215a31f0
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202607300803-4QH686
+
+DecisionContextRef:
+- operator_action: stop
+- can_execute_now: false
+- safe_command: none
+- diagnostic_command: agentplane task next-action 202607300803-4QH686 --explain
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: false
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: unsafe_shell_chain_route
 
 <!-- END VERIFICATION RESULTS -->
 
