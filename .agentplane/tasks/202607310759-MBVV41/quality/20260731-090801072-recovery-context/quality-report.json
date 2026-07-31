@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "task_id": "202607310759-MBVV41",
+  "evaluator_id": "recovery-context",
+  "evaluator_profile": "EVALUATOR",
+  "generated_at": "2026-07-31T09:08:01.072Z",
+  "verdict": "pass",
+  "summary": "The umbrella task is correctly represented as a no-op closure after its approved scope was split into seven independently traceable tasks.",
+  "evaluated_sha": "813e48c86e07d62d738cb3e52b3a6f16a4e10c8b",
+  "blueprint_digest": "c656347d6f6d1df6f34180d35c981a714cefce2dad4f2401e93ec557d1096ac1",
+  "findings": [
+    "No implementation paths are attributed to the umbrella task, preventing duplicate ownership and mixed commits.",
+    "The task README records the seven replacement task IDs and the closure artifact is committed separately."
+  ],
+  "evidence_refs": [
+    ".agentplane/tasks/202607310759-MBVV41/README.md",
+    "commit:2e0eef817d8e",
+    "task-local no-op verification commit:813e48c86e07"
+  ],
+  "missing_tests": [],
+  "hidden_assumptions": [],
+  "residual_risks": [
+    "The remaining replacement task RK1D6P must still be completed under its own implementation and closure commits."
+  ]
+}
