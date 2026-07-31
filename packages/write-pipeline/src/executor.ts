@@ -141,10 +141,10 @@ export class WriteExecutor {
       reservation.release();
       if (
         error instanceof Error &&
-        error.message === 'PREWRITE_STATE_STALE' &&
+        (error.message === 'PREWRITE_STATE_STALE' || error.message === 'DECISION_SUPERSEDED') &&
         prepared !== undefined
       ) {
-        await this.repository.rejectPreparedNoDispatch(prepared, workerId, 'PREWRITE_STATE_STALE');
+        await this.repository.rejectPreparedNoDispatch(prepared, workerId, error.message);
         return claimed.length;
       }
       throw error;

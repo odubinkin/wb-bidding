@@ -400,6 +400,72 @@ describeWithDatabase('write pipeline PostgreSQL invariants', () => {
     });
   });
 
+  it('rejects a leased decision superseded before the DISPATCHING commit boundary', async () => {
+    const fixture = await createFixture(pool, 'superseded-before-dispatch');
+    const claimed = await claimFixtures(
+      pool,
+      repository,
+      'worker-superseded-before-dispatch',
+      fixture.decisionId,
+    );
+    const item = claimed.find((candidate) => candidate.decisionId === fixture.decisionId);
+    expect(item).toBeDefined();
+    if (item === undefined) return;
+    const prepared = await repository.prepare({
+      endpointKey: 'cardBidsWrite',
+      items: [{ item, live: liveState(1000n, 'source:before-superseded') }],
+      method: 'PATCH',
+      reconciliationDeadlineMs: 60_000,
+      visibilityDelayMs: 1,
+      workerId: 'worker-superseded-before-dispatch',
+    });
+    const newerDecisionId = randomUUID();
+    await pool.query(
+      `INSERT INTO "BidDecision"
+         ("id", "targetId", "action", "currentBidMinor", "proposedBidMinor",
+          "boundedBidMinor", "strategyReasonCode", "outcomeReasonCode", "guardrailCodes",
+          "explanation", "metricSnapshotId", "policyVersion", "algorithmVersion",
+          "decisionInputChecksum", "createdAt")
+       SELECT $2, "targetId", 'NO_CHANGE', "currentBidMinor", "currentBidMinor",
+              "currentBidMinor", 'NO_CHANGE', 'NO_CHANGE', ARRAY[]::text[],
+              '{}'::jsonb, "metricSnapshotId", "policyVersion", "algorithmVersion", $3,
+              "createdAt" + INTERVAL '1 second'
+         FROM "BidDecision"
+        WHERE "id" = $1`,
+      [fixture.decisionId, newerDecisionId, checksumFor(`decision-${newerDecisionId}`)],
+    );
+
+    await expect(
+      repository.commitDispatch(prepared, 'worker-superseded-before-dispatch', 1, 60_000, 10_000),
+    ).rejects.toThrow('DECISION_SUPERSEDED');
+    await repository.rejectPreparedNoDispatch(
+      prepared,
+      'worker-superseded-before-dispatch',
+      'DECISION_SUPERSEDED',
+    );
+
+    const state = await pool.query<{
+      attemptStatus: string;
+      errorCode: string | null;
+      manualRetryBlocked: boolean;
+      queueStatus: string;
+    }>(
+      `SELECT a."status"::text AS "attemptStatus", q."status"::text AS "queueStatus",
+              q."lastErrorCode" AS "errorCode", q."manualRetryBlocked"
+         FROM "WbWriteAttempt" a
+         JOIN "WbWriteAttemptItem" i ON i."attemptId" = a."id"
+         JOIN "DecisionQueueItem" q ON q."decisionId" = i."decisionId"
+        WHERE a."id" = $1`,
+      [prepared.attemptId],
+    );
+    expect(state.rows[0]).toEqual({
+      attemptStatus: 'REJECTED',
+      errorCode: 'DECISION_SUPERSEDED',
+      manualRetryBlocked: true,
+      queueStatus: 'SUPERSEDED',
+    });
+  });
+
   it('maps partial batch outcomes by request index without losing item audit', async () => {
     const acceptedFixture = await createFixture(pool, 'partial-accepted');
     const rejectedFixture = await createFixture(pool, 'partial-rejected');

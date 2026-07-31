@@ -261,6 +261,33 @@ export class WritePipelineRepository {
           WHERE i."attemptId" = $1 FOR UPDATE OF i`,
         [prepared.attemptId],
       );
+      const targetIds = [...new Set(itemRows.rows.map((row) => row.targetId))].sort();
+      for (const targetId of targetIds) {
+        await client.query("SELECT pg_advisory_xact_lock(hashtextextended('decision:' || $1, 0))", [
+          targetId,
+        ]);
+      }
+      const superseded = await client.query<{ superseded: boolean }>(
+        `SELECT EXISTS (
+           SELECT 1
+             FROM "WbWriteAttemptItem" i
+             JOIN "BidDecision" current_decision ON current_decision."id" = i."decisionId"
+             JOIN "BidDecision" newer
+               ON newer."targetId" = current_decision."targetId"
+              AND (
+                newer."createdAt" > current_decision."createdAt"
+                OR (
+                  newer."createdAt" = current_decision."createdAt"
+                  AND newer."id" > current_decision."id"
+                )
+              )
+            WHERE i."attemptId" = $1
+         ) AS "superseded"`,
+        [prepared.attemptId],
+      );
+      if (superseded.rows[0]?.superseded === true) {
+        throw new Error('DECISION_SUPERSEDED');
+      }
       await assertAutomationAllows(
         client,
         itemRows.rows.map((row) => ({
@@ -341,9 +368,16 @@ export class WritePipelineRepository {
       );
       const queue = await client.query(
         `UPDATE "DecisionQueueItem" q
-            SET "status" = 'RETRY_WAIT', "availableAt" = NOW(),
+            SET "status" = CASE
+                  WHEN $3 = 'DECISION_SUPERSEDED' THEN 'SUPERSEDED'::"DecisionQueueStatus"
+                  ELSE 'RETRY_WAIT'::"DecisionQueueStatus"
+                END,
+                "availableAt" = CASE WHEN $3 = 'DECISION_SUPERSEDED'
+                  THEN q."availableAt" ELSE NOW() END,
                 "leaseOwner" = NULL, "leaseUntil" = NULL,
-                "failureClassification" = 'SAFE_NO_DISPATCH',
+                "failureClassification" = CASE WHEN $3 = 'DECISION_SUPERSEDED'
+                  THEN 'SUPERSEDED' ELSE 'SAFE_NO_DISPATCH' END,
+                "manualRetryBlocked" = $3 = 'DECISION_SUPERSEDED',
                 "lastErrorCode" = $3, "version" = q."version" + 1
            FROM "WbWriteAttemptItem" i
           WHERE i."attemptId" = $1 AND q."decisionId" = i."decisionId"
