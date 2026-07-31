@@ -18,6 +18,7 @@ import {
 } from './runtime.providers.js';
 import { RuntimeSafetyState } from './runtime-state.js';
 import { RuntimeClockService } from './runtime-clock.service.js';
+import { PROCESS_WORKER_IDENTITY, releaseOwnedSchedulerLeases } from './worker-identity.js';
 import { WriteRuntimeService } from './write-runtime.service.js';
 import type { AppConfiguration } from '@wb-bidder/config';
 import {
@@ -297,18 +298,7 @@ export class SchedulerService implements BeforeApplicationShutdown {
       }),
     ]);
     await this.writeRuntime.releaseLeases();
-    await this.pool.query(
-      `UPDATE "ProductEconomicsImport"
-          SET "status" = 'QUEUED', "leaseOwner" = NULL, "leaseUntil" = NULL
-        WHERE "status" = 'PROCESSING' AND "leaseOwner" LIKE $1`,
-      [`${this.workerPrefix()}%`],
-    );
-    await this.pool.query(
-      `UPDATE "ManualJob"
-          SET "status" = 'QUEUED', "leaseOwner" = NULL, "leaseUntil" = NULL
-        WHERE "status" = 'RUNNING' AND "leaseOwner" LIKE $1`,
-      [`${this.workerPrefix()}%`],
-    );
+    await releaseOwnedSchedulerLeases(this.pool, PROCESS_WORKER_IDENTITY);
   }
 
   /**
@@ -494,16 +484,7 @@ export class SchedulerService implements BeforeApplicationShutdown {
    * @returns Stable worker ID.
    */
   private workerId(suffix: string): string {
-    return `${this.workerPrefix()}:${suffix}`;
-  }
-
-  /**
-   * Returns the stable prefix shared by this process's leases.
-   *
-   * @returns Prefix.
-   */
-  private workerPrefix(): string {
-    return `pid:${String(process.pid)}`;
+    return PROCESS_WORKER_IDENTITY.owner(suffix);
   }
 }
 

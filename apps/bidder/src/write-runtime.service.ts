@@ -1,5 +1,4 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { hostname } from 'node:os';
 
 import { APP_CONFIGURATION } from './application-config.js';
 import { ObservabilityService } from './observability.service.js';
@@ -9,6 +8,7 @@ import {
   CLUSTER_BID_GATEWAY,
   WRITE_PIPELINE_REPOSITORY,
 } from './runtime.providers.js';
+import { PROCESS_WORKER_IDENTITY } from './worker-identity.js';
 import type { AppConfiguration } from '@wb-bidder/config';
 import {
   WbCardBidGateway,
@@ -62,7 +62,6 @@ export class WriteRuntimeService {
       reconciliationDeadlineMs: configuration.writePipeline.verificationTimeoutMs,
       visibilityDelayMs: configuration.writePipeline.verificationInitialDelayMs,
     };
-    const processKey = `${hostname()}:${String(process.pid)}`;
     this.executors = Object.freeze([
       Object.freeze({
         endpointKey: 'cardBidsWrite' as const,
@@ -70,7 +69,7 @@ export class WriteRuntimeService {
           ...common,
           endpointKey: 'cardBidsWrite',
         }),
-        workerId: `${processKey}:card-writer`,
+        workerId: PROCESS_WORKER_IDENTITY.owner('card-writer'),
       }),
       Object.freeze({
         endpointKey: 'clusterWriteBids' as const,
@@ -78,7 +77,7 @@ export class WriteRuntimeService {
           ...common,
           endpointKey: 'clusterWriteBids',
         }),
-        workerId: `${processKey}:cluster-set-writer`,
+        workerId: PROCESS_WORKER_IDENTITY.owner('cluster-set-writer'),
       }),
       Object.freeze({
         endpointKey: 'clusterDeleteBids' as const,
@@ -86,7 +85,7 @@ export class WriteRuntimeService {
           ...common,
           endpointKey: 'clusterDeleteBids',
         }),
-        workerId: `${processKey}:cluster-delete-writer`,
+        workerId: PROCESS_WORKER_IDENTITY.owner('cluster-delete-writer'),
       }),
     ]);
   }
