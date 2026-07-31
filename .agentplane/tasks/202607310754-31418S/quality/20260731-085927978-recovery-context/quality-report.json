@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "task_id": "202607310754-31418S",
+  "evaluator_id": "recovery-context",
+  "evaluator_profile": "EVALUATOR",
+  "generated_at": "2026-07-31T08:59:27.978Z",
+  "verdict": "pass",
+  "summary": "The landed state contains the verified canonical data-model reference without duplicate table descriptions.",
+  "evaluated_sha": null,
+  "blueprint_digest": "a7d87495e8fb3332ce0b914f6a923c45f4f725d29cec177e576226727457f654",
+  "findings": [
+    "PASS: 28 model headings are unique and all 416 stored scalar columns have individual purpose-and-usage rows.",
+    "PASS: documentation commits 9a87a78104f7 and f2ac30cf6432 are present in the evaluated landed state and all required checks passed."
+  ],
+  "evidence_refs": [
+    ".agentplane/tasks/202607310754-31418S/README.md",
+    "commit:067444d10b96d9c5bd4540a372660ca421e641f5",
+    "docs/data-model.md",
+    "prisma/schema.prisma",
+    "implementation commits: 9a87a78104f7, f2ac30cf6432",
+    "models=28; scalarColumns=416; duplicateModelHeadings=0; formatting/docs/routing/doctor/diff checks passed"
+  ],
+  "missing_tests": [],
+  "hidden_assumptions": [],
+  "residual_risks": [
+    "Future schema changes require rerunning the coverage audit."
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "task_id": "202607310754-31418S",
+  "evaluator_id": "recovery-context",
+  "evaluator_profile": "EVALUATOR",
+  "generated_at": "2026-07-31T08:57:32.726Z",
+  "verdict": "pass",
+  "summary": "The final data-model document at f2ac30cf6432 provides one canonical implementation-grounded reference for every current table and stored column.",
+  "evaluated_sha": null,
+  "blueprint_digest": "a7d87495e8fb3332ce0b914f6a923c45f4f725d29cec177e576226727457f654",
+  "findings": [
+    "PASS: all 28 Prisma models have exactly one table heading and all 416 stored scalar columns have exactly one individual purpose-and-usage row.",
+    "PASS: the duplicate short catalog is absent while the introduction, ER diagram, enums, lifecycle, implementation tracing, and detailed reference remain coherent.",
+    "PASS: implementation commit f2ac30cf6432 is scoped to docs/data-model.md and follows the earlier exhaustive-reference commit 9a87a78104f7."
+  ],
+  "evidence_refs": [
+    ".agentplane/tasks/202607310754-31418S/README.md",
+    "docs/data-model.md",
+    "prisma/schema.prisma",
+    "Data-model coverage: models=28, scalarColumns=416, duplicateModelHeadings=0, result=PASS",
+    "pnpm exec prettier --check docs/data-model.md; pnpm run docs:check; node .agentplane/policy/check-routing.mjs; ap doctor; git diff --check f2ac30cf6432^ f2ac30cf6432"
+  ],
+  "missing_tests": [],
+  "hidden_assumptions": [],
+  "residual_risks": [
+    "Future schema changes require rerunning the same coverage check to keep the prose synchronized."
+  ]
+}
