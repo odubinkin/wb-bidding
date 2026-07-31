@@ -7,6 +7,7 @@ import { APP_CONFIGURATION } from './application-config.js';
 import { DATABASE_POOL } from './database.js';
 import { DecisionJobService } from './decision-job.service.js';
 import { ExperimentRuntimeService } from './experiment-runtime.service.js';
+import { claimManualJob } from './manual-job-lease.js';
 import { ObservabilityService } from './observability.service.js';
 import {
   DATA_SYNC_REPOSITORY,
@@ -437,7 +438,7 @@ export class SchedulerService implements BeforeApplicationShutdown {
    */
   private async processManualJob(): Promise<void> {
     await this.runLocked('MANUAL_JOB', 10 * 60_000, async ({ signal }) => {
-      const job = await this.claimManualJob();
+      const job = await claimManualJob(this.pool, this.workerId('manual-job'));
       if (job === null) return null;
       try {
         const scope = parseManualScope(job.scope);
@@ -445,67 +446,26 @@ export class SchedulerService implements BeforeApplicationShutdown {
           job.type === 'RECALCULATE'
             ? await this.decisionJob.run(signal, scope)
             : await this.runManualResync(scope);
-        await this.pool.query(
+        const completed = await this.pool.query(
           `UPDATE "ManualJob"
               SET "status" = 'SUCCEEDED', "finishedAt" = NOW(),
                   "leaseOwner" = NULL, "leaseUntil" = NULL, "result" = $2::jsonb
-            WHERE "id" = $1`,
-          [job.id, JSON.stringify(result)],
+            WHERE "id" = $1 AND "status" = 'RUNNING' AND "leaseOwner" = $3`,
+          [job.id, JSON.stringify(result), job.leaseOwner],
         );
+        if (completed.rowCount !== 1) throw new Error('MANUAL_JOB_LEASE_LOST');
       } catch (error: unknown) {
-        await this.pool.query(
+        const failed = await this.pool.query(
           `UPDATE "ManualJob"
               SET "status" = 'FAILED', "finishedAt" = NOW(),
                   "leaseOwner" = NULL, "leaseUntil" = NULL, "errorCode" = $2
-            WHERE "id" = $1`,
-          [job.id, safeErrorCode(error)],
+            WHERE "id" = $1 AND "status" = 'RUNNING' AND "leaseOwner" = $3`,
+          [job.id, safeErrorCode(error), job.leaseOwner],
         );
+        if (failed.rowCount !== 1) throw new Error('MANUAL_JOB_LEASE_LOST');
       }
       return job.id;
     });
-  }
-
-  /**
-   * Claims one queued manual job.
-   *
-   * @returns Claimed job or null.
-   */
-  private async claimManualJob(): Promise<{
-    readonly id: string;
-    readonly scope: unknown;
-    readonly type: string;
-  } | null> {
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-      const selected = await client.query<{ id: string; scope: unknown; type: string }>(
-        `SELECT "id", "type", "scope"
-           FROM "ManualJob"
-          WHERE "status" = 'QUEUED'
-          ORDER BY "requestedAt"
-          FOR UPDATE SKIP LOCKED
-          LIMIT 1`,
-      );
-      const job = selected.rows[0];
-      if (job === undefined) {
-        await client.query('COMMIT');
-        return null;
-      }
-      await client.query(
-        `UPDATE "ManualJob"
-            SET "status" = 'RUNNING', "startedAt" = NOW(),
-                "leaseOwner" = $2, "leaseUntil" = NOW() + INTERVAL '10 minutes'
-          WHERE "id" = $1`,
-        [job.id, this.workerId('manual-job')],
-      );
-      await client.query('COMMIT');
-      return Object.freeze(job);
-    } catch (error: unknown) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
   }
 
   /**

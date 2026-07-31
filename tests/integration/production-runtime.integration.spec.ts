@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { ExperimentRuntimeService } from '../../apps/bidder/src/experiment-runtime.service.js';
 import { DecisionJobService } from '../../apps/bidder/src/decision-job.service.js';
+import { claimManualJob } from '../../apps/bidder/src/manual-job-lease.js';
 import { ObservabilityService } from '../../apps/bidder/src/observability.service.js';
 import { RuntimeSafetyState } from '../../apps/bidder/src/runtime-state.js';
 import { RuntimeClockService } from '../../apps/bidder/src/runtime-clock.service.js';
@@ -239,6 +240,54 @@ describeWithDatabase('production runtime PostgreSQL lifecycle', () => {
       );
       expect(statusRows).toHaveLength(expectedCount);
     }
+  });
+
+  it('claims expired manual jobs without stealing an active lease', async () => {
+    const expiredId = randomUUID();
+    const queuedId = randomUUID();
+    const activeId = randomUUID();
+    await pool.query(
+      `INSERT INTO "ManualJob"
+         ("id", "type", "status", "scope", "requestedAt", "requestedBy", "correlationId",
+          "leaseOwner", "leaseUntil", "startedAt")
+       VALUES
+         ($1, 'RECALCULATE', 'RUNNING', '{}'::jsonb, NOW() - INTERVAL '3 minutes',
+          'ADMIN:test', $4, 'dead-worker', NOW() - INTERVAL '1 minute',
+          NOW() - INTERVAL '2 minutes'),
+         ($2, 'RESYNC', 'QUEUED', '{}'::jsonb, NOW() - INTERVAL '2 minutes',
+          'ADMIN:test', $5, NULL, NULL, NULL),
+         ($3, 'RECALCULATE', 'RUNNING', '{}'::jsonb, NOW() - INTERVAL '4 minutes',
+          'ADMIN:test', $6, 'active-worker', NOW() + INTERVAL '5 minutes',
+          NOW() - INTERVAL '3 minutes')`,
+      [expiredId, queuedId, activeId, randomUUID(), randomUUID(), randomUUID()],
+    );
+
+    await expect(claimManualJob(pool, 'recovery-worker')).resolves.toMatchObject({
+      id: expiredId,
+      leaseOwner: 'recovery-worker',
+      type: 'RECALCULATE',
+    });
+    await expect(claimManualJob(pool, 'queue-worker')).resolves.toMatchObject({
+      id: queuedId,
+      leaseOwner: 'queue-worker',
+      type: 'RESYNC',
+    });
+    await expect(claimManualJob(pool, 'idle-worker')).resolves.toBeNull();
+
+    const states = await pool.query<{ id: string; leaseOwner: string | null; status: string }>(
+      `SELECT "id", "status"::text, "leaseOwner"
+         FROM "ManualJob"
+        WHERE "id" = ANY($1::uuid[])
+        ORDER BY "id"`,
+      [[expiredId, queuedId, activeId]],
+    );
+    expect(
+      Object.fromEntries(states.rows.map((row) => [row.id, [row.status, row.leaseOwner]])),
+    ).toEqual({
+      [activeId]: ['RUNNING', 'active-worker'],
+      [expiredId]: ['RUNNING', 'recovery-worker'],
+      [queuedId]: ['RUNNING', 'queue-worker'],
+    });
   });
 });
 

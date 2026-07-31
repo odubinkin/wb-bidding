@@ -225,6 +225,108 @@ describeWithDatabase('Decision Engine PostgreSQL invariants', () => {
     expect(replay).toEqual({ created: false, importId: queued.importId });
   });
 
+  it('reclaims an expired import without duplicating completed row effects', async () => {
+    const changeReason = 'crash recovery';
+    const queued = await repository.enqueueEconomicsImport({
+      actor: 'ADMIN:recovery',
+      changeReason,
+      correlationId,
+      dryRun: false,
+      idempotencyKey: `recovery-${correlationId}`,
+      idempotencyScope: 'product-economics',
+      rows: [
+        {
+          contributionMinor: 800n,
+          effectiveFrom: new Date('2026-05-01T00:00:00.000Z'),
+          expectedCurrentVersion: 0n,
+          nmId: 127n,
+          rowId: 'replayed',
+        },
+        {
+          contributionMinor: 900n,
+          effectiveFrom: new Date('2026-05-01T00:00:00.000Z'),
+          expectedCurrentVersion: 0n,
+          nmId: 128n,
+          rowId: 'terminal',
+        },
+        {
+          contributionMinor: 1_000n,
+          effectiveFrom: new Date('2026-05-01T00:00:00.000Z'),
+          expectedCurrentVersion: 0n,
+          nmId: 129n,
+          rowId: 'pending',
+        },
+      ],
+    });
+    const replayed = await repository.createEconomicsVersion({
+      actor: 'ADMIN:recovery',
+      changeReason,
+      contributionMinor: 800n,
+      correlationId,
+      effectiveFrom: new Date('2026-05-01T00:00:00.000Z'),
+      expectedCurrentVersion: 0n,
+      mutationKey: `import:${queued.importId}:replayed`,
+      nmId: 127n,
+      source: 'IMPORT',
+    });
+    const terminal = await repository.createEconomicsVersion({
+      actor: 'ADMIN:recovery',
+      changeReason,
+      contributionMinor: 900n,
+      correlationId,
+      effectiveFrom: new Date('2026-05-01T00:00:00.000Z'),
+      expectedCurrentVersion: 0n,
+      mutationKey: `import:${queued.importId}:terminal`,
+      nmId: 128n,
+      source: 'IMPORT',
+    });
+    await pool.query(
+      `UPDATE "ProductEconomicsImportItem"
+          SET "status" = 'SUCCEEDED', "createdVersion" = $2
+        WHERE "importId" = $1 AND "rowId" = 'terminal'`,
+      [queued.importId, terminal.version.toString()],
+    );
+    await pool.query(
+      `UPDATE "ProductEconomicsImport"
+          SET "status" = 'PROCESSING', "startedAt" = NOW() - INTERVAL '10 minutes',
+              "leaseOwner" = 'dead-worker', "leaseUntil" = NOW() - INTERVAL '1 minute',
+              "attemptCount" = 1
+        WHERE "id" = $1`,
+      [queued.importId],
+    );
+
+    await expect(repository.processNextEconomicsImport('recovery-worker')).resolves.toBe(
+      queued.importId,
+    );
+
+    const status = await pool.query<{
+      attemptCount: number;
+      failedItems: number;
+      processedItems: number;
+      status: string;
+      succeededItems: number;
+    }>(
+      `SELECT "status", "attemptCount", "processedItems", "succeededItems", "failedItems"
+         FROM "ProductEconomicsImport" WHERE "id" = $1`,
+      [queued.importId],
+    );
+    expect(status.rows[0]).toEqual({
+      attemptCount: 2,
+      failedItems: 0,
+      processedItems: 3,
+      status: 'COMPLETED',
+      succeededItems: 3,
+    });
+    const effects = await pool.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS "count"
+         FROM "ProductEconomics"
+        WHERE "mutationKey" LIKE $1`,
+      [`import:${queued.importId}:%`],
+    );
+    expect(effects.rows[0]?.count).toBe('3');
+    expect(replayed.created).toBe(true);
+  });
+
   it('resolves policy priority and persists deduplicated/superseding immutable decisions', async () => {
     const campaign = await pool.query<{ id: string }>(
       `SELECT "id" FROM "Campaign" WHERE "wbCampaignId" = 31001`,

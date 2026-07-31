@@ -296,55 +296,89 @@ export class DecisionRepository {
     }
     const items = await this.pool.query<ImportItemRow>(
       `SELECT "id", "rowId", "nmId", "normalizedInput", "expectedCurrentVersion"
-         FROM "ProductEconomicsImportItem" WHERE "importId" = $1 ORDER BY "rowId"`,
+         FROM "ProductEconomicsImportItem"
+        WHERE "importId" = $1 AND "status" IN ('PENDING', 'PROCESSING')
+        ORDER BY "rowId"`,
       [claimed.id],
     );
-    let validated = 0;
-    let succeeded = 0;
-    let failed = 0;
     for (const item of items.rows) {
+      const heartbeat = await this.pool.query(
+        `UPDATE "ProductEconomicsImport"
+            SET "leaseUntil" = clock_timestamp() + INTERVAL '5 minutes'
+          WHERE "id" = $1 AND "status" = 'PROCESSING' AND "leaseOwner" = $2`,
+        [claimed.id, claimed.workerId],
+      );
+      if (heartbeat.rowCount !== 1) throw new Error('ECONOMICS_IMPORT_LEASE_LOST');
+      const processing = await this.pool.query(
+        `UPDATE "ProductEconomicsImportItem"
+            SET "status" = 'PROCESSING', "errorCode" = NULL, "errorDetail" = NULL
+          WHERE "id" = $1 AND "status" IN ('PENDING', 'PROCESSING')`,
+        [item.id],
+      );
+      if (processing.rowCount !== 1) continue;
       try {
         const mutation = importMutation(claimed, item);
         validateEconomicsMutation(mutation);
         if (claimed.dryRun) {
-          validated += 1;
           await this.pool.query(
-            `UPDATE "ProductEconomicsImportItem" SET "status" = 'VALIDATED' WHERE "id" = $1`,
+            `UPDATE "ProductEconomicsImportItem"
+                SET "status" = 'VALIDATED'
+              WHERE "id" = $1 AND "status" = 'PROCESSING'`,
             [item.id],
           );
         } else {
           const created = await this.createEconomicsVersion(mutation);
-          succeeded += 1;
           await this.pool.query(
             `UPDATE "ProductEconomicsImportItem"
-                SET "status" = 'SUCCEEDED', "createdVersion" = $2 WHERE "id" = $1`,
+                SET "status" = 'SUCCEEDED', "createdVersion" = $2
+              WHERE "id" = $1 AND "status" = 'PROCESSING'`,
             [item.id, created.version.toString()],
           );
         }
       } catch (error: unknown) {
-        failed += 1;
         await this.pool.query(
           `UPDATE "ProductEconomicsImportItem"
-              SET "status" = 'FAILED', "errorCode" = $2, "errorDetail" = $3 WHERE "id" = $1`,
+              SET "status" = 'FAILED', "errorCode" = $2, "errorDetail" = $3
+            WHERE "id" = $1 AND "status" = 'PROCESSING'`,
           [item.id, classifyImportError(error), safeMessage(error)],
         );
       }
     }
-    await this.pool.query(
+    const counters = await this.pool.query<{
+      failed: string;
+      processed: string;
+      succeeded: string;
+      validated: string;
+    }>(
+      `SELECT
+         COUNT(*) FILTER (WHERE "status" IN ('VALIDATED', 'SUCCEEDED', 'FAILED'))::text
+           AS "processed",
+         COUNT(*) FILTER (WHERE "status" = 'VALIDATED')::text AS "validated",
+         COUNT(*) FILTER (WHERE "status" = 'SUCCEEDED')::text AS "succeeded",
+         COUNT(*) FILTER (WHERE "status" = 'FAILED')::text AS "failed"
+       FROM "ProductEconomicsImportItem"
+      WHERE "importId" = $1`,
+      [claimed.id],
+    );
+    const totals = counters.rows[0];
+    if (totals === undefined) throw new Error('ECONOMICS_IMPORT_COUNTERS_MISSING');
+    const completed = await this.pool.query(
       `UPDATE "ProductEconomicsImport"
           SET "status" = $2::"ImportStatus", "processedItems" = $3,
               "validatedItems" = $4, "succeededItems" = $5, "failedItems" = $6,
               "finishedAt" = NOW(), "leaseOwner" = NULL, "leaseUntil" = NULL
-        WHERE "id" = $1`,
+        WHERE "id" = $1 AND "status" = 'PROCESSING' AND "leaseOwner" = $7`,
       [
         claimed.id,
-        failed === 0 ? 'COMPLETED' : 'COMPLETED_WITH_ERRORS',
-        items.rows.length,
-        validated,
-        succeeded,
-        failed,
+        totals.failed === '0' ? 'COMPLETED' : 'COMPLETED_WITH_ERRORS',
+        totals.processed,
+        totals.validated,
+        totals.succeeded,
+        totals.failed,
+        claimed.workerId,
       ],
     );
+    if (completed.rowCount !== 1) throw new Error('ECONOMICS_IMPORT_LEASE_LOST');
     return claimed.id;
   }
 
@@ -769,7 +803,12 @@ export class DecisionRepository {
         id: string;
       }>(
         `SELECT "id", "dryRun", "createdByActor", "correlationId", "changeReason"
-           FROM "ProductEconomicsImport" WHERE "status" = 'QUEUED'
+           FROM "ProductEconomicsImport"
+          WHERE "status" = 'QUEUED'
+             OR (
+               "status" = 'PROCESSING'
+               AND COALESCE("leaseUntil", '-infinity'::timestamptz) < clock_timestamp()
+             )
           ORDER BY "createdAt" FOR UPDATE SKIP LOCKED LIMIT 1`,
       );
       const row = selected.rows[0];
@@ -779,8 +818,10 @@ export class DecisionRepository {
       }
       await client.query(
         `UPDATE "ProductEconomicsImport"
-            SET "status" = 'PROCESSING', "startedAt" = NOW(), "leaseOwner" = $2,
-                "leaseUntil" = NOW() + INTERVAL '5 minutes', "attemptCount" = "attemptCount" + 1
+            SET "status" = 'PROCESSING', "startedAt" = COALESCE("startedAt", NOW()),
+                "finishedAt" = NULL, "leaseOwner" = $2,
+                "leaseUntil" = NOW() + INTERVAL '5 minutes',
+                "attemptCount" = "attemptCount" + 1
           WHERE "id" = $1`,
         [row.id, workerId],
       );
@@ -791,6 +832,7 @@ export class DecisionRepository {
         correlationId: row.correlationId,
         dryRun: row.dryRun,
         id: row.id,
+        workerId,
       });
     } catch (error: unknown) {
       await client.query('ROLLBACK');
@@ -807,6 +849,7 @@ interface ClaimedImport {
   readonly correlationId: string;
   readonly dryRun: boolean;
   readonly id: string;
+  readonly workerId: string;
 }
 
 interface ImportItemRow {
