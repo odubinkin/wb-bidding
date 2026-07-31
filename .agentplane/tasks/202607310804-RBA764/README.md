@@ -1,10 +1,11 @@
 ---
 id: "202607310804-RBA764"
 title: "Deduplicate concurrent manual job creation"
-status: "DOING"
+result_summary: "Deduplicated concurrent manual-job creation and returned the actual state of existing active work."
+status: "DONE"
 priority: "high"
 owner: "CODER"
-revision: 9
+revision: 11
 origin:
   system: "manual"
 depends_on: []
@@ -28,11 +29,38 @@ verification:
   updated_by: "CODER"
   note: "Manual-job concurrency tests passed; format, lint, typecheck, 115 unit tests, PostgreSQL 18 migrations, and 33 integration tests passed."
   attempts: 0
-commit: null
+quality_review:
+  state: "pass"
+  updated_at: "2026-07-31T09:04:29.629Z"
+  updated_by: "EVALUATOR"
+  note: "Concurrent manual-job creation now converges per job type and canonical scope while unrelated scopes continue independently."
+  evaluated_sha: "d3cd988d66744599ea443b8c277ca9f71fa14a5b"
+  blueprint_digest: "51de4d22bd84fac8b3d38d56a801b2118323a952b27dff391a330760c795d975"
+  evidence_refs:
+    - ".agentplane/tasks/202607310804-RBA764/README.md"
+    - ".agentplane/tasks/202607310804-RBA764/quality/20260731-090429629-recovery-context/quality-report.json"
+    - ".agentplane/tasks/202607310804-RBA764/quality/20260731-090429629-recovery-context/evaluator-prompt.md"
+    - ".agentplane/tasks/202607310804-RBA764/quality/20260731-090429629-recovery-context/evaluator-opinion.md"
+    - ".agentplane/tasks/202607310804-RBA764/blueprint/resolved-snapshot.json"
+    - "commit:d3cd988d6674"
+    - "tests/integration/write-pipeline.integration.spec.ts"
+    - "targeted PostgreSQL 18 integration: 14 passed"
+    - "pnpm run format:check; pnpm run lint; pnpm run typecheck; pnpm run test:unit (115 passed)"
+    - "PostgreSQL 18 migrations and full integration suite (33 passed)"
+  findings:
+    - "createJob acquires a transaction-scoped advisory lock derived from job type and the checksum of the sorted canonical scope before checking active work."
+    - "Concurrent calls with different idempotency keys and equivalent reordered scopes return the same job identifier and persist only one ManualJob."
+    - "Existing RUNNING work is returned with its stored state, and a different canonical scope completes while another scope lock is held."
+commit:
+  hash: "d3cd988d66744599ea443b8c277ca9f71fa14a5b"
+  message: "🚧 RBA764 task: deduplicate concurrent manual jobs"
 comments:
   -
     author: "CODER"
     body: "Start: deduplicate concurrent manual-job creation by normalized job type and scope."
+  -
+    author: "CODER"
+    body: "Verified: concurrent manual-job requests now converge on one active job per type and canonical scope while preserving independent scopes."
 events:
   -
     type: "status"
@@ -47,8 +75,15 @@ events:
     author: "CODER"
     state: "ok"
     note: "Manual-job concurrency tests passed; format, lint, typecheck, 115 unit tests, PostgreSQL 18 migrations, and 33 integration tests passed."
+  -
+    type: "status"
+    at: "2026-07-31T09:04:35.521Z"
+    author: "CODER"
+    from: "DOING"
+    to: "DONE"
+    note: "Verified: concurrent manual-job requests now converge on one active job per type and canonical scope while preserving independent scopes."
 doc_version: 3
-doc_updated_at: "2026-07-31T09:04:15.991Z"
+doc_updated_at: "2026-07-31T09:04:35.522Z"
 doc_updated_by: "CODER"
 description: "Serialize manual-job creation for the same job type and canonical scope so concurrent requests cannot create duplicate active jobs; preserve and return the existing job state; add concurrency coverage."
 sections:
