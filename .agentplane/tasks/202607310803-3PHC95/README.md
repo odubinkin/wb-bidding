@@ -5,7 +5,7 @@ result_summary: "Prevented superseded bidding decisions from crossing the DISPAT
 status: "DONE"
 priority: "high"
 owner: "CODER"
-revision: 15
+revision: 16
 origin:
   system: "manual"
 depends_on: []
@@ -50,8 +50,8 @@ quality_review:
     - "commitDispatch acquires the same target advisory lock as decision persistence before checking for a newer decision and before transitioning to DISPATCHING."
     - "The no-dispatch path records REJECTED attempt evidence and terminal SUPERSEDED queue state; full static, unit, migration, and integration gates passed."
 commit:
-  hash: "f2ac30cf64320d59357b2a46214e325efacbdd53"
-  message: "🚧 31418S docs: remove duplicate table catalog"
+  hash: "443ed02ec7f92e7265dff45736147a88061bbc48"
+  message: "🚧 3PHC95 task: prevented superseded bidding decisions from crossing the DISPATCHING..."
 comments:
   -
     author: "CODER"
@@ -98,8 +98,14 @@ events:
     from: "DOING"
     to: "DONE"
     note: "Verified: superseded bidding decisions are rejected before dispatch; static, unit, and PostgreSQL integration checks pass."
+  -
+    type: "status"
+    at: "2026-07-31T08:22:00.310Z"
+    author: "CODER"
+    from: "DONE"
+    to: "DONE"
 doc_version: 3
-doc_updated_at: "2026-07-31T08:21:01.671Z"
+doc_updated_at: "2026-07-31T08:22:00.310Z"
 doc_updated_by: "CODER"
 description: "Serialize final dispatch validation with decision persistence so a leased decision cannot be sent after a newer decision for the same target exists; add race regression coverage."
 sections:
