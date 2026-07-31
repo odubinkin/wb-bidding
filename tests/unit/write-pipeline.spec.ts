@@ -125,6 +125,7 @@ describe('write pipeline state safety', () => {
       }),
       completeDispatch: vi.fn(),
       failLeased: vi.fn(),
+      heartbeat: vi.fn().mockResolvedValue(1),
       markUnknown: vi.fn().mockImplementation(() => {
         calls.push('unknown');
         return Promise.resolve();
@@ -179,6 +180,7 @@ describe('write pipeline state safety', () => {
       commitDispatch: vi.fn(),
       completeDispatch,
       failLeased: vi.fn(),
+      heartbeat: vi.fn().mockResolvedValue(1),
       markPreByteFailure,
       markUnknown,
       prepare: vi.fn().mockResolvedValue({
@@ -227,5 +229,142 @@ describe('write pipeline state safety', () => {
     expect(completeDispatch).toHaveBeenCalledTimes(1);
     expect(markPreByteFailure).not.toHaveBeenCalled();
     expect(markUnknown).not.toHaveBeenCalled();
+  });
+
+  it('renews only active leases throughout validation longer than the original lease', async () => {
+    vi.useFakeTimers();
+    try {
+      const rejected = { ...claimed };
+      const retained = {
+        ...claimed,
+        decisionId: '00000000-0000-4000-8000-000000000022',
+        queueItemId: '00000000-0000-4000-8000-000000000024',
+        targetId: '00000000-0000-4000-8000-000000000025',
+      };
+      const heartbeat = vi
+        .fn()
+        .mockImplementation((_workerId: string, queueItemIds: readonly string[]) =>
+          Promise.resolve(queueItemIds.length),
+        );
+      const failLeased = vi.fn();
+      const repository = {
+        claim: vi.fn().mockResolvedValue([rejected, retained]),
+        commitDispatch: vi.fn(),
+        completeDispatch: vi.fn(),
+        failLeased,
+        heartbeat,
+        prepare: vi.fn().mockResolvedValue({
+          attemptId: '00000000-0000-4000-8000-000000000026',
+          correlationId: '00000000-0000-4000-8000-000000000027',
+          items: [],
+        }),
+        releaseLease: vi.fn(),
+      } as unknown as WritePipelineRepository;
+      let resolveSlowRead: ((state: LiveBidState) => void) | undefined;
+      let markSlowReadStarted: (() => void) | undefined;
+      const slowReadStarted = new Promise<void>((resolve) => {
+        markSlowReadStarted = resolve;
+      });
+      const slowRead = new Promise<LiveBidState>((resolve) => {
+        resolveSlowRead = resolve;
+      });
+      const dispatch = vi.fn().mockResolvedValue({
+        httpStatus: 200,
+        items: [{ accepted: true, requestIndex: 0 }],
+      });
+      const gateway = {
+        dispatch: vi.fn(),
+        readLiveState: vi.fn().mockImplementation((item: ClaimedQueueItem) => {
+          if (item.queueItemId === rejected.queueItemId) {
+            return Promise.resolve({ ...oldState, observedAt: new Date() });
+          }
+          markSlowReadStarted?.();
+          return slowRead;
+        }),
+        reserveDispatch: vi.fn().mockResolvedValue({ dispatch, release: vi.fn() }),
+      };
+      const executor = new WriteExecutor(
+        repository,
+        gateway,
+        {
+          validate: vi
+            .fn()
+            .mockImplementation((item: ClaimedQueueItem) =>
+              Promise.resolve(
+                item.queueItemId === rejected.queueItemId
+                  ? { code: 'POLICY_CHANGED', valid: false as const }
+                  : { valid: true as const },
+              ),
+            ),
+        },
+        {
+          endpointKey: 'cardBidsWrite',
+          leaseSeconds: 1,
+          maximumBatchSize: 10,
+          maximumWriteAttempts: 2,
+          preByteMaximumRetries: 1,
+          preWriteStateMaximumAgeMs: 10_000,
+          reconciliationDeadlineMs: 60_000,
+          visibilityDelayMs: 5_000,
+        },
+      );
+
+      const running = executor.runOnce('worker-heartbeat');
+      await slowReadStarted;
+      await vi.advanceTimersByTimeAsync(1_100);
+      expect(heartbeat).toHaveBeenCalled();
+      for (const call of heartbeat.mock.calls) {
+        expect(call[1]).toEqual([retained.queueItemId]);
+      }
+      resolveSlowRead?.({ ...oldState, observedAt: new Date() });
+      await expect(running).resolves.toBe(2);
+      expect(failLeased).toHaveBeenCalledWith(
+        rejected.queueItemId,
+        'worker-heartbeat',
+        'POLICY_CHANGED',
+        'INVALID',
+      );
+      expect(dispatch).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('fails closed before dispatch when lease renewal loses ownership', async () => {
+    const commitDispatch = vi.fn();
+    const prepare = vi.fn();
+    const repository = {
+      claim: vi.fn().mockResolvedValue([claimed]),
+      commitDispatch,
+      failLeased: vi.fn(),
+      heartbeat: vi.fn().mockResolvedValue(0),
+      prepare,
+      releaseLease: vi.fn(),
+    } as unknown as WritePipelineRepository;
+    const gateway = {
+      dispatch: vi.fn(),
+      readLiveState: vi.fn().mockResolvedValue({ ...oldState, observedAt: new Date() }),
+      reserveDispatch: vi.fn(),
+    };
+    const executor = new WriteExecutor(
+      repository,
+      gateway,
+      { validate: vi.fn().mockResolvedValue({ valid: true }) },
+      {
+        endpointKey: 'cardBidsWrite',
+        leaseSeconds: 30,
+        maximumBatchSize: 10,
+        maximumWriteAttempts: 2,
+        preByteMaximumRetries: 1,
+        preWriteStateMaximumAgeMs: 10_000,
+        reconciliationDeadlineMs: 60_000,
+        visibilityDelayMs: 5_000,
+      },
+    );
+
+    await expect(executor.runOnce('worker-lost-lease')).rejects.toThrow('LEASE_LOST');
+    expect(gateway.reserveDispatch).not.toHaveBeenCalled();
+    expect(prepare).not.toHaveBeenCalled();
+    expect(commitDispatch).not.toHaveBeenCalled();
   });
 });
