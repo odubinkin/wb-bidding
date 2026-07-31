@@ -1,10 +1,11 @@
 ---
 id: "202607310804-5K6MS9"
 title: "Serialize concurrent Admin API idempotency"
-status: "DOING"
+result_summary: "Serialized Admin idempotency replay checks per scope and key across service and delegated repository paths."
+status: "DONE"
 priority: "high"
 owner: "CODER"
-revision: 9
+revision: 11
 origin:
   system: "manual"
 depends_on: []
@@ -28,11 +29,38 @@ verification:
   updated_by: "CODER"
   note: "Concurrent Admin idempotency tests passed; format, lint, typecheck, 113 unit tests, PostgreSQL 18 migrations, and 31 integration tests passed."
   attempts: 0
-commit: null
+quality_review:
+  state: "pass"
+  updated_at: "2026-07-31T08:48:53.465Z"
+  updated_by: "EVALUATOR"
+  note: "Concurrent Admin requests now serialize per idempotency scope and key before replay checks while unrelated keys remain independent."
+  evaluated_sha: "13243855bd266161a91920f151e1761491d07385"
+  blueprint_digest: "7b27ced10a8012877182d899c5035cec8ee3d5bb4226104be508b0655a548e23"
+  evidence_refs:
+    - ".agentplane/tasks/202607310804-5K6MS9/README.md"
+    - ".agentplane/tasks/202607310804-5K6MS9/quality/20260731-084853465-recovery-context/quality-report.json"
+    - ".agentplane/tasks/202607310804-5K6MS9/quality/20260731-084853465-recovery-context/evaluator-prompt.md"
+    - ".agentplane/tasks/202607310804-5K6MS9/quality/20260731-084853465-recovery-context/evaluator-opinion.md"
+    - ".agentplane/tasks/202607310804-5K6MS9/blueprint/resolved-snapshot.json"
+    - "commit:13243855bd26"
+    - "tests/integration/write-pipeline.integration.spec.ts"
+    - "targeted PostgreSQL 18 integration: 12 passed"
+    - "pnpm run format:check; pnpm run lint; pnpm run typecheck; pnpm run test:unit (113 passed)"
+    - "PostgreSQL 18 migrations and full integration suite (31 passed)"
+  findings:
+    - "Service-owned Admin mutations acquire a transaction-scoped advisory lock before reading IdempotencyRecord, so same-key requests replay the committed response."
+    - "Decision-engine economics, imports, and policies, plus write-pipeline retry and global-control mutations, use the same per-key serialization rule before replay lookup."
+    - "PostgreSQL concurrency tests demonstrate one side effect for same-key replay, IDEMPOTENCY_KEY_REUSED for mismatched payloads, and forward progress for a different key while another key is locked."
+commit:
+  hash: "13243855bd266161a91920f151e1761491d07385"
+  message: "🚧 5K6MS9 task: serialize Admin idempotency"
 comments:
   -
     author: "CODER"
     body: "Start: serialize concurrent Admin API idempotency while preserving independent-key concurrency."
+  -
+    author: "CODER"
+    body: "Verified: concurrent Admin idempotency now yields one committed effect and replay response per key without serializing independent keys."
 events:
   -
     type: "status"
@@ -47,8 +75,15 @@ events:
     author: "CODER"
     state: "ok"
     note: "Concurrent Admin idempotency tests passed; format, lint, typecheck, 113 unit tests, PostgreSQL 18 migrations, and 31 integration tests passed."
+  -
+    type: "status"
+    at: "2026-07-31T08:48:59.187Z"
+    author: "CODER"
+    from: "DOING"
+    to: "DONE"
+    note: "Verified: concurrent Admin idempotency now yields one committed effect and replay response per key without serializing independent keys."
 doc_version: 3
-doc_updated_at: "2026-07-31T08:48:39.865Z"
+doc_updated_at: "2026-07-31T08:48:59.188Z"
 doc_updated_by: "CODER"
 description: "Acquire transaction-scoped idempotency locks before replay checks across Admin mutations so concurrent requests with the same key converge on one effect and one replayable result; add concurrency coverage."
 sections:

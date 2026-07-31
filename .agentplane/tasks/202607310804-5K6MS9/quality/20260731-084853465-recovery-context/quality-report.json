@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "task_id": "202607310804-5K6MS9",
+  "evaluator_id": "recovery-context",
+  "evaluator_profile": "EVALUATOR",
+  "generated_at": "2026-07-31T08:48:53.465Z",
+  "verdict": "pass",
+  "summary": "Concurrent Admin requests now serialize per idempotency scope and key before replay checks while unrelated keys remain independent.",
+  "evaluated_sha": "13243855bd266161a91920f151e1761491d07385",
+  "blueprint_digest": "7b27ced10a8012877182d899c5035cec8ee3d5bb4226104be508b0655a548e23",
+  "findings": [
+    "Service-owned Admin mutations acquire a transaction-scoped advisory lock before reading IdempotencyRecord, so same-key requests replay the committed response.",
+    "Decision-engine economics, imports, and policies, plus write-pipeline retry and global-control mutations, use the same per-key serialization rule before replay lookup.",
+    "PostgreSQL concurrency tests demonstrate one side effect for same-key replay, IDEMPOTENCY_KEY_REUSED for mismatched payloads, and forward progress for a different key while another key is locked."
+  ],
+  "evidence_refs": [
+    ".agentplane/tasks/202607310804-5K6MS9/README.md",
+    "commit:13243855bd26",
+    "tests/integration/write-pipeline.integration.spec.ts",
+    "targeted PostgreSQL 18 integration: 12 passed",
+    "pnpm run format:check; pnpm run lint; pnpm run typecheck; pnpm run test:unit (113 passed)",
+    "PostgreSQL 18 migrations and full integration suite (31 passed)"
+  ],
+  "missing_tests": [],
+  "hidden_assumptions": [],
+  "residual_risks": [
+    "Advisory locking depends on all future Admin idempotency paths using the same admin-idempotency namespace before replay checks."
+  ]
+}
