@@ -4,7 +4,7 @@ title: "Document purpose and usage of every data model table and column"
 status: "DOING"
 priority: "med"
 owner: "DOCS"
-revision: 25
+revision: 27
 origin:
   system: "manual"
 depends_on: []
@@ -18,31 +18,31 @@ plan_approval:
   note: null
 verification:
   state: "ok"
-  updated_at: "2026-07-31T08:57:47.939Z"
-  updated_by: "CODER"
-  note: "verified-202607310754-31418S"
+  updated_at: "2026-07-31T09:00:21.771Z"
+  updated_by: "DOCS"
+  note: "Verification and fresh EVALUATOR pass are recorded for the clean landed state."
   attempts: 0
 quality_review:
   state: "pass"
-  updated_at: "2026-07-31T08:59:27.978Z"
+  updated_at: "2026-07-31T09:00:07.413Z"
   updated_by: "EVALUATOR"
-  note: "The landed state contains the verified canonical data-model reference without duplicate table descriptions."
-  evaluated_sha: null
+  note: "The clean landed state contains the verified canonical data-model reference without duplicate table descriptions."
+  evaluated_sha: "95865a9be3dd1d29964b3bc31d208578b8b59111"
   blueprint_digest: "a7d87495e8fb3332ce0b914f6a923c45f4f725d29cec177e576226727457f654"
   evidence_refs:
     - ".agentplane/tasks/202607310754-31418S/README.md"
-    - ".agentplane/tasks/202607310754-31418S/quality/20260731-085927978-recovery-context/quality-report.json"
-    - ".agentplane/tasks/202607310754-31418S/quality/20260731-085927978-recovery-context/evaluator-prompt.md"
-    - ".agentplane/tasks/202607310754-31418S/quality/20260731-085927978-recovery-context/evaluator-opinion.md"
+    - ".agentplane/tasks/202607310754-31418S/quality/20260731-090007413-recovery-context/quality-report.json"
+    - ".agentplane/tasks/202607310754-31418S/quality/20260731-090007413-recovery-context/evaluator-prompt.md"
+    - ".agentplane/tasks/202607310754-31418S/quality/20260731-090007413-recovery-context/evaluator-opinion.md"
     - ".agentplane/tasks/202607310754-31418S/blueprint/resolved-snapshot.json"
-    - "commit:067444d10b96d9c5bd4540a372660ca421e641f5"
+    - "commit:95865a9be3dd1d29964b3bc31d208578b8b59111"
     - "docs/data-model.md"
     - "prisma/schema.prisma"
     - "implementation commits: 9a87a78104f7, f2ac30cf6432"
-    - "models=28; scalarColumns=416; duplicateModelHeadings=0; formatting/docs/routing/doctor/diff checks passed"
+    - "models=28; scalarColumns=416; duplicateModelHeadings=0; result=PASS"
   findings:
     - "PASS: 28 model headings are unique and all 416 stored scalar columns have individual purpose-and-usage rows."
-    - "PASS: documentation commits 9a87a78104f7 and f2ac30cf6432 are present in the evaluated landed state and all required checks passed."
+    - "PASS: documentation commits 9a87a78104f7 and f2ac30cf6432 are present; all formatting, documentation, routing, doctor, and diff checks passed."
 commit:
   hash: "067444d10b96d9c5bd4540a372660ca421e641f5"
   message: "🚧 H5383N task: record verification evidence"
@@ -100,8 +100,14 @@ events:
     author: "DOCS"
     from: "DOING"
     to: "DOING"
+  -
+    type: "verify"
+    at: "2026-07-31T09:00:21.771Z"
+    author: "DOCS"
+    state: "ok"
+    note: "Verification and fresh EVALUATOR pass are recorded for the clean landed state."
 doc_version: 3
-doc_updated_at: "2026-07-31T08:58:40.015Z"
+doc_updated_at: "2026-07-31T09:00:21.853Z"
 doc_updated_by: "DOCS"
 description: "Expand docs/data-model.md so each Prisma-backed table has a standalone description of what it stores, why it exists, and where it is used, and every physical column has an individual description of meaning and usage grounded in the schema and implementation."
 sections:
@@ -272,6 +278,36 @@ sections:
     - operator_action: run_exact_argv
     - can_execute_now: true
     - safe_command: agentplane task complete 202607310754-31418S --result verified-202607310754-31418S --commit f2ac30cf64320d59357b2a46214e325efacbdd53
+    - diagnostic_command: none
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: true
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: none
+
+    ### 2026-07-31T09:00:21.771Z — VERIFY — ok
+
+    By: DOCS
+
+    Note: Verification and fresh EVALUATOR pass are recorded for the clean landed state.
+    Attempts: 0
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-31T08:58:40.015Z, excerpt_hash=sha256:3bca6a92f106924ce74074b830b14eecfbc48f5e2331f24e7e23f572e02ef9a0
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607310754-31418S/blueprint/resolved-snapshot.json
+    - old_digest: a7d87495e8fb3332ce0b914f6a923c45f4f725d29cec177e576226727457f654
+    - current_digest: a7d87495e8fb3332ce0b914f6a923c45f4f725d29cec177e576226727457f654
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202607310754-31418S
+
+    DecisionContextRef:
+    - operator_action: run_exact_argv
+    - can_execute_now: true
+    - safe_command: agentplane task complete 202607310754-31418S --result verified-202607310754-31418S --commit 067444d10b96d9c5bd4540a372660ca421e641f5
     - diagnostic_command: none
     - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
     - freshness: route=computed_local remote=remote_skipped
@@ -475,6 +511,36 @@ DecisionContextRef:
 - operator_action: run_exact_argv
 - can_execute_now: true
 - safe_command: agentplane task complete 202607310754-31418S --result verified-202607310754-31418S --commit f2ac30cf64320d59357b2a46214e325efacbdd53
+- diagnostic_command: none
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: true
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: none
+
+### 2026-07-31T09:00:21.771Z — VERIFY — ok
+
+By: DOCS
+
+Note: Verification and fresh EVALUATOR pass are recorded for the clean landed state.
+Attempts: 0
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-31T08:58:40.015Z, excerpt_hash=sha256:3bca6a92f106924ce74074b830b14eecfbc48f5e2331f24e7e23f572e02ef9a0
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607310754-31418S/blueprint/resolved-snapshot.json
+- old_digest: a7d87495e8fb3332ce0b914f6a923c45f4f725d29cec177e576226727457f654
+- current_digest: a7d87495e8fb3332ce0b914f6a923c45f4f725d29cec177e576226727457f654
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202607310754-31418S
+
+DecisionContextRef:
+- operator_action: run_exact_argv
+- can_execute_now: true
+- safe_command: agentplane task complete 202607310754-31418S --result verified-202607310754-31418S --commit 067444d10b96d9c5bd4540a372660ca421e641f5
 - diagnostic_command: none
 - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
 - freshness: route=computed_local remote=remote_skipped
