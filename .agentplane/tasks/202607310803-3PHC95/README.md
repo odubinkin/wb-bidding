@@ -1,10 +1,11 @@
 ---
 id: "202607310803-3PHC95"
 title: "Prevent dispatch of superseded bidding decisions"
-status: "DOING"
+result_summary: "Prevented superseded bidding decisions from crossing the DISPATCHING boundary."
+status: "DONE"
 priority: "high"
 owner: "CODER"
-revision: 10
+revision: 15
 origin:
   system: "manual"
 depends_on: []
@@ -24,15 +25,40 @@ plan_approval:
   note: null
 verification:
   state: "ok"
-  updated_at: "2026-07-31T08:12:36.492Z"
+  updated_at: "2026-07-31T08:20:18.706Z"
   updated_by: "CODER"
   note: "verified-202607310803-3PHC95"
   attempts: 0
-commit: null
+quality_review:
+  state: "pass"
+  updated_at: "2026-07-31T08:20:02.764Z"
+  updated_by: "EVALUATOR"
+  note: "The implementation satisfies the latest-decision dispatch exclusion contract with transactionally serialized behavior and focused PostgreSQL coverage."
+  evaluated_sha: "f2ac30cf64320d59357b2a46214e325efacbdd53"
+  blueprint_digest: "5f1703beb938fa4407f0a7c29ffc581fb8a67925f555eb63f3fd8ad44bb2a2c3"
+  evidence_refs:
+    - ".agentplane/tasks/202607310803-3PHC95/README.md"
+    - ".agentplane/tasks/202607310803-3PHC95/quality/20260731-082002764-recovery-context/quality-report.json"
+    - ".agentplane/tasks/202607310803-3PHC95/quality/20260731-082002764-recovery-context/evaluator-prompt.md"
+    - ".agentplane/tasks/202607310803-3PHC95/quality/20260731-082002764-recovery-context/evaluator-opinion.md"
+    - ".agentplane/tasks/202607310803-3PHC95/blueprint/resolved-snapshot.json"
+    - "commit:eca135488c2c2a4d6ab10a6bb94941574b0020ce"
+    - "tests/integration/write-pipeline.integration.spec.ts"
+    - "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run test:unit"
+    - "PostgreSQL 18 migrations + pnpm run test:integration (26 passed)"
+  findings:
+    - "commitDispatch acquires the same target advisory lock as decision persistence before checking for a newer decision and before transitioning to DISPATCHING."
+    - "The no-dispatch path records REJECTED attempt evidence and terminal SUPERSEDED queue state; full static, unit, migration, and integration gates passed."
+commit:
+  hash: "f2ac30cf64320d59357b2a46214e325efacbdd53"
+  message: "🚧 31418S docs: remove duplicate table catalog"
 comments:
   -
     author: "CODER"
     body: "Start: prevent dispatch of superseded bidding decisions and add focused race regression coverage."
+  -
+    author: "CODER"
+    body: "Verified: superseded bidding decisions are rejected before dispatch; static, unit, and PostgreSQL integration checks pass."
 events:
   -
     type: "status"
@@ -53,8 +79,27 @@ events:
     author: "CODER"
     state: "ok"
     note: "verified-202607310803-3PHC95"
+  -
+    type: "verify"
+    at: "2026-07-31T08:19:26.919Z"
+    author: "CODER"
+    state: "ok"
+    note: "verified-202607310803-3PHC95"
+  -
+    type: "verify"
+    at: "2026-07-31T08:20:18.706Z"
+    author: "CODER"
+    state: "ok"
+    note: "verified-202607310803-3PHC95"
+  -
+    type: "status"
+    at: "2026-07-31T08:21:01.669Z"
+    author: "CODER"
+    from: "DOING"
+    to: "DONE"
+    note: "Verified: superseded bidding decisions are rejected before dispatch; static, unit, and PostgreSQL integration checks pass."
 doc_version: 3
-doc_updated_at: "2026-07-31T08:12:36.580Z"
+doc_updated_at: "2026-07-31T08:21:01.671Z"
 doc_updated_by: "CODER"
 description: "Serialize final dispatch validation with decision persistence so a leased decision cannot be sent after a newer decision for the same target exists; add race regression coverage."
 sections:
@@ -125,6 +170,66 @@ sections:
     - operator_action: run_exact_argv
     - can_execute_now: true
     - safe_command: agentplane task complete 202607310803-3PHC95 --result verified-202607310803-3PHC95 --commit eca135488c2c2a4d6ab10a6bb94941574b0020ce
+    - diagnostic_command: none
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: true
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: none
+
+    ### 2026-07-31T08:19:26.919Z — VERIFY — ok
+
+    By: CODER
+
+    Note: verified-202607310803-3PHC95
+    Attempts: 0
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-31T08:12:36.580Z, excerpt_hash=sha256:28e2576afb9b7bab6a27b8471dc82a8f38dd643a2153ed729c10a3b32e6b1d6a
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607310803-3PHC95/blueprint/resolved-snapshot.json
+    - old_digest: 5f1703beb938fa4407f0a7c29ffc581fb8a67925f555eb63f3fd8ad44bb2a2c3
+    - current_digest: 5f1703beb938fa4407f0a7c29ffc581fb8a67925f555eb63f3fd8ad44bb2a2c3
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202607310803-3PHC95
+
+    DecisionContextRef:
+    - operator_action: run_exact_argv
+    - can_execute_now: true
+    - safe_command: agentplane task complete 202607310803-3PHC95 --result verified-202607310803-3PHC95 --commit 390879051f56c6c944cadacccac0045b2f603102
+    - diagnostic_command: none
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: true
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: none
+
+    ### 2026-07-31T08:20:18.706Z — VERIFY — ok
+
+    By: CODER
+
+    Note: verified-202607310803-3PHC95
+    Attempts: 0
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-31T08:19:27.008Z, excerpt_hash=sha256:28e2576afb9b7bab6a27b8471dc82a8f38dd643a2153ed729c10a3b32e6b1d6a
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607310803-3PHC95/blueprint/resolved-snapshot.json
+    - old_digest: 5f1703beb938fa4407f0a7c29ffc581fb8a67925f555eb63f3fd8ad44bb2a2c3
+    - current_digest: 5f1703beb938fa4407f0a7c29ffc581fb8a67925f555eb63f3fd8ad44bb2a2c3
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202607310803-3PHC95
+
+    DecisionContextRef:
+    - operator_action: run_exact_argv
+    - can_execute_now: true
+    - safe_command: agentplane task complete 202607310803-3PHC95 --result verified-202607310803-3PHC95 --commit f2ac30cf64320d59357b2a46214e325efacbdd53
     - diagnostic_command: none
     - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
     - freshness: route=computed_local remote=remote_skipped
@@ -218,6 +323,66 @@ DecisionContextRef:
 - operator_action: run_exact_argv
 - can_execute_now: true
 - safe_command: agentplane task complete 202607310803-3PHC95 --result verified-202607310803-3PHC95 --commit eca135488c2c2a4d6ab10a6bb94941574b0020ce
+- diagnostic_command: none
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: true
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: none
+
+### 2026-07-31T08:19:26.919Z — VERIFY — ok
+
+By: CODER
+
+Note: verified-202607310803-3PHC95
+Attempts: 0
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-31T08:12:36.580Z, excerpt_hash=sha256:28e2576afb9b7bab6a27b8471dc82a8f38dd643a2153ed729c10a3b32e6b1d6a
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607310803-3PHC95/blueprint/resolved-snapshot.json
+- old_digest: 5f1703beb938fa4407f0a7c29ffc581fb8a67925f555eb63f3fd8ad44bb2a2c3
+- current_digest: 5f1703beb938fa4407f0a7c29ffc581fb8a67925f555eb63f3fd8ad44bb2a2c3
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202607310803-3PHC95
+
+DecisionContextRef:
+- operator_action: run_exact_argv
+- can_execute_now: true
+- safe_command: agentplane task complete 202607310803-3PHC95 --result verified-202607310803-3PHC95 --commit 390879051f56c6c944cadacccac0045b2f603102
+- diagnostic_command: none
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: true
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: none
+
+### 2026-07-31T08:20:18.706Z — VERIFY — ok
+
+By: CODER
+
+Note: verified-202607310803-3PHC95
+Attempts: 0
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-31T08:19:27.008Z, excerpt_hash=sha256:28e2576afb9b7bab6a27b8471dc82a8f38dd643a2153ed729c10a3b32e6b1d6a
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607310803-3PHC95/blueprint/resolved-snapshot.json
+- old_digest: 5f1703beb938fa4407f0a7c29ffc581fb8a67925f555eb63f3fd8ad44bb2a2c3
+- current_digest: 5f1703beb938fa4407f0a7c29ffc581fb8a67925f555eb63f3fd8ad44bb2a2c3
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202607310803-3PHC95
+
+DecisionContextRef:
+- operator_action: run_exact_argv
+- can_execute_now: true
+- safe_command: agentplane task complete 202607310803-3PHC95 --result verified-202607310803-3PHC95 --commit f2ac30cf64320d59357b2a46214e325efacbdd53
 - diagnostic_command: none
 - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
 - freshness: route=computed_local remote=remote_skipped

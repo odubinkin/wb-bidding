@@ -1,0 +1,23 @@
+# EVALUATOR opinion: pass
+
+The implementation satisfies the latest-decision dispatch exclusion contract with transactionally serialized behavior and focused PostgreSQL coverage.
+
+## Findings
+- commitDispatch acquires the same target advisory lock as decision persistence before checking for a newer decision and before transitioning to DISPATCHING.
+- The no-dispatch path records REJECTED attempt evidence and terminal SUPERSEDED queue state; full static, unit, migration, and integration gates passed.
+
+## Evidence
+- .agentplane/tasks/202607310803-3PHC95/README.md
+- commit:eca135488c2c2a4d6ab10a6bb94941574b0020ce
+- tests/integration/write-pipeline.integration.spec.ts
+- pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run test:unit
+- PostgreSQL 18 migrations + pnpm run test:integration (26 passed)
+
+## Missing Tests
+- none recorded
+
+## Hidden Assumptions
+- none recorded
+
+## Residual Risks
+- Decision recency follows the existing BidDecision createdAt plus UUID ordering contract.
