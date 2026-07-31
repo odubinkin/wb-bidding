@@ -1,10 +1,11 @@
 ---
 id: "202607311024-NGX3E2"
 title: "Reduce raw SQL to irreducible Prisma primitives"
-status: "DOING"
+result_summary: "Refactored database access to Prisma delegates and responsibility-scoped PostgreSQL query modules"
+status: "DONE"
 priority: "high"
 owner: "CODER"
-revision: 8
+revision: 11
 origin:
   system: "manual"
 depends_on: []
@@ -18,7 +19,7 @@ plan_approval:
   note: null
 verification:
   state: "ok"
-  updated_at: "2026-07-31T11:52:21.778Z"
+  updated_at: "2026-07-31T11:53:05.189Z"
   updated_by: "CODER"
   note: "verified-202607311024-NGX3E2"
   attempts: 0
@@ -42,11 +43,19 @@ quality_review:
   findings:
     - "Generic raw database facade was removed; non-SQL single-consumer logic moved to its consumer; shared helpers and PostgreSQL-specific queries are responsibility-scoped."
     - "Architecture, static, unit, integration, load, runbook, E2E, build, and smoke validation all passed."
-commit: null
+commit:
+  hash: "7906da756e7c1339be61455893a6770ff968f3bd"
+  message: "🚧 NGX3E2 task: record evaluator pass"
 comments:
   -
     author: "CODER"
     body: "Start: replace safely expressible raw SQL with Prisma delegates, isolate irreducible PostgreSQL operations, remove the generic raw facade, and verify all database behavior."
+  -
+    author: "CODER"
+    body: "Verified: verified-202607311024-NGX3E2. Guided shortcut recorded verification and is closing the direct task with traceable commit metadata."
+  -
+    author: "CODER"
+    body: "Verified: Refactored database access to Prisma delegates and responsibility-scoped PostgreSQL query modules; all required checks passed."
 events:
   -
     type: "status"
@@ -67,8 +76,28 @@ events:
     author: "CODER"
     state: "ok"
     note: "verified-202607311024-NGX3E2"
+  -
+    type: "verify"
+    at: "2026-07-31T11:53:05.189Z"
+    author: "CODER"
+    state: "ok"
+    note: "verified-202607311024-NGX3E2"
+  -
+    type: "status"
+    at: "2026-07-31T11:53:05.423Z"
+    author: "CODER"
+    from: "DOING"
+    to: "DONE"
+    note: "Verified: verified-202607311024-NGX3E2. Guided shortcut recorded verification and is closing the direct task with traceable commit metadata."
+  -
+    type: "status"
+    at: "2026-07-31T11:53:43.830Z"
+    author: "CODER"
+    from: "DONE"
+    to: "DONE"
+    note: "Verified: Refactored database access to Prisma delegates and responsibility-scoped PostgreSQL query modules; all required checks passed."
 doc_version: 3
-doc_updated_at: "2026-07-31T11:52:21.886Z"
+doc_updated_at: "2026-07-31T11:53:43.834Z"
 doc_updated_by: "CODER"
 description: "Replace straightforward raw SQL in admin, data-sync, decision, and write-pipeline paths with generated Prisma delegates; isolate unavoidable PostgreSQL operations as typed shared database functions; remove the generic raw SQL facade; strengthen the architecture guard; preserve locking, concurrency, and API behavior."
 sections:
@@ -176,6 +205,36 @@ sections:
     - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
     - risks: none
 
+    ### 2026-07-31T11:53:05.189Z — VERIFY — ok
+
+    By: CODER
+
+    Note: verified-202607311024-NGX3E2
+    Attempts: 0
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-31T11:52:21.886Z, excerpt_hash=sha256:8c91eb3791b99c0913c50a769f13a2e2b59c04729a15eacbb168a5a70a3167d3
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607311024-NGX3E2/blueprint/resolved-snapshot.json
+    - old_digest: e719322ab32bedf0df1aeba3b8704af3b5fcb43a594e105aaccee75e1b8390ec
+    - current_digest: e719322ab32bedf0df1aeba3b8704af3b5fcb43a594e105aaccee75e1b8390ec
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202607311024-NGX3E2
+
+    DecisionContextRef:
+    - operator_action: run_exact_argv
+    - can_execute_now: true
+    - safe_command: agentplane task complete 202607311024-NGX3E2 --result verified-202607311024-NGX3E2 --commit 7906da756e7c1339be61455893a6770ff968f3bd
+    - diagnostic_command: none
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: true
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: none
+
     <!-- END VERIFICATION RESULTS -->
   Rollback Plan: |-
     - Revert task-related commit(s).
@@ -184,6 +243,10 @@ sections:
     - Observation: All required verification commands passed; database architecture guard reports Prisma-only access with centralized raw SQL.
       Impact: Database package API now exposes responsibility-specific modules without a generic raw facade.
       Resolution: Retained only shared non-SQL helpers and PostgreSQL-specific query functions in the database package.
+extensions:
+  implementation_commit:
+    hash: "3becf058e988da5a61f16f9a05d2c08fdfc72a06"
+    message: "🚧 NGX3E2 task: reduce raw SQL to irreducible Prisma queries"
 id_source: "generated"
 ---
 ## Summary
@@ -292,6 +355,36 @@ DecisionContextRef:
 - operator_action: run_exact_argv
 - can_execute_now: true
 - safe_command: agentplane task complete 202607311024-NGX3E2 --result verified-202607311024-NGX3E2 --commit 3becf058e988da5a61f16f9a05d2c08fdfc72a06
+- diagnostic_command: none
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: true
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: none
+
+### 2026-07-31T11:53:05.189Z — VERIFY — ok
+
+By: CODER
+
+Note: verified-202607311024-NGX3E2
+Attempts: 0
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-31T11:52:21.886Z, excerpt_hash=sha256:8c91eb3791b99c0913c50a769f13a2e2b59c04729a15eacbb168a5a70a3167d3
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607311024-NGX3E2/blueprint/resolved-snapshot.json
+- old_digest: e719322ab32bedf0df1aeba3b8704af3b5fcb43a594e105aaccee75e1b8390ec
+- current_digest: e719322ab32bedf0df1aeba3b8704af3b5fcb43a594e105aaccee75e1b8390ec
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202607311024-NGX3E2
+
+DecisionContextRef:
+- operator_action: run_exact_argv
+- can_execute_now: true
+- safe_command: agentplane task complete 202607311024-NGX3E2 --result verified-202607311024-NGX3E2 --commit 7906da756e7c1339be61455893a6770ff968f3bd
 - diagnostic_command: none
 - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
 - freshness: route=computed_local remote=remote_skipped
