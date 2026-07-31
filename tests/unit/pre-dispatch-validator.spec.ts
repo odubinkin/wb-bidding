@@ -1,9 +1,9 @@
-import type { Pool } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
 
 import { DatabasePreDispatchValidator } from '../../apps/bidder/src/pre-dispatch-validator.js';
 import { RuntimeSafetyState } from '../../apps/bidder/src/runtime-state.js';
 import { loadConfiguration } from '@wb-bidder/config';
+import type { DatabaseClient } from '@wb-bidder/database';
 import type { ClaimedQueueItem, LiveBidState } from '@wb-bidder/write-pipeline';
 
 const now = new Date('2026-07-28T12:00:00.000Z');
@@ -58,7 +58,7 @@ describe('cluster restore pre-dispatch proof', () => {
       targetAutomation: null,
       targetKind: 'CLUSTER',
     };
-    const query = vi.fn().mockResolvedValue({ rows: [row] });
+    let currentRow = row;
     const configuration = loadConfiguration({
       ACCOUNT_CURRENCY: 'RUB',
       ACCOUNT_TIMEZONE: 'Europe/Moscow',
@@ -76,23 +76,19 @@ describe('cluster restore pre-dispatch proof', () => {
     runtime.setCapacityAllowsWrites(true);
     runtime.setIntegrationAuthorized(true);
     const validator = new DatabasePreDispatchValidator(
-      { query } as unknown as Pool,
+      validatorDatabase(() => currentRow),
       configuration,
       runtime,
       { now: () => now } as never,
     );
 
     await expect(validator.validate(restore, live)).resolves.toEqual({ valid: true });
-    query.mockResolvedValueOnce({
-      rows: [{ ...row, clusterBaselineBidState: 'EXPLICIT' }],
-    });
+    currentRow = { ...row, clusterBaselineBidState: 'EXPLICIT' };
     await expect(validator.validate(restore, live)).resolves.toEqual({
       code: 'CLUSTER_RESTORE_PROOF_MISSING',
       valid: false,
     });
-    query.mockResolvedValueOnce({
-      rows: [{ ...row, clusterOverrideOwned: false }],
-    });
+    currentRow = { ...row, clusterOverrideOwned: false };
     await expect(validator.validate(restore, live)).resolves.toEqual({
       code: 'CLUSTER_RESTORE_PROOF_MISSING',
       valid: false,
@@ -147,7 +143,7 @@ describe('cluster restore pre-dispatch proof', () => {
     runtime.setCapacityAllowsWrites(true);
     runtime.setIntegrationAuthorized(true);
     const validator = new DatabasePreDispatchValidator(
-      { query: vi.fn().mockResolvedValue({ rows: [row] }) } as unknown as Pool,
+      validatorDatabase(() => row),
       configuration,
       runtime,
       { now: () => now } as never,
@@ -158,3 +154,55 @@ describe('cluster restore pre-dispatch proof', () => {
     );
   });
 });
+
+function validatorDatabase(row: () => Record<string, unknown>): DatabaseClient {
+  return {
+    bidDecision: {
+      findUnique: vi.fn(() => {
+        const value = row();
+        return Promise.resolve({
+          action: value.decisionAction,
+          createdAt: value.decisionCreatedAt,
+          currentBidMinor: BigInt(String(value.currentBidMinor)),
+          metricSnapshot: {
+            policy: {
+              configuration: value.policyConfiguration,
+              enabled: value.policyStillActive,
+              executionMode: value.executionMode,
+              validFrom: new Date('2020-01-01T00:00:00.000Z'),
+              validTo: null,
+            },
+            productEconomicsVersion: BigInt(String(value.decisionEconomicsVersion)),
+          },
+          policyVersion: BigInt(String(value.policyVersion)),
+          target: {
+            automation: value.targetAutomation === null ? null : { mode: value.targetAutomation },
+            campaign: {
+              automation:
+                value.campaignAutomation === null ? null : { mode: value.campaignAutomation },
+              status: value.campaignStatus,
+            },
+            capability: value.capability,
+            clusterBaselineBidState: value.clusterBaselineBidState,
+            clusterBidState: value.clusterBidState,
+            clusterOverrideOwned: value.clusterOverrideOwned,
+            dataSnapshots: [{ applyEligible: value.snapshotApplyEligible }],
+            minimumBidMinor: BigInt(String(value.minimumBidMinor)),
+            nmId: 20_001n,
+            targetKind: value.targetKind,
+          },
+        });
+      }),
+    },
+    deploymentControl: {
+      findUnique: vi.fn(() => Promise.resolve({ globalKill: row().globalKill })),
+    },
+    productEconomics: {
+      findFirst: vi.fn(() =>
+        Promise.resolve({
+          version: BigInt(String(row().currentEconomicsVersion)),
+        }),
+      ),
+    },
+  } as unknown as DatabaseClient;
+}

@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { Pool } from 'pg';
+import { createTestDatabaseClient, type TestDatabaseClient } from '@wb-bidder/database';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { AdminService } from '../../apps/bidder/src/admin.service.js';
@@ -17,9 +17,9 @@ const databaseUrl = process.env.DATABASE_URL;
 const describeWithDatabase = databaseUrl === undefined ? describe.skip : describe;
 
 describeWithDatabase('write pipeline PostgreSQL invariants', () => {
-  let admin: Pool;
+  let admin: TestDatabaseClient;
   let databaseName: string;
-  let pool: Pool;
+  let pool: TestDatabaseClient;
   let repository: WritePipelineRepository;
 
   beforeAll(async () => {
@@ -30,9 +30,9 @@ describeWithDatabase('write pipeline PostgreSQL invariants', () => {
     adminUrl.pathname = '/postgres';
     const isolatedUrl = new URL(sourceUrl);
     isolatedUrl.pathname = `/${databaseName}`;
-    admin = new Pool({ connectionString: adminUrl.toString() });
+    admin = createTestDatabaseClient({ connectionString: adminUrl.toString() });
     await admin.query(`CREATE DATABASE "${databaseName}"`);
-    pool = new Pool({ connectionString: isolatedUrl.toString() });
+    pool = createTestDatabaseClient({ connectionString: isolatedUrl.toString() });
     for (const migration of [
       '202607281330_initial',
       '202607281410_stage1_rate_limiter',
@@ -625,7 +625,7 @@ describeWithDatabase('write pipeline PostgreSQL invariants', () => {
       `SELECT "enabled", "version" FROM "BiddingPolicy" WHERE "id" = $1`,
       [(first.body as { id: string }).id],
     );
-    expect(created.rows[0]).toEqual({ enabled: false, version: '1' });
+    expect(created.rows[0]).toEqual({ enabled: false, version: 1n });
     const activation = {
       actor: 'ADMIN:policy-test',
       correlationId: randomUUID(),
@@ -936,7 +936,7 @@ describeWithDatabase('write pipeline PostgreSQL invariants', () => {
   });
 });
 
-async function createFixture(pool: Pool, suffix: string) {
+async function createFixture(pool: TestDatabaseClient, suffix: string) {
   const campaignId = randomUUID();
   const targetId = randomUUID();
   const economicsId = randomUUID();
@@ -1037,7 +1037,7 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T
 }
 
 async function claimFixtures(
-  pool: Pool,
+  pool: TestDatabaseClient,
   repository: WritePipelineRepository,
   workerId: string,
   ...decisionIds: string[]

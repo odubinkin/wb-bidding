@@ -1,9 +1,8 @@
 import { Inject, Injectable, type OnApplicationBootstrap } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import type { Pool } from 'pg';
 
 import { APP_CONFIGURATION } from './application-config.js';
-import { DATABASE_POOL } from './database.js';
+import { DATABASE_CLIENT } from './database.js';
 import { ObservabilityService } from './observability.service.js';
 import { DATA_SYNC_REPOSITORY, DECISION_REPOSITORY, WB_API_CLIENT } from './runtime.providers.js';
 import { RuntimeSafetyState } from './runtime-state.js';
@@ -19,6 +18,7 @@ import {
 } from '@wb-bidder/data-sync';
 import { DecisionRepository, initialObserveOnlyPolicy } from '@wb-bidder/decision-engine';
 import type { AppConfiguration } from '@wb-bidder/config';
+import { listAppliedMigrationNames, type DatabaseClient } from '@wb-bidder/database';
 import {
   CURRENT_ENDPOINT_PROFILE,
   type EndpointKey,
@@ -45,7 +45,7 @@ export class RuntimeCoordinatorService implements OnApplicationBootstrap {
    * Creates the startup coordinator.
    *
    * @param configuration - Validated environment.
-   * @param pool - Shared database.
+   * @param database - Shared Prisma Client.
    * @param token - Safe decoded token profile.
    * @param wbClient - Quota-aware integration client.
    * @param dataRepository - Binding and scheduler persistence.
@@ -58,7 +58,7 @@ export class RuntimeCoordinatorService implements OnApplicationBootstrap {
    */
   public constructor(
     @Inject(APP_CONFIGURATION) private readonly configuration: AppConfiguration,
-    @Inject(DATABASE_POOL) private readonly pool: Pool,
+    @Inject(DATABASE_CLIENT) private readonly database: DatabaseClient,
     @Inject(WB_TOKEN_PROFILE) private readonly token: ValidatedTokenProfile,
     @Inject(WB_API_CLIENT) private readonly wbClient: WbApiClient,
     @Inject(DATA_SYNC_REPOSITORY) private readonly dataRepository: DataSyncRepository,
@@ -142,12 +142,11 @@ export class RuntimeCoordinatorService implements OnApplicationBootstrap {
    * @returns Nothing after existing or newly created policy is available.
    */
   private async ensureInitialPolicy(): Promise<void> {
-    const existing = await this.pool.query<{ present: boolean }>(
-      `SELECT EXISTS (
-         SELECT 1 FROM "BiddingPolicy" WHERE "scope" = 'DEPLOYMENT'
-       ) AS present`,
-    );
-    if (existing.rows[0]?.present === true) return;
+    const existing = await this.database.biddingPolicy.findFirst({
+      select: { id: true },
+      where: { scope: 'DEPLOYMENT' },
+    });
+    if (existing !== null) return;
     await this.decisionRepository.createPolicyVersion({
       actor: 'SYSTEM',
       campaignId: null,
@@ -166,10 +165,9 @@ export class RuntimeCoordinatorService implements OnApplicationBootstrap {
    * @returns Nothing after updating the close-only runtime gate and ETA metrics.
    */
   private async evaluateCapacity(): Promise<void> {
-    const count = await this.pool.query<{ count: string }>(
-      `SELECT COUNT(*)::text AS count FROM "Campaign" WHERE "supported" = true`,
-    );
-    const campaigns = Number(count.rows[0]?.count ?? '0');
+    const campaigns = await this.database.campaign.count({
+      where: { supported: true },
+    });
     const limits = selectEmbeddedLimits(this.configuration, this.token);
     const currentProfile = stricterConfiguredLimit(
       limits.campaignDetails,
@@ -222,12 +220,7 @@ export class RuntimeCoordinatorService implements OnApplicationBootstrap {
    * @throws {Error} When migration state is incomplete.
    */
   private async assertMigrationsApplied(): Promise<void> {
-    const result = await this.pool.query<{ migration_name: string }>(
-      `SELECT migration_name
-         FROM "_prisma_migrations"
-        WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL`,
-    );
-    const applied = new Set(result.rows.map((row) => row.migration_name));
+    const applied = new Set(await listAppliedMigrationNames(this.database));
     if (REQUIRED_MIGRATIONS.some((migration) => !applied.has(migration))) {
       throw new Error('DATABASE_MIGRATIONS_INCOMPLETE');
     }

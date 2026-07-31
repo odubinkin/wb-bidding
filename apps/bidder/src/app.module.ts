@@ -8,7 +8,7 @@ import { AdminAuthGuard } from './admin-security.js';
 import { AdminService } from './admin.service.js';
 import { APP_CONFIGURATION } from './application-config.js';
 import { ApplicationConfigurationModule } from './application-config.module.js';
-import { databasePoolProvider, DatabaseLifecycle } from './database.js';
+import { databaseClientProvider, DatabaseLifecycle } from './database.js';
 import { HealthController } from './health.controller.js';
 import { DecisionJobService } from './decision-job.service.js';
 import { ExperimentRuntimeService } from './experiment-runtime.service.js';
@@ -45,7 +45,7 @@ import { createWbTokenProfile, WB_TOKEN_PROFILE } from './wb-integration.js';
       provide: WB_TOKEN_PROFILE,
       useFactory: createWbTokenProfile,
     },
-    databasePoolProvider,
+    databaseClientProvider,
     DatabaseLifecycle,
     ObservabilityService,
     RuntimeSafetyState,

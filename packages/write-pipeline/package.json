@@ -12,9 +12,9 @@
     }
   },
   "dependencies": {
+    "@wb-bidder/database": "workspace:*",
     "@wb-bidder/wb-api": "workspace:*",
-    "canonicalize": "3.0.0",
-    "pg": "8.16.3"
+    "canonicalize": "3.0.0"
   },
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts --sourcemap --clean",
@@ -22,7 +22,6 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@types/pg": "8.15.6",
     "rimraf": "6.0.1",
     "tsup": "8.5.1",
     "typescript": "5.9.3"

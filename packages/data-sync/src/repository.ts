@@ -1,5 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import type { Pool, PoolClient } from 'pg';
+import {
+  advisoryTransactionLock,
+  createRawDatabaseClient,
+  withTransaction,
+  type DatabaseClient,
+  type RawTransactionClient,
+} from '@wb-bidder/database';
 
 import { accountSettingsChecksum, validateAccountBindingTransition } from './binding.js';
 import { evidenceChecksum } from './checksum.js';
@@ -198,12 +204,20 @@ export interface PerformanceFinalizationConfiguration {
  * PostgreSQL persistence boundary for synchronization, evidence, and leases.
  */
 export class DataSyncRepository {
+  /** Generated Prisma model surface. */
+  private readonly database: DatabaseClient;
+  /** Prisma-backed facade for irreducible PostgreSQL synchronization primitives. */
+  private readonly pool;
+
   /**
-   * Creates a repository over the deployment pool.
+   * Creates a repository over the shared Prisma Client.
    *
-   * @param pool - Shared PostgreSQL pool.
+   * @param database - Shared Prisma Client.
    */
-  public constructor(private readonly pool: Pool) {}
+  public constructor(database: DatabaseClient) {
+    this.database = database;
+    this.pool = createRawDatabaseClient(database);
+  }
 
   /**
    * Creates or validates the singleton account binding under a transaction lock.
@@ -326,61 +340,64 @@ export class DataSyncRepository {
     if (!Number.isInteger(deadlineMs) || deadlineMs < 1) {
       throw new Error('Scheduler deadline must be a positive integer');
     }
-    const client = await this.pool.connect();
-    const lock = await client.query<{ acquired: boolean }>(
-      'SELECT pg_try_advisory_lock(hashtextextended($1, 0)) AS acquired',
-      [`scheduler:${jobType}`],
-    );
-    if (lock.rows[0]?.acquired !== true) {
-      client.release();
-      return Object.freeze({ started: false });
-    }
     const runId = randomUUID();
     const startedAt = new Date();
     const deadlineAt = new Date(startedAt.getTime() + deadlineMs);
+    const claimed = await withTransaction(this.database, async (transaction) => {
+      await advisoryTransactionLock(transaction, `scheduler:${jobType}`);
+      const active = await transaction.schedulerRun.findFirst({
+        select: { id: true },
+        where: {
+          deadlineAt: { gt: startedAt },
+          jobType,
+          status: 'RUNNING',
+        },
+      });
+      if (active !== null) return false;
+      await transaction.schedulerRun.create({
+        data: {
+          counters: {},
+          deadlineAt,
+          id: runId,
+          jobType,
+          leaseOwner: `pid:${String(process.pid)}`,
+          leaseUntil: deadlineAt,
+          startedAt,
+          status: 'RUNNING',
+        },
+      });
+      return true;
+    });
+    if (!claimed) return Object.freeze({ started: false });
     const controller = new AbortController();
     const timer = setTimeout(() => {
       controller.abort(new Error('Scheduler run deadline exceeded'));
     }, deadlineMs);
     try {
-      await client.query(
-        `INSERT INTO "SchedulerRun"
-           ("id", "jobType", "startedAt", "deadlineAt", "status", "counters", "leaseOwner", "leaseUntil")
-         VALUES ($1, $2, $3, $4, 'RUNNING', '{}'::jsonb, $5, $4)`,
-        [runId, jobType, startedAt, deadlineAt, `pid:${String(process.pid)}`],
-      );
       const result = await worker(Object.freeze({ deadlineAt, runId, signal: controller.signal }));
       const deadlineExceeded = controller.signal.aborted || Date.now() > deadlineAt.getTime();
-      await client.query(
-        `UPDATE "SchedulerRun"
-            SET "endedAt" = NOW(),
-                "status" = $2::"SchedulerRunStatus",
-                "leaseUntil" = NULL
-          WHERE "id" = $1`,
-        [runId, deadlineExceeded ? 'DEADLINE_EXCEEDED' : 'SUCCEEDED'],
-      );
+      await this.database.schedulerRun.update({
+        data: {
+          endedAt: new Date(),
+          leaseUntil: null,
+          status: deadlineExceeded ? 'DEADLINE_EXCEEDED' : 'SUCCEEDED',
+        },
+        where: { id: runId },
+      });
       return Object.freeze({ result, runId, started: true });
     } catch (error: unknown) {
-      await client.query(
-        `UPDATE "SchedulerRun"
-            SET "endedAt" = NOW(),
-                "status" = $2::"SchedulerRunStatus",
-                "errorSummary" = $3::jsonb,
-                "leaseUntil" = NULL
-          WHERE "id" = $1`,
-        [
-          runId,
-          controller.signal.aborted ? 'DEADLINE_EXCEEDED' : 'FAILED',
-          JSON.stringify({ code: 'JOB_FAILED', message: safeErrorMessage(error) }),
-        ],
-      );
+      await this.database.schedulerRun.update({
+        data: {
+          endedAt: new Date(),
+          errorSummary: { code: 'JOB_FAILED', message: safeErrorMessage(error) },
+          leaseUntil: null,
+          status: controller.signal.aborted ? 'DEADLINE_EXCEEDED' : 'FAILED',
+        },
+        where: { id: runId },
+      });
       throw error;
     } finally {
       clearTimeout(timer);
-      await client.query('SELECT pg_advisory_unlock(hashtextextended($1, 0))', [
-        `scheduler:${jobType}`,
-      ]);
-      client.release();
     }
   }
 
@@ -1927,7 +1944,7 @@ function mapExistingBinding(row: BindingRow): ExistingAccountBinding {
  * @param client - Transaction client holding the binding lock.
  * @returns Whether initialization would reinterpret history.
  */
-async function hasBusinessData(client: PoolClient): Promise<boolean> {
+async function hasBusinessData(client: RawTransactionClient): Promise<boolean> {
   const result = await client.query<{ present: boolean }>(
     `SELECT EXISTS (
        SELECT 1 FROM "Campaign"
@@ -1958,7 +1975,7 @@ interface AuditWrite {
  * @param event - Non-secret event.
  * @returns Nothing.
  */
-async function appendAudit(client: PoolClient, event: AuditWrite): Promise<void> {
+async function appendAudit(client: RawTransactionClient, event: AuditWrite): Promise<void> {
   await client.query(
     `INSERT INTO "AuditEvent"
        ("id", "actor", "action", "entityType", "entityId", "after", "correlationId")

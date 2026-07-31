@@ -1,9 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { performance } from 'node:perf_hooks';
-import type { Pool } from 'pg';
 
 import { APP_CONFIGURATION } from './application-config.js';
-import { DATABASE_POOL } from './database.js';
+import { DATABASE_CLIENT } from './database.js';
 import { ObservabilityService } from './observability.service.js';
 import { DECISION_REPOSITORY } from './runtime.providers.js';
 import { RuntimeClockService } from './runtime-clock.service.js';
@@ -14,6 +13,12 @@ import {
   isCampaignApplyEligibleStatus,
 } from '@wb-bidder/contracts';
 import { formatAccountLocalDate, type AppConfiguration } from '@wb-bidder/config';
+import {
+  loadDecisionPerformanceDayRows,
+  loadDecisionTargetPage,
+  type DatabaseClient,
+  type DecisionTargetRow,
+} from '@wb-bidder/database';
 import {
   DecisionRepository,
   decideBid,
@@ -43,41 +48,6 @@ export interface DecisionJobScope {
 /**
  * Bounded target row required to reconstruct one deterministic decision input.
  */
-interface TargetDecisionRow {
-  readonly activeExperimentStatus: string | null;
-  readonly applyEligible: boolean | null;
-  readonly bidType: 'MANUAL' | 'UNIFIED' | 'UNKNOWN';
-  readonly campaignAutomation: string | null;
-  readonly campaignId: string;
-  readonly campaignStatus: number;
-  readonly capability: string;
-  readonly coherentRegimeChecksum: string | null;
-  readonly currentBidMinor: string | null;
-  readonly dailyAnchorBidMinor: string | null;
-  readonly economicsId: string | null;
-  readonly economicsVersion: string | null;
-  readonly expectedContributionMinor: string | null;
-  readonly lastWriteAt: Date | null;
-  readonly minimumBidMinor: string | null;
-  readonly nmId: string;
-  readonly normQueryCanonical: string | null;
-  readonly paymentType: 'CPC' | 'CPM' | 'UNKNOWN';
-  readonly placement: string;
-  readonly policyConfiguration: unknown;
-  readonly policyId: string;
-  readonly policyVersion: string;
-  readonly recommendationData: unknown;
-  readonly recommendationFetchedAt: Date | null;
-  readonly recommendationSourceChecksum: string | null;
-  readonly sameDaySpendData: unknown;
-  readonly sameDaySpendFetchedAt: Date | null;
-  readonly siblingPlacements: number;
-  readonly targetAutomation: string | null;
-  readonly targetId: string;
-  readonly targetKind: 'CARD' | 'CLUSTER';
-  readonly wbCampaignId: string;
-}
-
 /**
  * Database-backed Decision job that performs no WB network calls.
  */
@@ -86,7 +56,7 @@ export class DecisionJobService {
   /**
    * Creates the Decision job.
    *
-   * @param pool - Authoritative PostgreSQL pool.
+   * @param database - Authoritative Prisma Client.
    * @param repository - Atomic decision and queue persistence.
    * @param configuration - Account and safety configuration.
    * @param runtimeState - Runtime write gates.
@@ -94,7 +64,7 @@ export class DecisionJobService {
    * @param clock - Wall or deterministic mock model clock.
    */
   public constructor(
-    @Inject(DATABASE_POOL) private readonly pool: Pool,
+    @Inject(DATABASE_CLIENT) private readonly database: DatabaseClient,
     @Inject(DECISION_REPOSITORY) private readonly repository: DecisionRepository,
     @Inject(APP_CONFIGURATION) private readonly configuration: AppConfiguration,
     private readonly runtimeState: RuntimeSafetyState,
@@ -125,7 +95,7 @@ export class DecisionJobService {
         signal.throwIfAborted();
         const started = performance.now();
         try {
-          const policy = parseDecisionPolicy(row.policyConfiguration, BigInt(row.policyVersion));
+          const policy = parseDecisionPolicy(row.policyConfiguration, row.policyVersion);
           const effectivePolicy = this.effectivePolicy(policy, row);
           const days = await this.loadPerformanceDays(row.targetId, effectivePolicy, decisionAt);
           const input = this.buildInput(row, effectivePolicy, days, decisionAt);
@@ -139,11 +109,10 @@ export class DecisionJobService {
           const result = exploration?.result ?? ordinaryResult;
           await this.repository.persistDecision({
             calculatedAt: decisionAt,
-            currentBidMinor: row.currentBidMinor === null ? null : BigInt(row.currentBidMinor),
+            currentBidMinor: row.currentBidMinor,
             economicsId: row.economicsId,
-            economicsVersion: row.economicsVersion === null ? null : BigInt(row.economicsVersion),
-            expectedContributionMinor:
-              row.expectedContributionMinor === null ? null : BigInt(row.expectedContributionMinor),
+            economicsVersion: row.economicsVersion,
+            expectedContributionMinor: row.expectedContributionMinor,
             ...(exploration === null ? {} : { experiment: exploration.plan }),
             periodEnd:
               days.at(-1)?.date ??
@@ -152,7 +121,7 @@ export class DecisionJobService {
               days[0]?.date ??
               formatAccountLocalDate(this.configuration.accountTimezone, decisionAt),
             policyId: row.policyId,
-            policyVersion: BigInt(row.policyVersion),
+            policyVersion: row.policyVersion,
             result,
             targetId: row.targetId,
           });
@@ -193,140 +162,21 @@ export class DecisionJobService {
     cursor: string,
     scope: DecisionJobScope,
     decisionAt: Date,
-  ): Promise<readonly TargetDecisionRow[]> {
-    const campaignIds = scope.campaignIds === undefined ? null : [...scope.campaignIds];
-    const targetIds = scope.targetIds === undefined ? null : [...scope.targetIds];
-    const result = await this.pool.query<TargetDecisionRow>(
-      `SELECT t."id" AS "targetId", t."campaignId", t."nmId", t."targetKind"::text,
-              t."placement"::text, t."normQueryCanonical", t."currentBidMinor",
-              t."minimumBidMinor", t."capability",
-              c."wbCampaignId", c."status" AS "campaignStatus",
-              c."bidType"::text, c."paymentType"::text,
-              snapshot."applyEligible", snapshot."coherentRegimeChecksum",
-              economics."id" AS "economicsId", economics."version" AS "economicsVersion",
-              economics."expectedContributionBeforeAdsMinor" AS "expectedContributionMinor",
-              policy."id" AS "policyId", policy."version" AS "policyVersion",
-              policy."configuration" AS "policyConfiguration",
-              recommendation."normalizedData" AS "recommendationData",
-              recommendation."fetchedAt" AS "recommendationFetchedAt",
-              recommendation."sourceChecksum" AS "recommendationSourceChecksum",
-              same_day_spend."normalizedData" AS "sameDaySpendData",
-              same_day_spend."fetchedAt" AS "sameDaySpendFetchedAt",
-              ca."mode"::text AS "campaignAutomation",
-              ta."mode"::text AS "targetAutomation",
-              active_experiment."status"::text AS "activeExperimentStatus",
-              COALESCE(placements."count", 0)::integer AS "siblingPlacements",
-              last_write."verifiedAt" AS "lastWriteAt",
-              daily_anchor."currentBidMinor" AS "dailyAnchorBidMinor"
-         FROM "CampaignTarget" t
-         JOIN "Campaign" c ON c."id" = t."campaignId"
-         LEFT JOIN LATERAL (
-           SELECT s."applyEligible", s."coherentRegimeChecksum"
-             FROM "TargetDataSnapshot" s
-            WHERE s."targetId" = t."id"
-            ORDER BY s."createdAt" DESC
-            LIMIT 1
-         ) snapshot ON true
-         LEFT JOIN LATERAL (
-           SELECT source."normalizedData", source."fetchedAt", source."sourceChecksum"
-             FROM "SyncSourceSnapshot" source
-            WHERE source."campaignId" = c."id"
-              AND source."dataKind" = 'BID_RECOMMENDATION'
-              AND source."valid" = true
-              AND source."endpointProfile" = $6
-              AND source."normalizedData"->>'nmId' = t."nmId"::text
-            ORDER BY source."fetchedAt" DESC, source."createdAt" DESC
-            LIMIT 1
-         ) recommendation ON true
-         LEFT JOIN LATERAL (
-           SELECT source."normalizedData", source."fetchedAt"
-             FROM "SyncSourceSnapshot" source
-            WHERE source."targetId" = t."id"
-              AND source."dataKind" = 'SAME_DAY_SPEND'
-              AND source."valid" = true
-              AND source."endpointProfile" = $6
-            ORDER BY source."fetchedAt" DESC, source."createdAt" DESC
-            LIMIT 1
-         ) same_day_spend ON true
-         LEFT JOIN LATERAL (
-           SELECT e."id", e."version", e."expectedContributionBeforeAdsMinor"
-             FROM "ProductEconomics" e
-            WHERE e."nmId" = t."nmId"
-              AND e."effectiveFrom" <= $4
-              AND (e."effectiveTo" IS NULL OR e."effectiveTo" > $4)
-            ORDER BY e."effectiveFrom" DESC, e."version" DESC
-            LIMIT 1
-         ) economics ON true
-         JOIN LATERAL (
-           SELECT p."id", p."version", p."configuration"
-             FROM "BiddingPolicy" p
-            WHERE p."enabled" = true
-              AND p."validFrom" <= $4
-              AND (p."validTo" IS NULL OR p."validTo" > $4)
-              AND (("scope" = 'TARGET' AND p."targetId" = t."id")
-                OR ("scope" = 'CAMPAIGN' AND p."campaignId" = c."id")
-                OR p."scope" = 'DEPLOYMENT')
-            ORDER BY CASE p."scope" WHEN 'TARGET' THEN 1 WHEN 'CAMPAIGN' THEN 2 ELSE 3 END,
-                     p."version" DESC
-            LIMIT 1
-         ) policy ON true
-         LEFT JOIN "CampaignAutomation" ca ON ca."campaignId" = c."id"
-         LEFT JOIN "TargetAutomation" ta ON ta."targetId" = t."id"
-         LEFT JOIN LATERAL (
-           SELECT experiment."status"
-             FROM "BidExperiment" experiment
-            WHERE experiment."targetId" = t."id"
-              AND experiment."status" IN
-                  ('PLANNED','ACTIVE','COLLECTING','EVALUATING','REVERTING')
-            ORDER BY experiment."createdAt" DESC
-            LIMIT 1
-         ) active_experiment ON true
-         LEFT JOIN LATERAL (
-           SELECT COUNT(DISTINCT sibling."placement") AS "count"
-             FROM "CampaignTarget" sibling
-            WHERE sibling."campaignId" = t."campaignId"
-              AND sibling."nmId" = t."nmId"
-              AND sibling."targetKind" = 'CARD'
-         ) placements ON true
-         LEFT JOIN LATERAL (
-           SELECT q."verifiedAt"
-             FROM "BidDecision" prior
-             JOIN "DecisionQueueItem" q ON q."decisionId" = prior."id"
-            WHERE prior."targetId" = t."id" AND q."status" = 'APPLIED'
-            ORDER BY q."verifiedAt" DESC NULLS LAST
-            LIMIT 1
-         ) last_write ON true
-         LEFT JOIN LATERAL (
-           SELECT prior."currentBidMinor"
-             FROM "BidDecision" prior
-             JOIN "DecisionQueueItem" q ON q."decisionId" = prior."id"
-            WHERE prior."targetId" = t."id"
-              AND q."status" = 'APPLIED'
-              AND q."verifiedAt" >=
-                  (date_trunc('day', $4::timestamptz AT TIME ZONE $5) AT TIME ZONE $5)
-            ORDER BY q."verifiedAt", prior."createdAt"
-            LIMIT 1
-        ) daily_anchor ON true
-        WHERE c."supported" = true
-          AND c."status" IN (9, 11)
-          AND t."id" > $1::uuid
-          AND ($2::uuid[] IS NULL OR t."campaignId" = ANY($2::uuid[]))
-          AND ($3::uuid[] IS NULL OR t."id" = ANY($3::uuid[]))
-        ORDER BY t."id"
-        LIMIT $7`,
-      [
+  ): Promise<readonly DecisionTargetRow[]> {
+    return Object.freeze(
+      await loadDecisionTargetPage(this.database, {
+        accountTimezone: this.configuration.accountTimezone,
+        ...(scope.campaignIds === undefined ? {} : { campaignIds: scope.campaignIds }),
         cursor,
-        campaignIds,
-        targetIds,
         decisionAt,
-        this.configuration.accountTimezone,
-        this.configuration.wb.mode === 'mock'
-          ? MOCK_ENDPOINT_PROFILE.profileId
-          : CURRENT_ENDPOINT_PROFILE.profileId,
-        DECISION_PAGE_SIZE,
-      ],
+        endpointProfileId:
+          this.configuration.wb.mode === 'mock'
+            ? MOCK_ENDPOINT_PROFILE.profileId
+            : CURRENT_ENDPOINT_PROFILE.profileId,
+        pageSize: DECISION_PAGE_SIZE,
+        ...(scope.targetIds === undefined ? {} : { targetIds: scope.targetIds }),
+      }),
     );
-    return Object.freeze(result.rows);
   }
 
   /**
@@ -342,45 +192,23 @@ export class DecisionJobService {
     policy: DecisionPolicy,
     decisionAt: Date,
   ): Promise<readonly DecisionPerformanceDay[]> {
-    const result = await this.pool.query<{
-      clicks: string;
-      confirmedBidMinor: string;
-      configurationChecksum: string;
-      date: string;
-      inputChecksum: string;
-      orderedUnits: string | null;
-      spendMinor: string;
-      views: string | null;
-    }>(
-      `SELECT "wbStatisticDate"::text AS date, "confirmedBidMinor",
-              "clicksDelta" AS clicks, "orderedUnitsDelta" AS "orderedUnits",
-              "spendDeltaMinor" AS "spendMinor", "viewsDelta" AS views,
-              "inputChecksum",
-              COALESCE("activePlacementConfig"->>'configurationChecksum',
-                       "inputChecksum") AS "configurationChecksum"
-         FROM "BidPerformanceDay"
-        WHERE "targetId" = $1
-          AND "status" = 'FINALIZED'
-          AND "wbStatisticDate" >=
-              $3::date - ($2 * INTERVAL '1 day')
-        ORDER BY "wbStatisticDate", "confirmedBidMinor"`,
-      [
-        targetId,
-        policy.baselineWindowDays + this.configuration.sync.conversionLagDays + 2,
-        formatAccountLocalDate(this.configuration.accountTimezone, decisionAt),
-      ],
+    const rows = await loadDecisionPerformanceDayRows(
+      this.database,
+      targetId,
+      policy.baselineWindowDays + this.configuration.sync.conversionLagDays + 2,
+      formatAccountLocalDate(this.configuration.accountTimezone, decisionAt),
     );
     return Object.freeze(
-      result.rows.map((row) =>
+      rows.map((row) =>
         Object.freeze({
-          bidMinor: BigInt(row.confirmedBidMinor),
-          clicks: BigInt(row.clicks),
+          bidMinor: row.confirmedBidMinor,
+          clicks: row.clicks,
           configurationChecksum: row.configurationChecksum,
           date: row.date,
           inputChecksum: row.inputChecksum,
-          orderedUnits: row.orderedUnits === null ? null : BigInt(row.orderedUnits),
-          spendMinor: BigInt(row.spendMinor),
-          views: row.views === null ? null : BigInt(row.views),
+          orderedUnits: row.orderedUnits,
+          spendMinor: row.spendMinor,
+          views: row.views,
         }),
       ),
     );
@@ -393,7 +221,7 @@ export class DecisionJobService {
    * @param row - Current automation state.
    * @returns Policy forced to observe-only when APPLY is not currently possible.
    */
-  private effectivePolicy(policy: DecisionPolicy, row: TargetDecisionRow): DecisionPolicy {
+  private effectivePolicy(policy: DecisionPolicy, row: DecisionTargetRow): DecisionPolicy {
     const automationApply =
       row.campaignAutomation === 'APPLY' &&
       (row.targetAutomation === null || row.targetAutomation === 'APPLY');
@@ -417,7 +245,7 @@ export class DecisionJobService {
    * @returns Atomic experiment plan and starting decision, or null.
    */
   private planExploration(
-    row: TargetDecisionRow,
+    row: DecisionTargetRow,
     policy: DecisionPolicy,
     result: DecisionResult,
     decisionAt: Date,
@@ -433,7 +261,7 @@ export class DecisionJobService {
       row.currentBidMinor === null ||
       row.minimumBidMinor === null ||
       row.expectedContributionMinor === null ||
-      BigInt(row.expectedContributionMinor) <= 0n ||
+      row.expectedContributionMinor <= 0n ||
       policy.maxExplorationSpendMinor === null
     ) {
       return null;
@@ -444,15 +272,14 @@ export class DecisionJobService {
     ) {
       return null;
     }
-    const current = BigInt(row.currentBidMinor);
-    const dailyAnchor =
-      row.dailyAnchorBidMinor === null ? current : BigInt(row.dailyAnchorBidMinor);
+    const current = row.currentBidMinor;
+    const dailyAnchor = row.dailyAnchorBidMinor ?? current;
     const cycleFloor =
       (current * BigInt(1_000_000 - policy.maxDecreasePerCyclePpm) + 999_999n) / 1_000_000n;
     const dailyFloor =
       (dailyAnchor * BigInt(1_000_000 - policy.maxDailyDecreasePpm) + 999_999n) / 1_000_000n;
     const floor = maximum(
-      BigInt(row.minimumBidMinor),
+      row.minimumBidMinor,
       policy.policyMinBidMinor ?? 0n,
       cycleFloor,
       dailyFloor,
@@ -515,12 +342,12 @@ export class DecisionJobService {
    * @returns Complete input.
    */
   private buildInput(
-    row: TargetDecisionRow,
+    row: DecisionTargetRow,
     policy: DecisionPolicy,
     days: readonly DecisionPerformanceDay[],
     decisionAt: Date,
   ): DecisionInput {
-    const currentBid = row.currentBidMinor === null ? 0n : BigInt(row.currentBidMinor);
+    const currentBid = row.currentBidMinor ?? 0n;
     const accountLocalDate = formatAccountLocalDate(this.configuration.accountTimezone, decisionAt);
     const recommendationBidHintsMinor = extractRecommendationHints(
       row.recommendationData,
@@ -564,18 +391,16 @@ export class DecisionJobService {
       capability: normalizeCapability(row.capability),
       currentBidMinor: currentBid,
       currentTrafficRegimeChecksum: row.coherentRegimeChecksum ?? 'missing-regime',
-      dailyAnchorBidMinor:
-        row.dailyAnchorBidMinor === null ? currentBid : BigInt(row.dailyAnchorBidMinor),
+      dailyAnchorBidMinor: row.dailyAnchorBidMinor ?? currentBid,
       decisionAt,
       endpointQuantumMinor: 1n,
-      expectedContributionBeforeAdsMinor:
-        row.expectedContributionMinor === null ? null : BigInt(row.expectedContributionMinor),
+      expectedContributionBeforeAdsMinor: row.expectedContributionMinor,
       lastWriteAt: row.lastWriteAt === null ? null : new Date(row.lastWriteAt),
       manualPause: campaignAutomationDisabled,
       paymentType: row.paymentType === 'CPC' ? 'CPC' : 'CPM',
       performanceDays: days,
       policy,
-      productEconomicsVersion: row.economicsVersion === null ? null : BigInt(row.economicsVersion),
+      productEconomicsVersion: row.economicsVersion,
       recommendationBidHintsMinor,
       recommendationSnapshotChecksum:
         recommendationBidHintsMinor.length === 0 ? null : row.recommendationSourceChecksum,
@@ -590,13 +415,13 @@ export class DecisionJobService {
         row.paymentType !== 'UNKNOWN' &&
         row.bidType !== 'UNKNOWN',
       targetKey: Object.freeze({
-        nmId: BigInt(row.nmId),
+        nmId: row.nmId,
         normQueryCanonical: row.normQueryCanonical,
         placement: row.placement,
         targetKind: row.targetKind,
-        wbCampaignId: BigInt(row.wbCampaignId),
+        wbCampaignId: row.wbCampaignId,
       }),
-      wbMinimumBidMinor: row.minimumBidMinor === null ? null : BigInt(row.minimumBidMinor),
+      wbMinimumBidMinor: row.minimumBidMinor,
     });
   }
 }

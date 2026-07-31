@@ -11,6 +11,7 @@ COPY apps/bidder/package.json apps/bidder/package.json
 COPY apps/wb-mock/package.json apps/wb-mock/package.json
 COPY packages/config/package.json packages/config/package.json
 COPY packages/contracts/package.json packages/contracts/package.json
+COPY packages/database/package.json packages/database/package.json
 COPY packages/data-sync/package.json packages/data-sync/package.json
 COPY packages/decision-engine/package.json packages/decision-engine/package.json
 COPY packages/write-pipeline/package.json packages/write-pipeline/package.json
@@ -22,6 +23,7 @@ COPY . .
 RUN pnpm run prisma:generate
 RUN pnpm --filter @wb-bidder/config build \
     && pnpm --filter @wb-bidder/contracts build \
+    && pnpm --filter @wb-bidder/database build \
     && pnpm --filter @wb-bidder/wb-api build \
     && pnpm --filter @wb-bidder/data-sync build \
     && pnpm --filter @wb-bidder/decision-engine build \

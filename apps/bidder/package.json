@@ -10,6 +10,7 @@
     "@nestjs/swagger": "11.4.6",
     "@wb-bidder/config": "workspace:*",
     "@wb-bidder/contracts": "workspace:*",
+    "@wb-bidder/database": "workspace:*",
     "@wb-bidder/data-sync": "workspace:*",
     "@wb-bidder/decision-engine": "workspace:*",
     "@wb-bidder/write-pipeline": "workspace:*",
@@ -17,7 +18,6 @@
     "class-transformer": "0.5.1",
     "class-validator": "0.15.1",
     "nestjs-pino": "4.6.0",
-    "pg": "8.16.3",
     "prom-client": "15.1.3",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2"

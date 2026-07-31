@@ -1,16 +1,17 @@
-import { Pool } from 'pg';
+import { createTestDatabaseClient, type TestDatabaseClient } from '@wb-bidder/database';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { PostgresRateLimitStore } from '@wb-bidder/wb-api';
+import { PrismaRateLimitStore } from '@wb-bidder/wb-api';
 
 const databaseUrl = process.env.DATABASE_URL;
 const describeWithDatabase = databaseUrl === undefined ? describe.skip : describe;
 
 describeWithDatabase('PostgreSQL WB rate-limit coordination', () => {
-  let pool: Pool;
+  let pool: TestDatabaseClient;
 
   beforeAll(() => {
-    pool = new Pool({ connectionString: databaseUrl });
+    if (databaseUrl === undefined) throw new Error('DATABASE_URL is required');
+    pool = createTestDatabaseClient({ connectionString: databaseUrl });
   });
 
   afterAll(async () => {
@@ -19,8 +20,8 @@ describeWithDatabase('PostgreSQL WB rate-limit coordination', () => {
 
   it('admits only one concurrent replica and shares authoritative freezes', async () => {
     const bucketKey = `integration:${String(process.pid)}:${String(Date.now())}`;
-    const firstReplica = new PostgresRateLimitStore(pool);
-    const secondReplica = new PostgresRateLimitStore(pool);
+    const firstReplica = new PrismaRateLimitStore(pool);
+    const secondReplica = new PrismaRateLimitStore(pool);
     const profile = { burst: 1, intervalMs: 1_000, requests: 1 };
     const nowMs = 2_000_000_000_000;
 

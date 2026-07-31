@@ -2,9 +2,8 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { createHash, randomUUID } from 'node:crypto';
 import canonicalize from 'canonicalize';
-import type { Pool, PoolClient } from 'pg';
 
-import { DATABASE_POOL } from './database.js';
+import { DATABASE_CLIENT } from './database.js';
 import { AdminApiError } from './problem-details.js';
 import { RuntimeClockService } from './runtime-clock.service.js';
 import type {
@@ -16,19 +15,26 @@ import type {
   PolicyCreateDto,
 } from './admin-dto.js';
 import { DecisionRepository, type DecisionPolicy } from '@wb-bidder/decision-engine';
+import {
+  createRawDatabaseClient,
+  type DatabaseClient,
+  type RawTransactionClient,
+} from '@wb-bidder/database';
 import { WritePipelineRepository } from '@wb-bidder/write-pipeline';
 
 @Injectable()
 export class AdminService {
   private readonly decisions: DecisionRepository;
+  private readonly pool;
   private readonly writes: WritePipelineRepository;
 
   public constructor(
-    @Inject(DATABASE_POOL) private readonly pool: Pool,
+    @Inject(DATABASE_CLIENT) database: DatabaseClient,
     private readonly clock: RuntimeClockService,
   ) {
-    this.decisions = new DecisionRepository(pool);
-    this.writes = new WritePipelineRepository(pool);
+    this.pool = createRawDatabaseClient(database);
+    this.decisions = new DecisionRepository(database);
+    this.writes = new WritePipelineRepository(database);
   }
 
   public async getEconomics(nmId: bigint, at?: Date) {
@@ -43,7 +49,7 @@ export class AdminService {
         ORDER BY "version" DESC LIMIT 1`,
       [nmId.toString(), effectiveAt],
     );
-    const row = result.rows[0] as Record<string, unknown> | undefined;
+    const row = result.rows[0];
     if (row === undefined)
       throw new AdminApiError(404, 'PRODUCT_ECONOMICS_NOT_FOUND', 'No effective version exists.');
     return { body: serialize(row), etag: economicsEtag(row.version) };
@@ -178,7 +184,7 @@ export class AdminService {
          FROM "BiddingPolicy" WHERE "id" = $1`,
       [id],
     );
-    const row = result.rows[0] as Record<string, unknown> | undefined;
+    const row = result.rows[0];
     if (row === undefined) throw new AdminApiError(404, 'POLICY_NOT_FOUND', 'Policy not found.');
     return { body: serialize(row), etag: versionEtag('policy', row.version) };
   }
@@ -351,7 +357,7 @@ export class AdminService {
     const table = input.entityType === 'campaign' ? 'CampaignAutomation' : 'TargetAutomation';
     const column = input.entityType === 'campaign' ? 'campaignId' : 'targetId';
     return this.transactionalMutation(input, async (client, audit) => {
-      const current = await client.query<Record<string, unknown>>(
+      const current = await client.query(
         `SELECT "id", "mode"::text, "version" FROM "${table}" WHERE "${column}" = $1 FOR UPDATE`,
         [input.entityId],
       );
@@ -612,7 +618,7 @@ export class AdminService {
 
   private async transactionalMutation(
     input: MutationContext,
-    mutation: (client: PoolClient, audit: { before?: unknown }) => Promise<unknown>,
+    mutation: (client: RawTransactionClient, audit: { before?: unknown }) => Promise<unknown>,
   ) {
     const scope = input.scope;
     const requestChecksum = checksum({
@@ -676,7 +682,11 @@ export class AdminService {
   }
 }
 
-async function lockIdempotencyKey(client: PoolClient, scope: string, key: string): Promise<void> {
+async function lockIdempotencyKey(
+  client: RawTransactionClient,
+  scope: string,
+  key: string,
+): Promise<void> {
   await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
     `admin-idempotency:${scope}:${key}`,
   ]);

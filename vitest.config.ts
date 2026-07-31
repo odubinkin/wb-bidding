@@ -91,6 +91,9 @@ export default defineConfig({
       '@wb-bidder/contracts': fileURLToPath(
         new URL('./packages/contracts/src/index.ts', import.meta.url),
       ),
+      '@wb-bidder/database': fileURLToPath(
+        new URL('./packages/database/src/index.ts', import.meta.url),
+      ),
       '@wb-bidder/data-sync': fileURLToPath(
         new URL('./packages/data-sync/src/index.ts', import.meta.url),
       ),

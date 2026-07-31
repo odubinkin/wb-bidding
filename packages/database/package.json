@@ -1,5 +1,5 @@
 {
-  "name": "@wb-bidder/data-sync",
+  "name": "@wb-bidder/database",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -12,13 +12,17 @@
     }
   },
   "dependencies": {
-    "@wb-bidder/contracts": "workspace:*",
-    "@wb-bidder/database": "workspace:*",
-    "@wb-bidder/wb-api": "workspace:*"
+    "@prisma/adapter-pg": "7.9.1",
+    "@prisma/client": "7.9.1"
   },
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts --clean",
     "clean": "rimraf dist",
     "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "rimraf": "6.0.1",
+    "tsup": "8.5.1",
+    "typescript": "5.9.3"
   }
 }

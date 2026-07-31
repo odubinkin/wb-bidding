@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import type { Pool } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
+import type { DatabaseClient } from '@wb-bidder/database';
 
 import {
   createWorkerIdentity,
@@ -37,20 +37,37 @@ describe('replica-safe worker identity', () => {
       hostname: 'bidder-a',
       pid: 11,
     });
-    const query = vi.fn().mockResolvedValue({ rowCount: 0 });
+    let economicsOwner = '';
+    let jobOwner = '';
+    const updateEconomics = vi.fn((input: { readonly where: { readonly leaseOwner: string } }) => {
+      economicsOwner = input.where.leaseOwner;
+      return Promise.resolve({ count: 0 });
+    });
+    const updateJobs = vi.fn((input: { readonly where: { readonly leaseOwner: string } }) => {
+      jobOwner = input.where.leaseOwner;
+      return Promise.resolve({ count: 0 });
+    });
+    const transaction = vi.fn(async (operations: readonly Promise<unknown>[]) =>
+      Promise.all(operations),
+    );
 
-    await releaseOwnedSchedulerLeases({ query } as unknown as Pool, identity);
+    await releaseOwnedSchedulerLeases(
+      {
+        $transaction: transaction,
+        manualJob: { updateMany: updateJobs },
+        productEconomicsImport: { updateMany: updateEconomics },
+      } as unknown as DatabaseClient,
+      identity,
+    );
 
-    expect(query).toHaveBeenCalledTimes(2);
-    for (const [statement, parameters] of query.mock.calls as [string, readonly string[]][]) {
-      expect(statement).toContain('"leaseOwner" = $1');
-      expect(statement).not.toContain('LIKE');
-      expect(parameters).toHaveLength(1);
-      expect(parameters[0]).toMatch(new RegExp(`^${escapeRegExp(identity.prefix)}:`));
-      expect(parameters[0]).not.toMatch(new RegExp(`^${escapeRegExp(otherIdentity.prefix)}:`));
+    expect(updateEconomics).toHaveBeenCalledTimes(1);
+    expect(updateJobs).toHaveBeenCalledTimes(1);
+    for (const owner of [economicsOwner, jobOwner]) {
+      expect(owner).toMatch(new RegExp(`^${escapeRegExp(identity.prefix)}:`));
+      expect(owner).not.toMatch(new RegExp(`^${escapeRegExp(otherIdentity.prefix)}:`));
     }
-    expect(query.mock.calls[0]?.[1]).toEqual([identity.owner('economics-import')]);
-    expect(query.mock.calls[1]?.[1]).toEqual([identity.owner('manual-job')]);
+    expect(economicsOwner).toBe(identity.owner('economics-import'));
+    expect(jobOwner).toBe(identity.owner('manual-job'));
   });
 });
 

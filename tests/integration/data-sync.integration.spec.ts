@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { Pool } from 'pg';
+import { createTestDatabaseClient, type TestDatabaseClient } from '@wb-bidder/database';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import {
@@ -16,11 +16,12 @@ const databaseUrl = process.env.DATABASE_URL;
 const describeWithDatabase = databaseUrl === undefined ? describe.skip : describe;
 
 describeWithDatabase('data synchronization persistence', () => {
-  let pool: Pool;
+  let pool: TestDatabaseClient;
   let repository: DataSyncRepository;
 
   beforeAll(() => {
-    pool = new Pool({ connectionString: databaseUrl });
+    if (databaseUrl === undefined) throw new Error('DATABASE_URL is required');
+    pool = createTestDatabaseClient({ connectionString: databaseUrl });
     repository = new DataSyncRepository(pool);
   });
 
@@ -352,7 +353,7 @@ describeWithDatabase('data synchronization persistence', () => {
     );
     expect(versions.rows.map((row) => row.status)).toEqual(['SUPERSEDED', 'FINALIZED']);
     expect(versions.rows[0]?.inputChecksum).not.toBe(versions.rows[1]?.inputChecksum);
-    expect(versions.rows[1]?.orderedUnitsDelta).toBe('3');
+    expect(versions.rows[1]?.orderedUnitsDelta).toBe(3n);
   });
 
   it('supports only statistics-eligible campaign statuses and fails closed otherwise', async () => {
@@ -423,13 +424,13 @@ describeWithDatabase('data synchronization persistence', () => {
       throw new Error('DATABASE_URL is required by this integration project');
     }
     const databaseName = `wb_stage2_populated_${randomUUID().replaceAll('-', '')}`;
-    const admin = new Pool({ connectionString: databaseUrl });
+    const admin = createTestDatabaseClient({ connectionString: databaseUrl });
     const isolatedUrl = new URL(databaseUrl);
     isolatedUrl.pathname = `/${databaseName}`;
-    let isolated: Pool | undefined;
+    let isolated: TestDatabaseClient | undefined;
     try {
       await admin.query(`CREATE DATABASE "${databaseName}"`);
-      isolated = new Pool({ connectionString: isolatedUrl.toString() });
+      isolated = createTestDatabaseClient({ connectionString: isolatedUrl.toString() });
       for (const migration of ['202607281330_initial', '202607281410_stage1_rate_limiter']) {
         const sql = await readFile(
           new URL(`../../prisma/migrations/${migration}/migration.sql`, import.meta.url),

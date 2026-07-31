@@ -1,14 +1,14 @@
 import type { Provider } from '@nestjs/common';
-import type { Pool } from 'pg';
 
 import { APP_CONFIGURATION } from './application-config.js';
-import { DATABASE_POOL } from './database.js';
+import { DATABASE_CLIENT } from './database.js';
 import { ObservabilityService } from './observability.service.js';
 import { RuntimeClockService } from './runtime-clock.service.js';
 import { WB_TOKEN_PROFILE } from './wb-integration.js';
 import { DataSyncRepository, WbDataSyncWorker } from '@wb-bidder/data-sync';
 import { DecisionRepository } from '@wb-bidder/decision-engine';
 import { formatAccountLocalDate, type AppConfiguration } from '@wb-bidder/config';
+import type { DatabaseClient } from '@wb-bidder/database';
 import {
   CURRENT_ENDPOINT_PROFILE,
   MOCK_ENDPOINT_PROFILE,
@@ -17,7 +17,7 @@ import {
 } from '@wb-bidder/contracts';
 import {
   CircuitBreakerRegistry,
-  PostgresRateLimitStore,
+  PrismaRateLimitStore,
   WbApiClient,
   WbRateLimiter,
   applyStricterOverrides,
@@ -51,7 +51,7 @@ export const CARD_BID_GATEWAY = Symbol('CARD_BID_GATEWAY');
 export const CLUSTER_BID_GATEWAY = Symbol('CLUSTER_BID_GATEWAY');
 
 /**
- * Production runtime providers sharing one pool, limiter, breakers, and WB client.
+ * Production runtime providers sharing one Prisma Client, limiter, breakers, and WB client.
  */
 export const runtimeProviders: readonly Provider[] = [
   {
@@ -59,12 +59,18 @@ export const runtimeProviders: readonly Provider[] = [
     useFactory: createCircuitBreakerRegistry,
   },
   {
-    inject: [APP_CONFIGURATION, DATABASE_POOL, WB_TOKEN_PROFILE, WB_BREAKERS, ObservabilityService],
+    inject: [
+      APP_CONFIGURATION,
+      DATABASE_CLIENT,
+      WB_TOKEN_PROFILE,
+      WB_BREAKERS,
+      ObservabilityService,
+    ],
     provide: WB_API_CLIENT,
     useFactory: createWbApiClient,
   },
   {
-    inject: [DATABASE_POOL],
+    inject: [DATABASE_CLIENT],
     provide: DATA_SYNC_REPOSITORY,
     useFactory: createDataSyncRepository,
   },
@@ -74,12 +80,12 @@ export const runtimeProviders: readonly Provider[] = [
     useFactory: createDataSyncWorker,
   },
   {
-    inject: [DATABASE_POOL],
+    inject: [DATABASE_CLIENT],
     provide: DECISION_REPOSITORY,
     useFactory: createDecisionRepository,
   },
   {
-    inject: [DATABASE_POOL],
+    inject: [DATABASE_CLIENT],
     provide: WRITE_PIPELINE_REPOSITORY,
     useFactory: createWritePipelineRepository,
   },
@@ -107,31 +113,31 @@ function createCircuitBreakerRegistry(): CircuitBreakerRegistry {
 /**
  * Creates data-sync persistence.
  *
- * @param pool - Shared database pool.
+ * @param database - Shared Prisma Client.
  * @returns Repository.
  */
-function createDataSyncRepository(pool: Pool): DataSyncRepository {
-  return new DataSyncRepository(pool);
+function createDataSyncRepository(database: DatabaseClient): DataSyncRepository {
+  return new DataSyncRepository(database);
 }
 
 /**
  * Creates decision persistence.
  *
- * @param pool - Shared database pool.
+ * @param database - Shared Prisma Client.
  * @returns Repository.
  */
-function createDecisionRepository(pool: Pool): DecisionRepository {
-  return new DecisionRepository(pool);
+function createDecisionRepository(database: DatabaseClient): DecisionRepository {
+  return new DecisionRepository(database);
 }
 
 /**
  * Creates write-pipeline persistence.
  *
- * @param pool - Shared database pool.
+ * @param database - Shared Prisma Client.
  * @returns Repository.
  */
-function createWritePipelineRepository(pool: Pool): WritePipelineRepository {
-  return new WritePipelineRepository(pool);
+function createWritePipelineRepository(database: DatabaseClient): WritePipelineRepository {
+  return new WritePipelineRepository(database);
 }
 
 /**
@@ -158,7 +164,7 @@ function createClusterBidGateway(client: WbApiClient): WbClusterBidGateway {
  * Creates one runtime WB adapter over a cross-replica PostgreSQL limiter.
  *
  * @param configuration - Validated environment.
- * @param pool - Shared pool.
+ * @param database - Shared Prisma Client.
  * @param token - Safe decoded token profile.
  * @param breakers - Shared circuit breakers.
  * @param observability - Bounded telemetry sink.
@@ -166,7 +172,7 @@ function createClusterBidGateway(client: WbApiClient): WbClusterBidGateway {
  */
 function createWbApiClient(
   configuration: AppConfiguration,
-  pool: Pool,
+  database: DatabaseClient,
   token: ValidatedTokenProfile,
   breakers: CircuitBreakerRegistry,
   observability: ObservabilityService,
@@ -195,7 +201,7 @@ function createWbApiClient(
         intervalMs: configuration.wb.globalRateLimitIntervalMs,
         requests: configuration.wb.globalRateLimitRequests,
       },
-      new PostgresRateLimitStore(pool),
+      new PrismaRateLimitStore(database),
     ),
     readRetryPolicy: {
       baseMs: configuration.wb.readRetryBaseMs,

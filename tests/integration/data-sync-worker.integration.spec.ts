@@ -3,7 +3,7 @@ import type { INestApplication } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import type { Server } from 'node:http';
-import { Pool } from 'pg';
+import { createTestDatabaseClient, type TestDatabaseClient } from '@wb-bidder/database';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { DecisionJobService } from '../../apps/bidder/src/decision-job.service.js';
@@ -45,11 +45,12 @@ const MIGRATIONS = Object.freeze([
 ]);
 
 describeWithDatabase('WB mock to PostgreSQL synchronization', () => {
-  let admin: Pool;
+  let admin: TestDatabaseClient;
   let application: INestApplication;
   let databaseName: string;
+  let isolatedUrl: URL;
   let mockBaseUrl: URL;
-  let pool: Pool;
+  let pool: TestDatabaseClient;
   let verifiedMockWorker: WbDataSyncWorker;
   let worker: WbDataSyncWorker;
 
@@ -74,11 +75,11 @@ describeWithDatabase('WB mock to PostgreSQL synchronization', () => {
     databaseName = `wb_sync_worker_${randomUUID().replaceAll('-', '').slice(0, 20)}`;
     const adminUrl = new URL(sourceUrl);
     adminUrl.pathname = '/postgres';
-    const isolatedUrl = new URL(sourceUrl);
+    isolatedUrl = new URL(sourceUrl);
     isolatedUrl.pathname = `/${databaseName}`;
-    admin = new Pool({ connectionString: adminUrl.toString() });
+    admin = createTestDatabaseClient({ connectionString: adminUrl.toString() });
     await admin.query(`CREATE DATABASE "${databaseName}"`);
-    pool = new Pool({ connectionString: isolatedUrl.toString() });
+    pool = createTestDatabaseClient({ connectionString: isolatedUrl.toString() });
     for (const migration of MIGRATIONS) {
       await pool.query(
         await readFile(
@@ -290,10 +291,10 @@ describeWithDatabase('WB mock to PostgreSQL synchronization', () => {
     expect(clusters.rows).toEqual([
       {
         baseline: 'EXPLICIT',
-        baselineBidMinor: '700',
+        baselineBidMinor: 700n,
         capability: 'CLUSTER_WRITE_READY',
-        currentBidMinor: '700',
-        minimumBidMinor: '500',
+        currentBidMinor: 700n,
+        minimumBidMinor: 500n,
         normQueryWire: 'synthetic cluster one',
         state: 'EXPLICIT',
       },
@@ -302,7 +303,7 @@ describeWithDatabase('WB mock to PostgreSQL synchronization', () => {
         baselineBidMinor: null,
         capability: 'CLUSTER_WRITE_READY',
         currentBidMinor: null,
-        minimumBidMinor: '500',
+        minimumBidMinor: 500n,
         normQueryWire: 'synthetic cluster two',
         state: 'ABSENT',
       },
@@ -352,7 +353,7 @@ describeWithDatabase('WB mock to PostgreSQL synchronization', () => {
           AND target."targetKind" = 'CLUSTER'
           AND target."normQueryWire" = 'synthetic cluster one'`,
     );
-    expect(refreshed.rows[0]?.currentBidMinor).toBe('800');
+    expect(refreshed.rows[0]?.currentBidMinor).toBe(800n);
   });
 
   it('runs synchronized evidence through decision, durable dispatch, and verified APPLIED', async () => {
@@ -456,7 +457,7 @@ describeWithDatabase('WB mock to PostgreSQL synchronization', () => {
       ACCOUNT_CURRENCY: 'RUB',
       ACCOUNT_TIMEZONE: 'Europe/Moscow',
       ADMIN_API_SERVICE_TOKEN: 'runtime-test-admin-token-with-32-chars',
-      DATABASE_URL: pool.options.connectionString ?? '',
+      DATABASE_URL: isolatedUrl.toString(),
       WB_API_MOCK_BASE_URL: mockBaseUrl.toString(),
       WB_API_MODE: 'mock',
       WB_API_TOKEN: 'mock-test-token',

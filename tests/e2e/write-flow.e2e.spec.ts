@@ -3,7 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import type { Server } from 'node:http';
-import { Pool } from 'pg';
+import { createTestDatabaseClient, type TestDatabaseClient } from '@wb-bidder/database';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { INestApplication } from '@nestjs/common';
@@ -29,7 +29,7 @@ const databaseUrl = process.env.DATABASE_URL;
 const describeWithDatabase = databaseUrl === undefined ? describe.skip : describe;
 
 describeWithDatabase('mock HTTP to durable verified write flow', () => {
-  let admin: Pool;
+  let admin: TestDatabaseClient;
   let application: INestApplication;
   let baseUrl: URL;
   let databaseName: string;
@@ -38,7 +38,7 @@ describeWithDatabase('mock HTTP to durable verified write flow', () => {
   let clusterDeleteExecutor: WriteExecutor;
   let clusterGateway: WbClusterBidGateway;
   let clusterSetExecutor: WriteExecutor;
-  let pool: Pool;
+  let pool: TestDatabaseClient;
   let repository: WritePipelineRepository;
   let server: Server;
   let targetId: string;
@@ -65,9 +65,9 @@ describeWithDatabase('mock HTTP to durable verified write flow', () => {
     adminUrl.pathname = '/postgres';
     const isolatedUrl = new URL(sourceUrl);
     isolatedUrl.pathname = `/${databaseName}`;
-    admin = new Pool({ connectionString: adminUrl.toString() });
+    admin = createTestDatabaseClient({ connectionString: adminUrl.toString() });
     await admin.query(`CREATE DATABASE "${databaseName}"`);
-    pool = new Pool({ connectionString: isolatedUrl.toString() });
+    pool = createTestDatabaseClient({ connectionString: isolatedUrl.toString() });
     for (const migration of [
       '202607281330_initial',
       '202607281410_stage1_rate_limiter',
@@ -337,7 +337,7 @@ describeWithDatabase('mock HTTP to durable verified write flow', () => {
   });
 });
 
-async function createFixture(pool: Pool): Promise<string> {
+async function createFixture(pool: TestDatabaseClient): Promise<string> {
   const campaignId = '00000000-0000-4000-8000-000000000101';
   const targetId = randomUUID();
   const economicsId = randomUUID();
@@ -380,7 +380,7 @@ async function createFixture(pool: Pool): Promise<string> {
   return targetId;
 }
 
-async function enqueueNextDecision(pool: Pool, targetId: string, bidMinor: bigint) {
+async function enqueueNextDecision(pool: TestDatabaseClient, targetId: string, bidMinor: bigint) {
   const reference = await pool.query<{ economicsId: string; policyId: string }>(
     `SELECT e."id" AS "economicsId", p."id" AS "policyId"
        FROM "ProductEconomics" e CROSS JOIN "BiddingPolicy" p
@@ -393,7 +393,7 @@ async function enqueueNextDecision(pool: Pool, targetId: string, bidMinor: bigin
 }
 
 async function enqueueDecision(
-  pool: Pool,
+  pool: TestDatabaseClient,
   targetId: string,
   economicsId: string,
   policyId: string,
@@ -434,7 +434,10 @@ function hexChecksum(value: string): string {
   return Buffer.from(value).toString('hex').padEnd(64, '0').slice(0, 64);
 }
 
-async function createClusterTarget(pool: Pool, cardTargetId: string): Promise<string> {
+async function createClusterTarget(
+  pool: TestDatabaseClient,
+  cardTargetId: string,
+): Promise<string> {
   const targetId = randomUUID();
   const source = await pool.query<{ campaignId: string }>(
     `SELECT "campaignId" FROM "CampaignTarget" WHERE "id" = $1`,
@@ -458,7 +461,7 @@ async function createClusterTarget(pool: Pool, cardTargetId: string): Promise<st
 }
 
 async function enqueueClusterDecision(
-  pool: Pool,
+  pool: TestDatabaseClient,
   targetId: string,
   action: 'INCREASE' | 'RESTORE_ABSENT_OVERRIDE',
   currentBidMinor: bigint | null,
@@ -542,7 +545,7 @@ function clusterClaim(
 }
 
 async function reconcileCluster(
-  pool: Pool,
+  pool: TestDatabaseClient,
   repository: WritePipelineRepository,
   targetId: string,
   decisionId: string,

@@ -9,11 +9,17 @@ import {
   type GaugeConfiguration,
   type HistogramConfiguration,
 } from 'prom-client';
-import type { Pool } from 'pg';
 
 import { APP_CONFIGURATION } from './application-config.js';
-import { DATABASE_POOL } from './database.js';
+import { DATABASE_CLIENT } from './database.js';
 import type { AppConfiguration } from '@wb-bidder/config';
+import {
+  countTargetsWithoutCurrentEconomics,
+  listAppliedMigrationNames,
+  probeDatabase,
+  readDatabaseConnectionUtilization,
+  type DatabaseClient,
+} from '@wb-bidder/database';
 
 const REQUIRED_MIGRATIONS = Object.freeze([
   '202607281330_initial',
@@ -265,11 +271,11 @@ export class ObservabilityService {
   /**
    * Creates the metrics service and registers process metrics when enabled.
    *
-   * @param pool - Shared PostgreSQL pool.
+   * @param database - Shared Prisma Client.
    * @param configuration - Immutable startup configuration.
    */
   public constructor(
-    @Inject(DATABASE_POOL) private readonly pool: Pool,
+    @Inject(DATABASE_CLIENT) private readonly database: DatabaseClient,
     @Inject(APP_CONFIGURATION) private readonly configuration: AppConfiguration,
   ) {
     this.registry.setDefaultLabels({
@@ -330,7 +336,7 @@ export class ObservabilityService {
       { detail: 'validated startup schema', name: 'configuration', ok: true },
     ];
     try {
-      await this.pool.query('SELECT 1');
+      await probeDatabase(this.database);
       checks.push({ detail: 'query succeeded', name: 'database', ok: true });
     } catch {
       checks.push({ detail: 'query failed', name: 'database', ok: false });
@@ -343,13 +349,11 @@ export class ObservabilityService {
       name: 'migrations',
       ok: migrations.ok,
     });
-    const binding = await this.pool.query<{ present: boolean }>(
-      `SELECT EXISTS (SELECT 1 FROM "DeploymentAccountBinding") AS present`,
-    );
+    const bindingPresent = (await this.database.deploymentAccountBinding.count()) > 0;
     checks.push({
-      detail: binding.rows[0]?.present === true ? 'singleton present' : 'singleton missing',
+      detail: bindingPresent ? 'singleton present' : 'singleton missing',
       name: 'account_binding',
-      ok: binding.rows[0]?.present === true,
+      ok: bindingPresent,
     });
     const now = Date.now();
     const lastSuccess = this.integrationHealth.lastSuccessAt?.getTime() ?? 0;
@@ -419,12 +423,7 @@ export class ObservabilityService {
    */
   private async readMigrationState(): Promise<{ readonly detail: string; readonly ok: boolean }> {
     try {
-      const result = await this.pool.query<{ migration_name: string }>(
-        `SELECT migration_name
-           FROM "_prisma_migrations"
-          WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL`,
-      );
-      const applied = new Set(result.rows.map((row) => row.migration_name));
+      const applied = new Set(await listAppliedMigrationNames(this.database));
       const missing = REQUIRED_MIGRATIONS.filter((migration) => !applied.has(migration));
       return missing.length === 0
         ? { detail: 'all required migrations applied', ok: true }
@@ -441,59 +440,50 @@ export class ObservabilityService {
    */
   private async refreshDatabaseGauges(): Promise<void> {
     this.databasePoolUtilization.set(
-      this.pool.options.max === 0 ? 0 : this.pool.totalCount / this.pool.options.max,
+      await readDatabaseConnectionUtilization(this.database, 'wb-bidder', 20),
     );
-    const queue = await this.pool.query<{
-      ageSeconds: string | null;
-      count: string;
-      status: string;
-    }>(
-      `SELECT "status"::text AS status, COUNT(*)::text AS count,
-              EXTRACT(EPOCH FROM (clock_timestamp() - MIN("availableAt")))::text AS "ageSeconds"
-         FROM "DecisionQueueItem"
-        GROUP BY "status"`,
-    );
+    const queue = await this.database.decisionQueueItem.groupBy({
+      _count: { _all: true },
+      _min: { availableAt: true },
+      by: ['status'],
+    });
     this.queueItems.reset();
     let oldest = 0;
-    for (const row of queue.rows) {
-      this.queueItems.set({ status: row.status }, Number(row.count));
+    for (const row of queue) {
+      this.queueItems.set({ status: row.status }, row._count._all);
       if (row.status === 'QUEUED' || row.status === 'RETRY_WAIT') {
-        oldest = Math.max(oldest, Number(row.ageSeconds ?? '0'));
+        oldest = Math.max(
+          oldest,
+          row._min.availableAt === null ? 0 : (Date.now() - row._min.availableAt.getTime()) / 1_000,
+        );
       }
     }
     this.queueOldestAge.set(Math.max(0, oldest));
 
-    const economics = await this.pool.query<{ count: string }>(
-      `SELECT COUNT(*)::text AS count
-         FROM "CampaignTarget" t
-        WHERE NOT EXISTS (
-          SELECT 1 FROM "ProductEconomics" e
-           WHERE e."nmId" = t."nmId"
-             AND e."effectiveFrom" <= NOW()
-             AND (e."effectiveTo" IS NULL OR e."effectiveTo" > NOW())
-        )`,
+    this.targetsWithoutEconomics.set(
+      await countTargetsWithoutCurrentEconomics(this.database, new Date()),
     );
-    this.targetsWithoutEconomics.set(Number(economics.rows[0]?.count ?? '0'));
 
-    const experiments = await this.pool.query<{ count: string; status: string }>(
-      `SELECT "status"::text AS status, COUNT(*)::text AS count
-         FROM "BidExperiment" GROUP BY "status"`,
-    );
+    const experiments = await this.database.bidExperiment.groupBy({
+      _count: { _all: true },
+      by: ['status'],
+    });
     this.bidExperiments.reset();
-    for (const row of experiments.rows) {
-      this.bidExperiments.set({ status: row.status }, Number(row.count));
+    for (const row of experiments) {
+      this.bidExperiments.set({ status: row.status }, row._count._all);
     }
 
-    const stuck = await this.pool.query<{ count: string; status: string }>(
-      `SELECT "status"::text AS status, COUNT(*)::text AS count
-         FROM "WbWriteAttempt"
-        WHERE "status" IN ('PREPARED', 'DISPATCHING', 'UNKNOWN')
-          AND "preparedAt" < NOW() - INTERVAL '15 minutes'
-        GROUP BY "status"`,
-    );
+    const stuck = await this.database.wbWriteAttempt.groupBy({
+      _count: { _all: true },
+      by: ['status'],
+      where: {
+        preparedAt: { lt: new Date(Date.now() - 15 * 60_000) },
+        status: { in: ['PREPARED', 'DISPATCHING', 'UNKNOWN'] },
+      },
+    });
     this.stuckWriteAttempts.reset();
-    for (const row of stuck.rows) {
-      this.stuckWriteAttempts.set({ status: row.status }, Number(row.count));
+    for (const row of stuck) {
+      this.stuckWriteAttempts.set({ status: row.status }, row._count._all);
     }
   }
 }

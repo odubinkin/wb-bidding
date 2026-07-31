@@ -1,15 +1,20 @@
-/* eslint-disable jsdoc/check-param-names, jsdoc/require-jsdoc, jsdoc/require-param */
+/* eslint-disable jsdoc/require-jsdoc */
 import { randomUUID } from 'node:crypto';
-import type { Pool, PoolClient } from 'pg';
 
 import { normalizeCanonical, scopedChecksum } from './checksum.js';
 import { uuidV7 } from './ids.js';
 import { validateDecisionPolicy } from './policy.js';
 import type { DecisionPolicy, DecisionResult } from './types.js';
+import {
+  Prisma,
+  advisoryTransactionLock,
+  claimEconomicsImportRecord,
+  withTransaction,
+  type DatabaseClient,
+  type DatabaseTransaction,
+} from '@wb-bidder/database';
 
-/**
- * Atomic lower-only experiment creation accompanying its starting decision.
- */
+/** Atomic lower-only experiment creation accompanying its starting decision. */
 export interface ExperimentPlanWrite {
   readonly experimentBidMinor: bigint;
   readonly maxConcurrentPerAccount: number;
@@ -20,9 +25,7 @@ export interface ExperimentPlanWrite {
   readonly spendSafetyBufferMinor: bigint;
 }
 
-/**
- * Conditional immutable product-economics mutation.
- */
+/** Conditional immutable product-economics mutation. */
 export interface EconomicsMutation {
   readonly actor: string;
   readonly changeReason?: string;
@@ -39,9 +42,7 @@ export interface EconomicsMutation {
   readonly sourceUpdatedAt?: Date;
 }
 
-/**
- * One asynchronous economics import row.
- */
+/** One asynchronous economics import row. */
 export interface EconomicsImportRow {
   readonly contributionMinor: bigint;
   readonly effectiveFrom: Date;
@@ -53,23 +54,15 @@ export interface EconomicsImportRow {
   readonly sourceUpdatedAt?: Date;
 }
 
-/**
- * PostgreSQL persistence for immutable economics, policies, snapshots, and decisions.
- */
+/** Prisma persistence for immutable economics, policies, snapshots, and decisions. */
 export class DecisionRepository {
   /**
    * Creates a repository.
    *
-   * @param pool - Deployment PostgreSQL pool.
+   * @param database - Shared Prisma Client.
    */
-  public constructor(private readonly pool: Pool) {}
+  public constructor(private readonly database: DatabaseClient) {}
 
-  /**
-   * Creates or idempotently replays the next economics version.
-   *
-   * @param mutation - Versioned conditional mutation.
-   * @returns Version identity.
-   */
   public async createEconomicsVersion(
     mutation: EconomicsMutation,
   ): Promise<{ readonly created: boolean; readonly id: string; readonly version: bigint }> {
@@ -84,86 +77,67 @@ export class DecisionRepository {
       sourceReference: mutation.sourceReference ?? null,
       sourceUpdatedAt: mutation.sourceUpdatedAt ?? null,
     });
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-      await lockIdempotencyKey(client, 'product-economics', mutation.mutationKey);
-      await client.query("SELECT pg_advisory_xact_lock(hashtextextended('economics:' || $1, 0))", [
-        mutation.nmId.toString(),
-      ]);
-      const replay = await client.query<{
-        id: string;
-        inputChecksum: string;
-        version: string;
-      }>(
-        `SELECT "id", "inputChecksum", "version" FROM "ProductEconomics"
-          WHERE "mutationKey" = $1`,
-        [mutation.mutationKey],
+    return withTransaction(this.database, async (transaction) => {
+      await advisoryTransactionLock(
+        transaction,
+        `admin-idempotency:product-economics:${mutation.mutationKey}`,
       );
-      const replayed = replay.rows[0];
-      if (replayed !== undefined) {
-        if (replayed.inputChecksum !== checksum) {
-          throw new Error('IDEMPOTENCY_KEY_REUSED');
-        }
-        await client.query('COMMIT');
-        return Object.freeze({
-          created: false,
-          id: replayed.id,
-          version: BigInt(replayed.version),
-        });
+      await advisoryTransactionLock(transaction, `economics:${mutation.nmId.toString()}`);
+      const replay = await transaction.productEconomics.findUnique({
+        select: { id: true, inputChecksum: true, version: true },
+        where: { mutationKey: mutation.mutationKey },
+      });
+      if (replay !== null) {
+        if (replay.inputChecksum !== checksum) throw new Error('IDEMPOTENCY_KEY_REUSED');
+        return Object.freeze({ created: false, id: replay.id, version: replay.version });
       }
-      const current = await client.query<{
-        effectiveFrom: Date;
-        effectiveTo: Date | null;
-        expectedContributionBeforeAdsMinor: string;
-        id: string;
-        version: string;
-      }>(
-        `SELECT "id", "version", "effectiveFrom", "effectiveTo",
-                "expectedContributionBeforeAdsMinor"
-           FROM "ProductEconomics"
-          WHERE "nmId" = $1 AND "effectiveFrom" < $2
-            AND ("effectiveTo" IS NULL OR "effectiveTo" >= $2)
-          ORDER BY "effectiveFrom" DESC LIMIT 1 FOR UPDATE`,
-        [mutation.nmId.toString(), mutation.effectiveFrom],
-      );
-      const actualVersion = BigInt(current.rows[0]?.version ?? '0');
+      const current = await transaction.productEconomics.findFirst({
+        orderBy: { effectiveFrom: 'desc' },
+        select: {
+          effectiveFrom: true,
+          effectiveTo: true,
+          expectedContributionBeforeAdsMinor: true,
+          id: true,
+          version: true,
+        },
+        where: {
+          effectiveFrom: { lt: mutation.effectiveFrom },
+          nmId: mutation.nmId,
+          OR: [{ effectiveTo: null }, { effectiveTo: { gte: mutation.effectiveFrom } }],
+        },
+      });
+      const actualVersion = current?.version ?? 0n;
       if (actualVersion !== mutation.expectedCurrentVersion) {
         throw new Error(
           `VERSION_CONFLICT expected=${mutation.expectedCurrentVersion.toString()} actual=${actualVersion.toString()}`,
         );
       }
-      if (current.rows[0] !== undefined) {
-        await client.query(`UPDATE "ProductEconomics" SET "effectiveTo" = $2 WHERE "id" = $1`, [
-          current.rows[0].id,
-          mutation.effectiveFrom,
-        ]);
+      if (current !== null) {
+        await transaction.productEconomics.update({
+          data: { effectiveTo: mutation.effectiveFrom },
+          where: { id: current.id },
+        });
       }
       const id = randomUUID();
       const version = actualVersion + 1n;
-      await client.query(
-        `INSERT INTO "ProductEconomics"
-           ("id", "nmId", "effectiveFrom", "effectiveTo", "expectedContributionBeforeAdsMinor",
-            "source", "sourceUpdatedAt", "sourceReference", "version", "mutationKey",
-            "inputChecksum", "createdByActor")
-         VALUES ($1, $2, $3, $4, $5, $6::"ProductEconomicsSource", $7, $8, $9, $10, $11, $12)`,
-        [
+      await transaction.productEconomics.create({
+        data: {
+          createdByActor: mutation.actor,
+          effectiveFrom: mutation.effectiveFrom,
+          effectiveTo: mutation.effectiveTo ?? null,
+          expectedContributionBeforeAdsMinor: mutation.contributionMinor,
           id,
-          mutation.nmId.toString(),
-          mutation.effectiveFrom,
-          mutation.effectiveTo ?? null,
-          mutation.contributionMinor.toString(),
-          mutation.source,
-          mutation.sourceUpdatedAt ?? null,
-          mutation.sourceReference ?? null,
-          version.toString(),
-          mutation.mutationKey,
-          checksum,
-          mutation.actor,
-        ],
-      );
+          inputChecksum: checksum,
+          mutationKey: mutation.mutationKey,
+          nmId: mutation.nmId,
+          source: mutation.source,
+          sourceReference: mutation.sourceReference ?? null,
+          sourceUpdatedAt: mutation.sourceUpdatedAt ?? null,
+          version,
+        },
+      });
       await appendAudit(
-        client,
+        transaction,
         mutation.actor,
         'PRODUCT_ECONOMICS_VERSION_CREATED',
         id,
@@ -177,24 +151,12 @@ export class DecisionRepository {
           nmId: mutation.nmId,
           version,
         },
-        current.rows[0] ?? null,
+        current,
       );
-      await client.query('COMMIT');
       return Object.freeze({ created: true, id, version });
-    } catch (error: unknown) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+    });
   }
 
-  /**
-   * Enqueues an idempotent import of up to 10,000 unique articles.
-   *
-   * @param request - Batch request.
-   * @returns Existing or created import.
-   */
   public async enqueueEconomicsImport(request: {
     readonly actor: string;
     readonly changeReason?: string;
@@ -210,59 +172,56 @@ export class DecisionRepository {
       dryRun: request.dryRun,
       rows: request.rows,
     });
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-      await lockIdempotencyKey(client, request.idempotencyScope, request.idempotencyKey);
-      const existing = await client.query<{ id: string; requestChecksum: string }>(
-        `SELECT "id", "requestChecksum" FROM "ProductEconomicsImport"
-          WHERE "idempotencyScope" = $1 AND "idempotencyKey" = $2 FOR UPDATE`,
-        [request.idempotencyScope, request.idempotencyKey],
+    return withTransaction(this.database, async (transaction) => {
+      await advisoryTransactionLock(
+        transaction,
+        `admin-idempotency:${request.idempotencyScope}:${request.idempotencyKey}`,
       );
-      if (existing.rows[0] !== undefined) {
-        if (existing.rows[0].requestChecksum !== requestChecksum) {
+      const existing = await transaction.productEconomicsImport.findUnique({
+        select: { id: true, requestChecksum: true },
+        where: {
+          idempotencyScope_idempotencyKey: {
+            idempotencyKey: request.idempotencyKey,
+            idempotencyScope: request.idempotencyScope,
+          },
+        },
+      });
+      if (existing !== null) {
+        if (existing.requestChecksum !== requestChecksum) {
           throw new Error('IDEMPOTENCY_KEY_REUSED');
         }
-        await client.query('COMMIT');
-        return Object.freeze({ created: false, importId: existing.rows[0].id });
+        return Object.freeze({ created: false, importId: existing.id });
       }
       const importId = randomUUID();
-      await client.query(
-        `INSERT INTO "ProductEconomicsImport"
-           ("id", "status", "dryRun", "idempotencyScope", "idempotencyKey",
-            "requestChecksum", "totalItems", "createdByActor", "correlationId", "changeReason")
-         VALUES ($1, 'QUEUED', $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [
-          importId,
-          request.dryRun,
-          request.idempotencyScope,
-          request.idempotencyKey,
+      await transaction.productEconomicsImport.create({
+        data: {
+          changeReason: request.changeReason ?? 'unspecified import',
+          correlationId: request.correlationId,
+          createdByActor: request.actor,
+          dryRun: request.dryRun,
+          id: importId,
+          idempotencyKey: request.idempotencyKey,
+          idempotencyScope: request.idempotencyScope,
           requestChecksum,
-          request.rows.length,
-          request.actor,
-          request.correlationId,
-          request.changeReason ?? 'unspecified import',
-        ],
-      );
-      for (const row of request.rows) {
-        await client.query(
-          `INSERT INTO "ProductEconomicsImportItem"
-             ("id", "importId", "rowId", "nmId", "normalizedInput", "rowChecksum",
-              "status", "expectedCurrentVersion")
-           VALUES ($1, $2, $3, $4, $5::jsonb, $6, 'PENDING', $7)`,
-          [
-            randomUUID(),
-            importId,
-            row.rowId,
-            row.nmId.toString(),
-            JSON.stringify(normalizeCanonical(row)),
-            scopedChecksum('product-economics-import-row-v1', row),
-            row.expectedCurrentVersion.toString(),
-          ],
-        );
-      }
+          status: 'QUEUED',
+          totalItems: request.rows.length,
+          items: {
+            createMany: {
+              data: request.rows.map((row) => ({
+                expectedCurrentVersion: row.expectedCurrentVersion,
+                id: randomUUID(),
+                nmId: row.nmId,
+                normalizedInput: prismaJson(row),
+                rowChecksum: scopedChecksum('product-economics-import-row-v1', row),
+                rowId: row.rowId,
+                status: 'PENDING',
+              })),
+            },
+          },
+        },
+      });
       await appendAudit(
-        client,
+        transaction,
         request.actor,
         'PRODUCT_ECONOMICS_IMPORT_QUEUED',
         importId,
@@ -275,121 +234,86 @@ export class DecisionRepository {
           totalItems: request.rows.length,
         },
       );
-      await client.query('COMMIT');
       return Object.freeze({ created: true, importId });
-    } catch (error: unknown) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+    });
   }
 
-  /**
-   * Claims and processes one import with per-row partial success.
-   *
-   * @param workerId - Stable lease owner.
-   * @returns Processed import identifier or null.
-   */
   public async processNextEconomicsImport(workerId: string): Promise<string | null> {
     const claimed = await this.claimImport(workerId);
-    if (claimed === null) {
-      return null;
-    }
-    const items = await this.pool.query<ImportItemRow>(
-      `SELECT "id", "rowId", "nmId", "normalizedInput", "expectedCurrentVersion"
-         FROM "ProductEconomicsImportItem"
-        WHERE "importId" = $1 AND "status" IN ('PENDING', 'PROCESSING')
-        ORDER BY "rowId"`,
-      [claimed.id],
-    );
-    for (const item of items.rows) {
-      const heartbeat = await this.pool.query(
-        `UPDATE "ProductEconomicsImport"
-            SET "leaseUntil" = clock_timestamp() + INTERVAL '5 minutes'
-          WHERE "id" = $1 AND "status" = 'PROCESSING' AND "leaseOwner" = $2`,
-        [claimed.id, claimed.workerId],
-      );
-      if (heartbeat.rowCount !== 1) throw new Error('ECONOMICS_IMPORT_LEASE_LOST');
-      const processing = await this.pool.query(
-        `UPDATE "ProductEconomicsImportItem"
-            SET "status" = 'PROCESSING', "errorCode" = NULL, "errorDetail" = NULL
-          WHERE "id" = $1 AND "status" IN ('PENDING', 'PROCESSING')`,
-        [item.id],
-      );
-      if (processing.rowCount !== 1) continue;
+    if (claimed === null) return null;
+    const items = await this.database.productEconomicsImportItem.findMany({
+      orderBy: { rowId: 'asc' },
+      where: {
+        importId: claimed.id,
+        status: { in: ['PENDING', 'PROCESSING'] },
+      },
+    });
+    for (const stored of items) {
+      const heartbeat = await this.database.productEconomicsImport.updateMany({
+        data: { leaseUntil: new Date(Date.now() + 5 * 60_000) },
+        where: { id: claimed.id, leaseOwner: claimed.workerId, status: 'PROCESSING' },
+      });
+      if (heartbeat.count !== 1) throw new Error('ECONOMICS_IMPORT_LEASE_LOST');
+      const processing = await this.database.productEconomicsImportItem.updateMany({
+        data: { errorCode: null, errorDetail: null, status: 'PROCESSING' },
+        where: { id: stored.id, status: { in: ['PENDING', 'PROCESSING'] } },
+      });
+      if (processing.count !== 1) continue;
+      const item = importItem(stored);
       try {
         const mutation = importMutation(claimed, item);
         validateEconomicsMutation(mutation);
         if (claimed.dryRun) {
-          await this.pool.query(
-            `UPDATE "ProductEconomicsImportItem"
-                SET "status" = 'VALIDATED'
-              WHERE "id" = $1 AND "status" = 'PROCESSING'`,
-            [item.id],
-          );
+          await this.database.productEconomicsImportItem.updateMany({
+            data: { status: 'VALIDATED' },
+            where: { id: item.id, status: 'PROCESSING' },
+          });
         } else {
           const created = await this.createEconomicsVersion(mutation);
-          await this.pool.query(
-            `UPDATE "ProductEconomicsImportItem"
-                SET "status" = 'SUCCEEDED', "createdVersion" = $2
-              WHERE "id" = $1 AND "status" = 'PROCESSING'`,
-            [item.id, created.version.toString()],
-          );
+          await this.database.productEconomicsImportItem.updateMany({
+            data: { createdVersion: created.version, status: 'SUCCEEDED' },
+            where: { id: item.id, status: 'PROCESSING' },
+          });
         }
       } catch (error: unknown) {
-        await this.pool.query(
-          `UPDATE "ProductEconomicsImportItem"
-              SET "status" = 'FAILED', "errorCode" = $2, "errorDetail" = $3
-            WHERE "id" = $1 AND "status" = 'PROCESSING'`,
-          [item.id, classifyImportError(error), safeMessage(error)],
-        );
+        await this.database.productEconomicsImportItem.updateMany({
+          data: {
+            errorCode: classifyImportError(error),
+            errorDetail: safeMessage(error),
+            status: 'FAILED',
+          },
+          where: { id: item.id, status: 'PROCESSING' },
+        });
       }
     }
-    const counters = await this.pool.query<{
-      failed: string;
-      processed: string;
-      succeeded: string;
-      validated: string;
-    }>(
-      `SELECT
-         COUNT(*) FILTER (WHERE "status" IN ('VALIDATED', 'SUCCEEDED', 'FAILED'))::text
-           AS "processed",
-         COUNT(*) FILTER (WHERE "status" = 'VALIDATED')::text AS "validated",
-         COUNT(*) FILTER (WHERE "status" = 'SUCCEEDED')::text AS "succeeded",
-         COUNT(*) FILTER (WHERE "status" = 'FAILED')::text AS "failed"
-       FROM "ProductEconomicsImportItem"
-      WHERE "importId" = $1`,
-      [claimed.id],
-    );
-    const totals = counters.rows[0];
-    if (totals === undefined) throw new Error('ECONOMICS_IMPORT_COUNTERS_MISSING');
-    const completed = await this.pool.query(
-      `UPDATE "ProductEconomicsImport"
-          SET "status" = $2::"ImportStatus", "processedItems" = $3,
-              "validatedItems" = $4, "succeededItems" = $5, "failedItems" = $6,
-              "finishedAt" = NOW(), "leaseOwner" = NULL, "leaseUntil" = NULL
-        WHERE "id" = $1 AND "status" = 'PROCESSING' AND "leaseOwner" = $7`,
-      [
-        claimed.id,
-        totals.failed === '0' ? 'COMPLETED' : 'COMPLETED_WITH_ERRORS',
-        totals.processed,
-        totals.validated,
-        totals.succeeded,
-        totals.failed,
-        claimed.workerId,
-      ],
-    );
-    if (completed.rowCount !== 1) throw new Error('ECONOMICS_IMPORT_LEASE_LOST');
+    const statuses = await this.database.productEconomicsImportItem.groupBy({
+      _count: { _all: true },
+      by: ['status'],
+      where: { importId: claimed.id },
+    });
+    const count = (status: 'FAILED' | 'SUCCEEDED' | 'VALIDATED'): number =>
+      statuses.find((row) => row.status === status)?._count._all ?? 0;
+    const failed = count('FAILED');
+    const succeeded = count('SUCCEEDED');
+    const validated = count('VALIDATED');
+    const processed = failed + succeeded + validated;
+    const completed = await this.database.productEconomicsImport.updateMany({
+      data: {
+        failedItems: failed,
+        finishedAt: new Date(),
+        leaseOwner: null,
+        leaseUntil: null,
+        processedItems: processed,
+        status: failed === 0 ? 'COMPLETED' : 'COMPLETED_WITH_ERRORS',
+        succeededItems: succeeded,
+        validatedItems: validated,
+      },
+      where: { id: claimed.id, leaseOwner: claimed.workerId, status: 'PROCESSING' },
+    });
+    if (completed.count !== 1) throw new Error('ECONOMICS_IMPORT_LEASE_LOST');
     return claimed.id;
   }
 
-  /**
-   * Creates a new policy version and closes the previous validity interval.
-   *
-   * @param request - Scoped policy mutation.
-   * @returns New policy identity.
-   */
   public async createPolicyVersion(request: {
     readonly actor: string;
     readonly campaignId: string | null;
@@ -408,102 +332,96 @@ export class DecisionRepository {
   }): Promise<{ readonly id: string; readonly version: bigint }> {
     validateDecisionPolicy(request.configuration);
     validatePolicyScope(request);
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-      const idempotencyChecksum = scopedChecksum(
-        'policy-admin-mutation-v1',
-        request.idempotencyInput ?? {
-          campaignId: request.campaignId,
-          changeReason: request.changeReason ?? null,
-          configuration: request.configuration,
-          enabled: request.enabled ?? true,
-          expectedCurrentVersion: request.expectedCurrentVersion ?? null,
-          scope: request.scope,
-          supersedeQueued: request.supersedeQueued ?? false,
-          targetId: request.targetId,
-          validFrom: request.validFrom,
-        },
-      );
+    const idempotencyChecksum = scopedChecksum(
+      'policy-admin-mutation-v1',
+      request.idempotencyInput ?? {
+        campaignId: request.campaignId,
+        changeReason: request.changeReason ?? null,
+        configuration: request.configuration,
+        enabled: request.enabled ?? true,
+        expectedCurrentVersion: request.expectedCurrentVersion ?? null,
+        scope: request.scope,
+        supersedeQueued: request.supersedeQueued ?? false,
+        targetId: request.targetId,
+        validFrom: request.validFrom,
+      },
+    );
+    return withTransaction(this.database, async (transaction) => {
       if (request.idempotencyKey !== undefined && request.idempotencyScope !== undefined) {
-        await lockIdempotencyKey(client, request.idempotencyScope, request.idempotencyKey);
-        const replay = await client.query<{
-          requestChecksum: string;
-          responseBody: { id: string; version: string };
-        }>(
-          `SELECT "requestChecksum", "responseBody" FROM "IdempotencyRecord"
-            WHERE "scope" = $1 AND "idempotencyKey" = $2 FOR UPDATE`,
-          [request.idempotencyScope, request.idempotencyKey],
+        await advisoryTransactionLock(
+          transaction,
+          `admin-idempotency:${request.idempotencyScope}:${request.idempotencyKey}`,
         );
-        if (replay.rows[0] !== undefined) {
-          if (replay.rows[0].requestChecksum !== idempotencyChecksum) {
+        const replay = await transaction.idempotencyRecord.findUnique({
+          select: { requestChecksum: true, responseBody: true },
+          where: {
+            scope_idempotencyKey: {
+              idempotencyKey: request.idempotencyKey,
+              scope: request.idempotencyScope,
+            },
+          },
+        });
+        if (replay !== null) {
+          if (replay.requestChecksum !== idempotencyChecksum) {
             throw new Error('IDEMPOTENCY_KEY_REUSED');
           }
-          await client.query('COMMIT');
-          return Object.freeze({
-            id: replay.rows[0].responseBody.id,
-            version: BigInt(replay.rows[0].responseBody.version),
-          });
+          return policyReplay(replay.responseBody);
         }
       }
-      await client.query("SELECT pg_advisory_xact_lock(hashtextextended('policy:' || $1, 0))", [
-        `${request.scope}:${request.campaignId ?? ''}:${request.targetId ?? ''}`,
+      await advisoryTransactionLock(
+        transaction,
+        `policy:${request.scope}:${request.campaignId ?? ''}:${request.targetId ?? ''}`,
+      );
+      const scopeWhere = {
+        campaignId: request.campaignId,
+        scope: request.scope,
+        targetId: request.targetId,
+      } as const;
+      const [current, latest] = await Promise.all([
+        transaction.biddingPolicy.findFirst({
+          orderBy: { version: 'desc' },
+          select: { id: true, version: true },
+          where: { ...scopeWhere, enabled: true, validTo: null },
+        }),
+        transaction.biddingPolicy.findFirst({
+          orderBy: { version: 'desc' },
+          select: { version: true },
+          where: scopeWhere,
+        }),
       ]);
-      const current = await client.query<{ id: string; version: string }>(
-        `SELECT "id", "version" FROM "BiddingPolicy"
-          WHERE "scope" = $1::"PolicyScope"
-            AND "campaignId" IS NOT DISTINCT FROM $2
-            AND "targetId" IS NOT DISTINCT FROM $3
-            AND "enabled" = true AND "validTo" IS NULL
-          ORDER BY "version" DESC LIMIT 1 FOR UPDATE`,
-        [request.scope, request.campaignId, request.targetId],
-      );
-      const latest = await client.query<{ version: string }>(
-        `SELECT "version" FROM "BiddingPolicy"
-          WHERE "scope" = $1::"PolicyScope"
-            AND "campaignId" IS NOT DISTINCT FROM $2
-            AND "targetId" IS NOT DISTINCT FROM $3
-          ORDER BY "version" DESC LIMIT 1 FOR UPDATE`,
-        [request.scope, request.campaignId, request.targetId],
-      );
       const enabled = request.enabled ?? true;
       if (
         request.expectedCurrentVersion !== undefined &&
-        BigInt(current.rows[0]?.version ?? '0') !== request.expectedCurrentVersion
+        (current?.version ?? 0n) !== request.expectedCurrentVersion
       ) {
         throw new Error('VERSION_MISMATCH');
       }
-      if (enabled && current.rows[0] !== undefined) {
-        await client.query(`UPDATE "BiddingPolicy" SET "validTo" = $2 WHERE "id" = $1`, [
-          current.rows[0].id,
-          request.validFrom,
-        ]);
+      if (enabled && current !== null) {
+        await transaction.biddingPolicy.update({
+          data: { validTo: request.validFrom },
+          where: { id: current.id },
+        });
       }
-      const version = BigInt(latest.rows[0]?.version ?? '0') + 1n;
+      const version = (latest?.version ?? 0n) + 1n;
       const id = randomUUID();
       const checksum = scopedChecksum('bidding-policy-v1', request.configuration);
-      await client.query(
-        `INSERT INTO "BiddingPolicy"
-           ("id", "scope", "campaignId", "targetId", "executionMode", "configuration",
-            "enabled", "version", "validFrom", "inputChecksum", "createdByActor")
-         VALUES ($1, $2::"PolicyScope", $3, $4, $5::"ExecutionMode", $6::jsonb,
-                 $7, $8, $9, $10, $11)`,
-        [
-          id,
-          request.scope,
-          request.campaignId,
-          request.targetId,
-          request.configuration.executionMode,
-          JSON.stringify(normalizeCanonical(request.configuration)),
+      await transaction.biddingPolicy.create({
+        data: {
+          campaignId: request.campaignId,
+          configuration: prismaJson(request.configuration),
+          createdByActor: request.actor,
           enabled,
-          version.toString(),
-          request.validFrom,
-          checksum,
-          request.actor,
-        ],
-      );
+          executionMode: request.configuration.executionMode,
+          id,
+          inputChecksum: checksum,
+          scope: request.scope,
+          targetId: request.targetId,
+          validFrom: request.validFrom,
+          version,
+        },
+      });
       await appendAudit(
-        client,
+        transaction,
         request.actor,
         'BIDDING_POLICY_VERSION_CREATED',
         id,
@@ -515,55 +433,40 @@ export class DecisionRepository {
           scope: request.scope,
           version,
         },
-        current.rows[0] ?? null,
+        current,
       );
       if (enabled && request.supersedeQueued === true) {
-        await client.query(
-          `UPDATE "DecisionQueueItem" q
-              SET "status" = 'SUPERSEDED', "version" = q."version" + 1
-             FROM "BidDecision" d, "CampaignTarget" t
-            WHERE q."decisionId" = d."id" AND t."id" = d."targetId"
-              AND q."status" IN ('QUEUED','RETRY_WAIT')
-              AND (($1 = 'TARGET' AND d."targetId" = $2)
-                OR ($1 = 'CAMPAIGN' AND t."campaignId" = $3)
-                OR $1 = 'DEPLOYMENT')`,
-          [request.scope, request.targetId, request.campaignId],
-        );
+        await transaction.decisionQueueItem.updateMany({
+          data: { status: 'SUPERSEDED', version: { increment: 1 } },
+          where: {
+            status: { in: ['QUEUED', 'RETRY_WAIT'] },
+            decision:
+              request.scope === 'TARGET'
+                ? { targetId: request.targetId ?? '' }
+                : request.scope === 'CAMPAIGN'
+                  ? { target: { campaignId: request.campaignId ?? '' } }
+                  : {},
+          },
+        });
       }
       if (request.idempotencyKey !== undefined && request.idempotencyScope !== undefined) {
-        await client.query(
-          `INSERT INTO "IdempotencyRecord"
-             ("id", "scope", "idempotencyKey", "requestChecksum", "responseStatus",
-              "responseHeaders", "responseBody", "expiresAt")
-           VALUES ($1, $2, $3, $4, 201, '{}'::jsonb, $5::jsonb,
-                   NOW() + INTERVAL '400 days')`,
-          [
-            randomUUID(),
-            request.idempotencyScope,
-            request.idempotencyKey,
-            idempotencyChecksum,
-            JSON.stringify({ id, version: version.toString() }),
-          ],
-        );
+        await transaction.idempotencyRecord.create({
+          data: {
+            expiresAt: new Date(Date.now() + 400 * 86_400_000),
+            id: randomUUID(),
+            idempotencyKey: request.idempotencyKey,
+            requestChecksum: idempotencyChecksum,
+            responseBody: prismaJson({ id, version }),
+            responseHeaders: {},
+            responseStatus: 201,
+            scope: request.idempotencyScope,
+          },
+        });
       }
-      await client.query('COMMIT');
       return Object.freeze({ id, version });
-    } catch (error: unknown) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+    });
   }
 
-  /**
-   * Resolves target, campaign, then deployment policy priority.
-   *
-   * @param targetId - Target UUID.
-   * @param campaignId - Campaign UUID.
-   * @param at - Resolution instant.
-   * @returns Stored policy row or null.
-   */
   public async resolvePolicy(
     targetId: string,
     campaignId: string,
@@ -573,37 +476,33 @@ export class DecisionRepository {
     readonly id: string;
     readonly version: bigint;
   } | null> {
-    const result = await this.pool.query<{
-      configuration: unknown;
-      id: string;
-      version: string;
-    }>(
-      `SELECT "id", "version", "configuration" FROM "BiddingPolicy"
-        WHERE "enabled" = true AND "validFrom" <= $3
-          AND ("validTo" IS NULL OR "validTo" > $3)
-          AND (("scope" = 'TARGET' AND "targetId" = $1)
-            OR ("scope" = 'CAMPAIGN' AND "campaignId" = $2)
-            OR "scope" = 'DEPLOYMENT')
-        ORDER BY CASE "scope" WHEN 'TARGET' THEN 1 WHEN 'CAMPAIGN' THEN 2 ELSE 3 END,
-                 "version" DESC LIMIT 1`,
-      [targetId, campaignId, at],
-    );
-    const row = result.rows[0];
-    return row === undefined
-      ? null
-      : Object.freeze({
-          configuration: row.configuration,
-          id: row.id,
-          version: BigInt(row.version),
-        });
+    const common = {
+      enabled: true,
+      validFrom: { lte: at },
+      OR: [{ validTo: null }, { validTo: { gt: at } }],
+    };
+    const select = { configuration: true, id: true, version: true } as const;
+    const [target, campaign, deployment] = await Promise.all([
+      this.database.biddingPolicy.findFirst({
+        orderBy: { version: 'desc' },
+        select,
+        where: { ...common, scope: 'TARGET', targetId },
+      }),
+      this.database.biddingPolicy.findFirst({
+        orderBy: { version: 'desc' },
+        select,
+        where: { ...common, campaignId, scope: 'CAMPAIGN' },
+      }),
+      this.database.biddingPolicy.findFirst({
+        orderBy: { version: 'desc' },
+        select,
+        where: { ...common, scope: 'DEPLOYMENT' },
+      }),
+    ]);
+    const policy = target ?? campaign ?? deployment;
+    return policy === null ? null : Object.freeze(policy);
   }
 
-  /**
-   * Persists a metric snapshot, semantically deduplicated decision, and optional queue item.
-   *
-   * @param request - Immutable references and pure result.
-   * @returns Existing or created decision.
-   */
   public async persistDecision(request: {
     readonly calculatedAt: Date;
     readonly currentBidMinor: bigint | null;
@@ -618,238 +517,164 @@ export class DecisionRepository {
     readonly result: DecisionResult;
     readonly targetId: string;
   }): Promise<{ readonly created: boolean; readonly decisionId: string }> {
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-      await client.query("SELECT pg_advisory_xact_lock(hashtextextended('decision:' || $1, 0))", [
-        request.targetId,
-      ]);
-      const existingMetric = await client.query<{ id: string }>(
-        `SELECT "id" FROM "MetricSnapshot"
-          WHERE "targetId" = $1 AND "inputSnapshotChecksum" = $2`,
-        [request.targetId, request.result.explanation.inputSnapshotChecksum],
-      );
-      let metricId = existingMetric.rows[0]?.id;
-      if (metricId === undefined) {
-        metricId = randomUUID();
-        await client.query(
-          `INSERT INTO "MetricSnapshot"
-           ("id", "targetId", "productEconomicsId", "productEconomicsVersion",
-            "expectedContributionBeforeAdsMinor", "policyId", "periodStart", "periodEnd",
-            "metrics", "candidateEstimates", "completenessFlags", "inputSnapshotChecksum",
-            "inputSnapshotSchema", "algorithmVersion", "calculatedAt")
-         VALUES ($1, $2, $3, $4, $5, $6, $7::date, $8::date, $9::jsonb, $10::jsonb,
-                 $11, $12, 'input-snapshot-v1', 'rules-v1', $13)`,
-          [
-            metricId,
-            request.targetId,
-            request.economicsId,
-            request.economicsVersion?.toString() ?? null,
-            request.expectedContributionMinor?.toString() ?? null,
-            request.policyId,
-            request.periodStart,
-            request.periodEnd,
-            json({ buckets: request.result.explanation.buckets }),
-            json(request.result.explanation.candidates),
-            request.result.guardrailCodes,
-            request.result.explanation.inputSnapshotChecksum,
-            request.calculatedAt,
-          ],
-        );
-      }
-      const existing = await client.query<DecisionReplayRow>(
-        `SELECT "id", "action", "boundedBidMinor", "outcomeReasonCode"
-           FROM "BidDecision" WHERE "decisionInputChecksum" = $1 FOR UPDATE`,
-        [request.result.decisionInputChecksum],
-      );
-      const replay = existing.rows[0];
-      if (replay !== undefined) {
+    return withTransaction(this.database, async (transaction) => {
+      await advisoryTransactionLock(transaction, `decision:${request.targetId}`);
+      const existingMetric = await transaction.metricSnapshot.findUnique({
+        select: { id: true },
+        where: {
+          targetId_inputSnapshotChecksum: {
+            inputSnapshotChecksum: request.result.explanation.inputSnapshotChecksum,
+            targetId: request.targetId,
+          },
+        },
+      });
+      const metricId =
+        existingMetric?.id ??
+        (
+          await transaction.metricSnapshot.create({
+            data: {
+              algorithmVersion: 'rules-v1',
+              calculatedAt: request.calculatedAt,
+              candidateEstimates: prismaJson(request.result.explanation.candidates),
+              completenessFlags: [...request.result.guardrailCodes],
+              expectedContributionBeforeAdsMinor: request.expectedContributionMinor,
+              id: randomUUID(),
+              inputSnapshotChecksum: request.result.explanation.inputSnapshotChecksum,
+              inputSnapshotSchema: 'input-snapshot-v1',
+              metrics: prismaJson({ buckets: request.result.explanation.buckets }),
+              periodEnd: isoDate(request.periodEnd),
+              periodStart: isoDate(request.periodStart),
+              policyId: request.policyId,
+              productEconomicsId: request.economicsId,
+              productEconomicsVersion: request.economicsVersion,
+              targetId: request.targetId,
+            },
+            select: { id: true },
+          })
+        ).id;
+      const replay = await transaction.bidDecision.findUnique({
+        select: {
+          action: true,
+          boundedBidMinor: true,
+          id: true,
+          outcomeReasonCode: true,
+        },
+        where: { decisionInputChecksum: request.result.decisionInputChecksum },
+      });
+      if (replay !== null) {
         assertSameDecision(replay, request.result);
-        await client.query('COMMIT');
         return Object.freeze({ created: false, decisionId: replay.id });
       }
       if (request.experiment !== undefined) {
-        await this.assertExperimentCapacity(client, request.targetId, request.experiment);
+        await this.assertExperimentCapacity(transaction, request.targetId, request.experiment);
       }
-      await client.query(
-        `UPDATE "DecisionQueueItem" q SET "status" = 'SUPERSEDED'
-           FROM "BidDecision" d
-          WHERE q."decisionId" = d."id" AND d."targetId" = $1
-            AND q."status" IN ('QUEUED', 'RETRY_WAIT')`,
-        [request.targetId],
-      );
+      await transaction.decisionQueueItem.updateMany({
+        data: { status: 'SUPERSEDED' },
+        where: {
+          decision: { targetId: request.targetId },
+          status: { in: ['QUEUED', 'RETRY_WAIT'] },
+        },
+      });
       const decisionId = uuidV7(request.calculatedAt);
-      await client.query(
-        `INSERT INTO "BidDecision"
-           ("id", "targetId", "action", "currentBidMinor", "proposedBidMinor",
-            "boundedBidMinor", "strategyReasonCode", "outcomeReasonCode", "guardrailCodes",
-            "explanation", "metricSnapshotId", "policyVersion", "algorithmVersion",
-            "decisionInputChecksum", "createdAt")
-         VALUES ($1, $2, $3::"DecisionAction", $4, $5, $6, $7, $8, $9, $10::jsonb,
-                 $11, $12, 'rules-v1', $13, $14)`,
-        [
-          decisionId,
-          request.targetId,
-          request.result.action,
-          request.currentBidMinor?.toString() ?? null,
-          request.result.proposedBidMinor?.toString() ?? null,
-          request.result.boundedBidMinor?.toString() ?? null,
-          request.result.strategyReasonCode,
-          request.result.outcomeReasonCode,
-          request.result.guardrailCodes,
-          json(request.result.explanation),
-          metricId,
-          request.policyVersion.toString(),
-          request.result.decisionInputChecksum,
-          request.calculatedAt,
-        ],
-      );
+      await transaction.bidDecision.create({
+        data: {
+          action: request.result.action,
+          algorithmVersion: 'rules-v1',
+          boundedBidMinor: request.result.boundedBidMinor,
+          createdAt: request.calculatedAt,
+          currentBidMinor: request.currentBidMinor,
+          decisionInputChecksum: request.result.decisionInputChecksum,
+          explanation: prismaJson(request.result.explanation),
+          guardrailCodes: [...request.result.guardrailCodes],
+          id: decisionId,
+          metricSnapshotId: metricId,
+          outcomeReasonCode: request.result.outcomeReasonCode,
+          policyVersion: request.policyVersion,
+          proposedBidMinor: request.result.proposedBidMinor,
+          strategyReasonCode: request.result.strategyReasonCode,
+          targetId: request.targetId,
+        },
+      });
       if (request.result.queueEligible) {
-        await client.query(
-          `INSERT INTO "DecisionQueueItem"
-             ("id", "decisionId", "status", "priority", "availableAt")
-           VALUES ($1, $2, 'QUEUED', $3, clock_timestamp())`,
-          [randomUUID(), decisionId, decisionPriority(request.result)],
-        );
+        await transaction.decisionQueueItem.create({
+          data: {
+            availableAt: new Date(),
+            decisionId,
+            id: randomUUID(),
+            priority: decisionPriority(request.result),
+            status: 'QUEUED',
+          },
+        });
       }
       if (request.experiment !== undefined) {
-        await client.query(
-          `INSERT INTO "BidExperiment"
-             ("id", "targetId", "status", "sourceBidMinor", "experimentBidMinor",
-              "desiredRevertBidMinor", "plannedFullDays", "spendLimitMinor",
-              "spendSafetyBufferMinor", "policyVersion", "algorithmVersion",
-              "experimentReasonCode", "startDecisionId")
-           VALUES ($1, $2, 'PLANNED', $3, $4, $3, $5, $6, $7, $8,
-                   'rules-v1', 'EXPLORATION_PLANNED', $9)`,
-          [
-            randomUUID(),
-            request.targetId,
-            request.experiment.sourceBidMinor.toString(),
-            request.experiment.experimentBidMinor.toString(),
-            request.experiment.plannedFullDays,
-            request.experiment.spendLimitMinor.toString(),
-            request.experiment.spendSafetyBufferMinor.toString(),
-            request.policyVersion.toString(),
-            decisionId,
-          ],
-        );
+        await transaction.bidExperiment.create({
+          data: {
+            algorithmVersion: 'rules-v1',
+            desiredRevertBidMinor: request.experiment.sourceBidMinor,
+            experimentBidMinor: request.experiment.experimentBidMinor,
+            experimentReasonCode: 'EXPLORATION_PLANNED',
+            id: randomUUID(),
+            plannedFullDays: request.experiment.plannedFullDays,
+            policyVersion: request.policyVersion,
+            sourceBidMinor: request.experiment.sourceBidMinor,
+            spendLimitMinor: request.experiment.spendLimitMinor,
+            spendSafetyBufferMinor: request.experiment.spendSafetyBufferMinor,
+            startDecisionId: decisionId,
+            status: 'PLANNED',
+            targetId: request.targetId,
+          },
+        });
       }
-      await client.query('COMMIT');
       return Object.freeze({ created: true, decisionId });
-    } catch (error: unknown) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+    });
   }
 
-  /**
-   * Enforces target, campaign, and account experiment limits under transaction locks.
-   *
-   * @param client - Active decision transaction.
-   * @param targetId - Planned experiment target.
-   * @param plan - Versioned concurrency limits.
-   * @returns Nothing.
-   */
   private async assertExperimentCapacity(
-    client: PoolClient,
+    transaction: DatabaseTransaction,
     targetId: string,
     plan: ExperimentPlanWrite,
   ): Promise<void> {
-    await client.query("SELECT pg_advisory_xact_lock(hashtextextended('experiment-account', 0))");
-    const counts = await client.query<{
-      accountCount: string;
-      campaignCount: string;
-      targetCount: string;
-    }>(
-      `SELECT
-         COUNT(experiment."id")::text AS "accountCount",
-         (COUNT(experiment."id") FILTER (
-           WHERE experiment_target."campaignId" = selected."campaignId"
-         ))::text AS "campaignCount",
-         (COUNT(experiment."id") FILTER (
-           WHERE experiment."targetId" = $1
-         ))::text AS "targetCount"
-       FROM "CampaignTarget" selected
-       LEFT JOIN "BidExperiment" experiment
-         ON experiment."status" IN ('PLANNED','ACTIVE','COLLECTING','EVALUATING','REVERTING')
-       LEFT JOIN "CampaignTarget" experiment_target
-         ON experiment_target."id" = experiment."targetId"
-      WHERE selected."id" = $1
-      GROUP BY selected."campaignId"`,
-      [targetId],
-    );
-    const row = counts.rows[0];
-    if (row === undefined) throw new Error('EXPERIMENT_TARGET_NOT_FOUND');
-    if (BigInt(row.targetCount) > 0n) throw new Error('EXPERIMENT_ALREADY_ACTIVE');
-    if (BigInt(row.campaignCount) >= BigInt(plan.maxConcurrentPerCampaign)) {
+    await advisoryTransactionLock(transaction, 'experiment-account');
+    const target = await transaction.campaignTarget.findUnique({
+      select: { campaignId: true },
+      where: { id: targetId },
+    });
+    if (target === null) throw new Error('EXPERIMENT_TARGET_NOT_FOUND');
+    const activeStatuses = ['PLANNED', 'ACTIVE', 'COLLECTING', 'EVALUATING', 'REVERTING'] as const;
+    const [accountCount, campaignCount, targetCount] = await Promise.all([
+      transaction.bidExperiment.count({ where: { status: { in: [...activeStatuses] } } }),
+      transaction.bidExperiment.count({
+        where: {
+          status: { in: [...activeStatuses] },
+          target: { campaignId: target.campaignId },
+        },
+      }),
+      transaction.bidExperiment.count({
+        where: { status: { in: [...activeStatuses] }, targetId },
+      }),
+    ]);
+    if (targetCount > 0) throw new Error('EXPERIMENT_ALREADY_ACTIVE');
+    if (campaignCount >= plan.maxConcurrentPerCampaign) {
       throw new Error('EXPERIMENT_CAMPAIGN_CONCURRENCY_LIMIT');
     }
-    if (BigInt(row.accountCount) >= BigInt(plan.maxConcurrentPerAccount)) {
+    if (accountCount >= plan.maxConcurrentPerAccount) {
       throw new Error('EXPERIMENT_ACCOUNT_CONCURRENCY_LIMIT');
     }
   }
 
   private async claimImport(workerId: string): Promise<ClaimedImport | null> {
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-      await client.query(
-        "SELECT pg_advisory_xact_lock(hashtextextended('product-economics-import-worker', 0))",
-      );
-      const selected = await client.query<{
-        changeReason: string;
-        correlationId: string;
-        createdByActor: string;
-        dryRun: boolean;
-        id: string;
-      }>(
-        `SELECT "id", "dryRun", "createdByActor", "correlationId", "changeReason"
-           FROM "ProductEconomicsImport"
-          WHERE "status" = 'QUEUED'
-             OR (
-               "status" = 'PROCESSING'
-               AND COALESCE("leaseUntil", '-infinity'::timestamptz) < clock_timestamp()
-             )
-          ORDER BY "createdAt" FOR UPDATE SKIP LOCKED LIMIT 1`,
-      );
-      const row = selected.rows[0];
-      if (row === undefined) {
-        await client.query('COMMIT');
-        return null;
-      }
-      await client.query(
-        `UPDATE "ProductEconomicsImport"
-            SET "status" = 'PROCESSING', "startedAt" = COALESCE("startedAt", NOW()),
-                "finishedAt" = NULL, "leaseOwner" = $2,
-                "leaseUntil" = NOW() + INTERVAL '5 minutes',
-                "attemptCount" = "attemptCount" + 1
-          WHERE "id" = $1`,
-        [row.id, workerId],
-      );
-      await client.query('COMMIT');
-      return Object.freeze({
-        actor: row.createdByActor,
-        changeReason: row.changeReason,
-        correlationId: row.correlationId,
-        dryRun: row.dryRun,
-        id: row.id,
-        workerId,
-      });
-    } catch (error: unknown) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+    const row = await claimEconomicsImportRecord(this.database, workerId);
+    return row === null
+      ? null
+      : Object.freeze({
+          actor: row.createdByActor,
+          changeReason: row.changeReason,
+          correlationId: row.correlationId,
+          dryRun: row.dryRun,
+          id: row.id,
+          workerId,
+        });
   }
-}
-
-async function lockIdempotencyKey(client: PoolClient, scope: string, key: string): Promise<void> {
-  await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
-    `admin-idempotency:${scope}:${key}`,
-  ]);
 }
 
 interface ClaimedImport {
@@ -862,9 +687,9 @@ interface ClaimedImport {
 }
 
 interface ImportItemRow {
-  readonly expectedCurrentVersion: string;
+  readonly expectedCurrentVersion: bigint;
   readonly id: string;
-  readonly nmId: string;
+  readonly nmId: bigint;
   readonly normalizedInput: {
     readonly contributionMinor: string;
     readonly effectiveFrom: string;
@@ -877,9 +702,32 @@ interface ImportItemRow {
 
 interface DecisionReplayRow {
   readonly action: string;
-  readonly boundedBidMinor: string | null;
+  readonly boundedBidMinor: bigint | null;
   readonly id: string;
   readonly outcomeReasonCode: string;
+}
+
+function importItem(stored: {
+  readonly expectedCurrentVersion: bigint;
+  readonly id: string;
+  readonly nmId: bigint;
+  readonly normalizedInput: Prisma.JsonValue;
+  readonly rowId: string;
+}): ImportItemRow {
+  if (
+    typeof stored.normalizedInput !== 'object' ||
+    stored.normalizedInput === null ||
+    Array.isArray(stored.normalizedInput)
+  ) {
+    throw new Error('INVALID_PRODUCT_ECONOMICS');
+  }
+  return {
+    expectedCurrentVersion: stored.expectedCurrentVersion,
+    id: stored.id,
+    nmId: stored.nmId,
+    normalizedInput: stored.normalizedInput as unknown as ImportItemRow['normalizedInput'],
+    rowId: stored.rowId,
+  };
 }
 
 function importMutation(claimed: ClaimedImport, item: ImportItemRow): EconomicsMutation {
@@ -893,9 +741,9 @@ function importMutation(claimed: ClaimedImport, item: ImportItemRow): EconomicsM
       item.normalizedInput.effectiveTo === undefined || item.normalizedInput.effectiveTo === null
         ? null
         : new Date(item.normalizedInput.effectiveTo),
-    expectedCurrentVersion: BigInt(item.expectedCurrentVersion),
+    expectedCurrentVersion: item.expectedCurrentVersion,
     mutationKey: `import:${claimed.id}:${item.rowId}`,
-    nmId: BigInt(item.nmId),
+    nmId: item.nmId,
     source: 'IMPORT',
     ...(item.normalizedInput.sourceReference === undefined
       ? {}
@@ -954,16 +802,13 @@ function validatePolicyScope(request: {
     (request.scope === 'DEPLOYMENT' && request.campaignId === null && request.targetId === null) ||
     (request.scope === 'CAMPAIGN' && request.campaignId !== null && request.targetId === null) ||
     (request.scope === 'TARGET' && request.campaignId === null && request.targetId !== null);
-  if (!valid) {
-    throw new Error('INVALID_POLICY_SCOPE');
-  }
+  if (!valid) throw new Error('INVALID_POLICY_SCOPE');
 }
 
 function assertSameDecision(existing: DecisionReplayRow, result: DecisionResult): void {
   if (
     existing.action !== result.action ||
-    existing.boundedBidMinor !==
-      (result.boundedBidMinor === null ? null : result.boundedBidMinor.toString()) ||
+    existing.boundedBidMinor !== result.boundedBidMinor ||
     existing.outcomeReasonCode !== result.outcomeReasonCode
   ) {
     throw new Error('DATA_INCONSISTENCY');
@@ -971,7 +816,7 @@ function assertSameDecision(existing: DecisionReplayRow, result: DecisionResult)
 }
 
 async function appendAudit(
-  client: PoolClient,
+  transaction: DatabaseTransaction,
   actor: string,
   action: string,
   entityId: string,
@@ -979,29 +824,46 @@ async function appendAudit(
   after: unknown,
   before?: unknown,
 ): Promise<void> {
-  await client.query(
-    `INSERT INTO "AuditEvent"
-       ("id", "actor", "action", "entityType", "entityId", "before", "after", "correlationId")
-     VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8)`,
-    [
-      randomUUID(),
-      actor,
+  await transaction.auditEvent.create({
+    data: {
       action,
-      action.includes('IMPORT')
+      actor,
+      after: prismaJson(after),
+      before: before === undefined ? Prisma.JsonNull : prismaJson(before),
+      correlationId,
+      entityId,
+      entityType: action.includes('IMPORT')
         ? 'ProductEconomicsImport'
         : action.startsWith('PRODUCT')
           ? 'ProductEconomics'
           : 'BiddingPolicy',
-      entityId,
-      before === undefined ? null : json(before),
-      json(after),
-      correlationId,
-    ],
-  );
+      id: randomUUID(),
+    },
+  });
 }
 
-function json(value: unknown): string {
-  return JSON.stringify(normalizeCanonical(value));
+function policyReplay(value: Prisma.JsonValue): {
+  readonly id: string;
+  readonly version: bigint;
+} {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    Array.isArray(value) ||
+    typeof value.id !== 'string' ||
+    typeof value.version !== 'string'
+  ) {
+    throw new Error('IDEMPOTENCY_RESPONSE_INVALID');
+  }
+  return Object.freeze({ id: value.id, version: BigInt(value.version) });
+}
+
+function prismaJson(value: unknown): Prisma.InputJsonValue {
+  return normalizeCanonical(value) as Prisma.InputJsonValue;
+}
+
+function isoDate(value: string): Date {
+  return new Date(`${value}T00:00:00.000Z`);
 }
 
 function classifyImportError(error: unknown): string {

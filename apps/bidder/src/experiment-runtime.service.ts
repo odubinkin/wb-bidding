@@ -1,9 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import type { Pool } from 'pg';
 
 import { APP_CONFIGURATION } from './application-config.js';
-import { DATABASE_POOL } from './database.js';
+import { DATABASE_CLIENT } from './database.js';
 import { parseDecisionPolicy } from './decision-job.service.js';
 import { ObservabilityService } from './observability.service.js';
 import { DECISION_REPOSITORY } from './runtime.providers.js';
@@ -14,6 +13,7 @@ import {
   formatAccountLocalDate,
   type AppConfiguration,
 } from '@wb-bidder/config';
+import type { DatabaseClient } from '@wb-bidder/database';
 import {
   advanceExperiment,
   confirmExperimentRevert,
@@ -31,38 +31,39 @@ const EXPERIMENT_PAGE_SIZE = 100;
  * Database representation required to advance one experiment without WB calls.
  */
 interface ExperimentRuntimeRow {
-  readonly actualRevertBidMinor: string | null;
+  readonly actualRevertBidMinor: bigint | null;
   readonly activePolicyConfiguration: unknown;
   readonly activePolicyId: string | null;
-  readonly activePolicyVersion: string | null;
+  readonly activePolicyVersion: bigint | null;
   readonly applyEligible: boolean | null;
   readonly campaignAutomation: string | null;
   readonly capability: string;
   readonly collectedEligibleDays: number;
   readonly completedAt: Date | null;
-  readonly currentBidMinor: string | null;
-  readonly desiredRevertBidMinor: string;
+  readonly currentBidMinor: bigint | null;
+  readonly desiredRevertBidMinor: bigint;
   readonly economicsId: string | null;
-  readonly expectedContributionMinor: string | null;
-  readonly economicsVersion: string | null;
+  readonly expectedContributionMinor: bigint | null;
+  readonly economicsVersion: bigint | null;
   readonly evaluationNotBefore: Date | null;
-  readonly experimentBidMinor: string;
+  readonly experimentBidMinor: bigint;
   readonly id: string;
-  readonly observedExperimentSpendMinor: string;
+  readonly observedExperimentSpendMinor: bigint;
   readonly plannedFullDays: number;
-  readonly reservedUnobservedSpendMinor: string;
+  readonly reservedUnobservedSpendMinor: bigint;
   readonly revertDeadlineAt: Date | null;
   readonly revertDecisionId: string | null;
-  readonly sourceBidMinor: string;
-  readonly spendLimitMinor: string;
-  readonly spendSafetyBufferMinor: string;
+  readonly revertStartedAt: Date | null;
+  readonly sourceBidMinor: bigint;
+  readonly spendLimitMinor: bigint;
+  readonly spendSafetyBufferMinor: bigint;
   readonly startDecisionId: string | null;
   readonly startedAt: Date | null;
   readonly status: ExperimentState['status'];
   readonly targetAutomation: string | null;
   readonly targetId: string;
   readonly terminalReasonCode: string | null;
-  readonly wbMinimumBidMinor: string | null;
+  readonly wbMinimumBidMinor: bigint | null;
 }
 
 /**
@@ -76,7 +77,7 @@ export class ExperimentRuntimeService {
   /**
    * Creates the lifecycle worker.
    *
-   * @param pool - Authoritative PostgreSQL pool.
+   * @param database - Authoritative Prisma Client.
    * @param configuration - Revert deadline and write gates.
    * @param decisions - Atomic decision/queue repository.
    * @param runtimeState - Process-level close-only write gates.
@@ -84,7 +85,7 @@ export class ExperimentRuntimeService {
    * @param clock - Wall or deterministic mock model clock.
    */
   public constructor(
-    @Inject(DATABASE_POOL) private readonly pool: Pool,
+    @Inject(DATABASE_CLIENT) private readonly database: DatabaseClient,
     @Inject(APP_CONFIGURATION) private readonly configuration: AppConfiguration,
     @Inject(DECISION_REPOSITORY) private readonly decisions: DecisionRepository,
     private readonly runtimeState: RuntimeSafetyState,
@@ -99,75 +100,83 @@ export class ExperimentRuntimeService {
    */
   public async run(): Promise<number> {
     const now = this.clock.now();
-    const result = await this.pool.query<ExperimentRuntimeRow>(
-      `SELECT experiment."id", experiment."targetId", experiment."status"::text,
-              experiment."sourceBidMinor", experiment."experimentBidMinor",
-              experiment."desiredRevertBidMinor", experiment."actualRevertBidMinor",
-              experiment."plannedFullDays", experiment."collectedEligibleDays",
-              experiment."spendLimitMinor", experiment."spendSafetyBufferMinor",
-              experiment."observedExperimentSpendMinor",
-              experiment."reservedUnobservedSpendMinor", experiment."startedAt",
-              experiment."evaluationNotBefore", experiment."terminalReasonCode",
-              experiment."completedAt", experiment."startDecisionId",
-              experiment."revertDecisionId", experiment."revertDeadlineAt",
-              target."currentBidMinor", target."minimumBidMinor" AS "wbMinimumBidMinor",
-              target."capability",
-              policy."id" AS "activePolicyId", policy."version" AS "activePolicyVersion",
-              policy."configuration" AS "activePolicyConfiguration",
-              economics."id" AS "economicsId", economics."version" AS "economicsVersion",
-              economics."expectedContributionBeforeAdsMinor" AS "expectedContributionMinor",
-              snapshot."applyEligible",
-              campaign_automation."mode"::text AS "campaignAutomation",
-              target_automation."mode"::text AS "targetAutomation"
-         FROM "BidExperiment" experiment
-         JOIN "CampaignTarget" target ON target."id" = experiment."targetId"
-         JOIN "Campaign" campaign ON campaign."id" = target."campaignId"
-         LEFT JOIN LATERAL (
-           SELECT current_policy."id", current_policy."version", current_policy."configuration"
-             FROM "BiddingPolicy" current_policy
-            WHERE current_policy."enabled" = true
-              AND current_policy."validFrom" <= $2
-              AND (current_policy."validTo" IS NULL OR current_policy."validTo" > $2)
-              AND (("scope" = 'TARGET' AND current_policy."targetId" = target."id")
-                OR ("scope" = 'CAMPAIGN' AND current_policy."campaignId" = campaign."id")
-                OR current_policy."scope" = 'DEPLOYMENT')
-            ORDER BY CASE current_policy."scope"
-                       WHEN 'TARGET' THEN 1 WHEN 'CAMPAIGN' THEN 2 ELSE 3
-                     END,
-                     current_policy."version" DESC
-            LIMIT 1
-         ) policy ON true
-         LEFT JOIN LATERAL (
-           SELECT product."id", product."version",
-                  product."expectedContributionBeforeAdsMinor"
-             FROM "ProductEconomics" product
-            WHERE product."nmId" = target."nmId"
-              AND product."effectiveFrom" <= $2
-              AND (product."effectiveTo" IS NULL OR product."effectiveTo" > $2)
-            ORDER BY product."effectiveFrom" DESC, product."version" DESC
-            LIMIT 1
-         ) economics ON true
-         LEFT JOIN LATERAL (
-           SELECT data_snapshot."applyEligible"
-             FROM "TargetDataSnapshot" data_snapshot
-            WHERE data_snapshot."targetId" = target."id"
-            ORDER BY data_snapshot."createdAt" DESC
-            LIMIT 1
-         ) snapshot ON true
-         LEFT JOIN "CampaignAutomation" campaign_automation
-           ON campaign_automation."campaignId" = campaign."id"
-         LEFT JOIN "TargetAutomation" target_automation
-           ON target_automation."targetId" = target."id"
-        WHERE experiment."status" IN
-              ('PLANNED','ACTIVE','COLLECTING','EVALUATING','REVERTING')
-        ORDER BY experiment."createdAt", experiment."id"
-        LIMIT $1`,
-      [EXPERIMENT_PAGE_SIZE, now],
-    );
-    for (const row of result.rows) {
+    const experiments = await this.database.bidExperiment.findMany({
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      take: EXPERIMENT_PAGE_SIZE,
+      where: {
+        status: { in: ['PLANNED', 'ACTIVE', 'COLLECTING', 'EVALUATING', 'REVERTING'] },
+      },
+      include: {
+        target: {
+          include: {
+            automation: { select: { mode: true } },
+            campaign: {
+              include: { automation: { select: { mode: true } } },
+            },
+            dataSnapshots: {
+              orderBy: { createdAt: 'desc' },
+              select: { applyEligible: true },
+              take: 1,
+            },
+          },
+        },
+      },
+    });
+    for (const experiment of experiments) {
+      const [policy, economics] = await Promise.all([
+        this.resolvePolicy(experiment.targetId, experiment.target.campaignId, now),
+        this.database.productEconomics.findFirst({
+          orderBy: [{ effectiveFrom: 'desc' }, { version: 'desc' }],
+          select: {
+            expectedContributionBeforeAdsMinor: true,
+            id: true,
+            version: true,
+          },
+          where: {
+            effectiveFrom: { lte: now },
+            nmId: experiment.target.nmId,
+            OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
+          },
+        }),
+      ]);
+      const row: ExperimentRuntimeRow = {
+        actualRevertBidMinor: experiment.actualRevertBidMinor,
+        activePolicyConfiguration: policy?.configuration ?? null,
+        activePolicyId: policy?.id ?? null,
+        activePolicyVersion: policy?.version ?? null,
+        applyEligible: experiment.target.dataSnapshots[0]?.applyEligible ?? null,
+        campaignAutomation: experiment.target.campaign.automation?.mode ?? null,
+        capability: experiment.target.capability,
+        collectedEligibleDays: experiment.collectedEligibleDays,
+        completedAt: experiment.completedAt,
+        currentBidMinor: experiment.target.currentBidMinor,
+        desiredRevertBidMinor: experiment.desiredRevertBidMinor,
+        economicsId: economics?.id ?? null,
+        economicsVersion: economics?.version ?? null,
+        evaluationNotBefore: experiment.evaluationNotBefore,
+        expectedContributionMinor: economics?.expectedContributionBeforeAdsMinor ?? null,
+        experimentBidMinor: experiment.experimentBidMinor,
+        id: experiment.id,
+        observedExperimentSpendMinor: experiment.observedExperimentSpendMinor,
+        plannedFullDays: experiment.plannedFullDays,
+        reservedUnobservedSpendMinor: experiment.reservedUnobservedSpendMinor,
+        revertDeadlineAt: experiment.revertDeadlineAt,
+        revertDecisionId: experiment.revertDecisionId,
+        revertStartedAt: experiment.revertStartedAt,
+        sourceBidMinor: experiment.sourceBidMinor,
+        spendLimitMinor: experiment.spendLimitMinor,
+        spendSafetyBufferMinor: experiment.spendSafetyBufferMinor,
+        startDecisionId: experiment.startDecisionId,
+        startedAt: experiment.startedAt,
+        status: experiment.status,
+        targetAutomation: experiment.target.automation?.mode ?? null,
+        targetId: experiment.targetId,
+        terminalReasonCode: experiment.terminalReasonCode,
+        wbMinimumBidMinor: experiment.target.minimumBidMinor,
+      };
       await this.advance(row, now);
     }
-    return result.rows.length;
+    return experiments.length;
   }
 
   /**
@@ -205,24 +214,24 @@ export class ExperimentRuntimeService {
       await this.fail(row, now, 'EXPERIMENT_START_DECISION_MISSING', false);
       return;
     }
-    const queue = await this.pool.query<{ status: string; verifiedAt: Date | null }>(
-      `SELECT "status"::text, "verifiedAt"
-         FROM "DecisionQueueItem" WHERE "decisionId" = $1`,
-      [row.startDecisionId],
-    );
-    const state = queue.rows[0];
+    const state = await this.database.decisionQueueItem.findUnique({
+      select: { status: true, verifiedAt: true },
+      where: { decisionId: row.startDecisionId },
+    });
     if (state?.status === 'APPLIED') {
       const startedAt = state.verifiedAt ?? now;
       const firstEligibleDate = addIsoCalendarDays(
         formatAccountLocalDate(this.configuration.accountTimezone, startedAt),
         1,
       );
-      await this.pool.query(
-        `UPDATE "BidExperiment"
-            SET "status" = 'ACTIVE', "startedAt" = $2, "firstEligibleDate" = $3::date
-          WHERE "id" = $1 AND "status" = 'PLANNED'`,
-        [row.id, startedAt, firstEligibleDate],
-      );
+      await this.database.bidExperiment.updateMany({
+        data: {
+          firstEligibleDate: new Date(`${firstEligibleDate}T00:00:00.000Z`),
+          startedAt,
+          status: 'ACTIVE',
+        },
+        where: { id: row.id, status: 'PLANNED' },
+      });
     } else if (state?.status === 'FAILED' || state?.status === 'SUPERSEDED') {
       await this.fail(row, now, 'EXPERIMENT_START_WRITE_FAILED', false);
     }
@@ -240,29 +249,28 @@ export class ExperimentRuntimeService {
       await this.fail(row, now, 'EXPERIMENT_START_TIME_MISSING', false);
       return;
     }
-    const evidence = await this.pool.query<{
-      collectedDays: number;
-      evaluationNotBefore: Date | null;
-      observedSpendMinor: string;
-    }>(
-      `SELECT
-         COUNT(*) FILTER (
-           WHERE "wbStatisticDate" >= ($3::date + INTERVAL '1 day')::date
-             AND "confirmedBidMinor" = $2
-         )::integer AS "collectedDays",
-         MAX("statisticsFinalizedAt") FILTER (
-           WHERE "wbStatisticDate" >= ($3::date + INTERVAL '1 day')::date
-             AND "confirmedBidMinor" = $2
-         ) AS "evaluationNotBefore",
-         COALESCE(SUM("spendDeltaMinor") FILTER (
-           WHERE "wbStatisticDate" >= $3::date
-         ), 0)::text AS "observedSpendMinor"
-       FROM "BidPerformanceDay"
-      WHERE "targetId" = $1 AND "status" = 'FINALIZED'`,
-      [row.targetId, row.experimentBidMinor, row.startedAt.toISOString().slice(0, 10)],
-    );
-    const current = evidence.rows[0];
-    if (current === undefined) return;
+    const startDate = new Date(`${row.startedAt.toISOString().slice(0, 10)}T00:00:00.000Z`);
+    const firstEligibleDate = new Date(startDate.getTime() + 86_400_000);
+    const [eligible, spend] = await Promise.all([
+      this.database.bidPerformanceDay.aggregate({
+        _count: { _all: true },
+        _max: { statisticsFinalizedAt: true },
+        where: {
+          confirmedBidMinor: row.experimentBidMinor,
+          status: 'FINALIZED',
+          targetId: row.targetId,
+          wbStatisticDate: { gte: firstEligibleDate },
+        },
+      }),
+      this.database.bidPerformanceDay.aggregate({
+        _sum: { spendDeltaMinor: true },
+        where: {
+          status: 'FINALIZED',
+          targetId: row.targetId,
+          wbStatisticDate: { gte: startDate },
+        },
+      }),
+    ]);
     const configurationValid =
       row.currentBidMinor === row.experimentBidMinor &&
       row.capability === 'CARD_WRITE_READY' &&
@@ -271,46 +279,32 @@ export class ExperimentRuntimeService {
       row.activePolicyVersion !== null &&
       row.campaignAutomation === 'APPLY' &&
       (row.targetAutomation === null || row.targetAutomation === 'APPLY');
-    const evaluationNotBefore = current.evaluationNotBefore ?? now;
+    const evaluationNotBefore = eligible._max.statisticsFinalizedAt ?? now;
     const state = advanceExperiment(toState(row), {
-      collectedEligibleDays: current.collectedDays,
+      collectedEligibleDays: eligible._count._all,
       configurationValid,
       evaluationNotBefore,
       now,
-      observedExperimentSpendMinor: BigInt(current.observedSpendMinor),
+      observedExperimentSpendMinor: spend._sum.spendDeltaMinor ?? 0n,
       reservedUnobservedSpendMinor: 0n,
     });
     const reverting = state.status === 'REVERTING';
-    await this.pool.query(
-      `UPDATE "BidExperiment"
-          SET "status" = $2::"ExperimentStatus",
-              "collectedEligibleDays" = $3,
-              "observedExperimentSpendMinor" = $4,
-              "reservedUnobservedSpendMinor" = $5,
-              "evaluationNotBefore" = $6,
-              "terminalReasonCode" = $7,
-              "revertStartedAt" = CASE WHEN $8 THEN COALESCE("revertStartedAt", $9) ELSE NULL END,
-              "revertDeadlineAt" = CASE
-                WHEN $8 THEN COALESCE(
-                  "revertDeadlineAt",
-                  $9 + ($10::integer * INTERVAL '1 millisecond')
-                )
-                ELSE NULL
-              END
-        WHERE "id" = $1`,
-      [
-        row.id,
-        state.status,
-        state.collectedEligibleDays,
-        state.observedExperimentSpendMinor.toString(),
-        state.reservedUnobservedSpendMinor.toString(),
-        state.evaluationNotBefore,
-        state.terminalReasonCode,
-        reverting,
-        now,
-        this.configuration.writePipeline.experimentRevertDeadlineMs,
-      ],
-    );
+    await this.database.bidExperiment.update({
+      data: {
+        collectedEligibleDays: state.collectedEligibleDays,
+        evaluationNotBefore: state.evaluationNotBefore,
+        observedExperimentSpendMinor: state.observedExperimentSpendMinor,
+        reservedUnobservedSpendMinor: state.reservedUnobservedSpendMinor,
+        revertDeadlineAt: reverting
+          ? (row.revertDeadlineAt ??
+            new Date(now.getTime() + this.configuration.writePipeline.experimentRevertDeadlineMs))
+          : null,
+        revertStartedAt: reverting ? (row.revertStartedAt ?? now) : null,
+        status: state.status,
+        terminalReasonCode: state.terminalReasonCode,
+      },
+      where: { id: row.id },
+    });
     if (reverting) this.observability.bidExperimentReverts.inc({ reason: 'started' });
   }
 
@@ -322,34 +316,35 @@ export class ExperimentRuntimeService {
    * @returns Nothing.
    */
   private async evaluate(row: ExperimentRuntimeRow, now: Date): Promise<void> {
-    const decision = await this.pool.query<{
-      boundedBidMinor: string | null;
-      id: string;
-      outcomeReasonCode: string;
-    }>(
-      `SELECT "id", "boundedBidMinor", "outcomeReasonCode"
-         FROM "BidDecision"
-        WHERE "targetId" = $1
-          AND "createdAt" >= COALESCE($2, '-infinity'::timestamptz)
-          AND "strategyReasonCode" NOT IN ('EXPLORATION_PLANNED','EXPLORATION_REVERT')
-        ORDER BY "createdAt" DESC
-        LIMIT 1`,
-      [row.targetId, row.evaluationNotBefore],
-    );
-    const observed = decision.rows[0];
-    if (observed === undefined) return;
+    const observed = await this.database.bidDecision.findFirst({
+      orderBy: { createdAt: 'desc' },
+      select: {
+        boundedBidMinor: true,
+        id: true,
+        outcomeReasonCode: true,
+      },
+      where: {
+        ...(row.evaluationNotBefore === null
+          ? {}
+          : { createdAt: { gte: row.evaluationNotBefore } }),
+        strategyReasonCode: { notIn: ['EXPLORATION_PLANNED', 'EXPLORATION_REVERT'] },
+        targetId: row.targetId,
+      },
+    });
+    if (observed === null) return;
     if (
       observed.boundedBidMinor === row.experimentBidMinor &&
       !['INSUFFICIENT_DATA', 'INSUFFICIENT_BID_RESPONSE_DATA'].includes(observed.outcomeReasonCode)
     ) {
-      await this.pool.query(
-        `UPDATE "BidExperiment"
-            SET "status" = 'ACCEPTED', "completedAt" = $2,
-                "terminalReasonCode" = 'EXPLORATION_ACCEPTED',
-                "resultDecisionId" = $3
-          WHERE "id" = $1 AND "status" = 'EVALUATING'`,
-        [row.id, now, observed.id],
-      );
+      await this.database.bidExperiment.updateMany({
+        data: {
+          completedAt: now,
+          resultDecisionId: observed.id,
+          status: 'ACCEPTED',
+          terminalReasonCode: 'EXPLORATION_ACCEPTED',
+        },
+        where: { id: row.id, status: 'EVALUATING' },
+      });
       return;
     }
     await this.beginRevert(row.id, now, 'EXPLORATION_EVALUATION_REVERT');
@@ -368,31 +363,25 @@ export class ExperimentRuntimeService {
       return;
     }
     if (row.revertDecisionId !== null) {
-      const queue = await this.pool.query<{ status: string; verifiedAt: Date | null }>(
-        `SELECT "status"::text, "verifiedAt"
-           FROM "DecisionQueueItem" WHERE "decisionId" = $1`,
-        [row.revertDecisionId],
-      );
-      const result = queue.rows[0];
+      const result = await this.database.decisionQueueItem.findUnique({
+        select: { status: true, verifiedAt: true },
+        where: { decisionId: row.revertDecisionId },
+      });
       if (result?.status === 'APPLIED' && row.currentBidMinor !== null) {
         const terminal = confirmExperimentRevert(
           toState(row),
-          BigInt(row.currentBidMinor),
+          row.currentBidMinor,
           result.verifiedAt ?? now,
         );
-        await this.pool.query(
-          `UPDATE "BidExperiment"
-              SET "status" = $2::"ExperimentStatus", "actualRevertBidMinor" = $3,
-                  "completedAt" = $4, "terminalReasonCode" = $5
-            WHERE "id" = $1`,
-          [
-            row.id,
-            terminal.status,
-            terminal.actualRevertBidMinor?.toString() ?? null,
-            terminal.completedAt,
-            terminal.terminalReasonCode,
-          ],
-        );
+        await this.database.bidExperiment.update({
+          data: {
+            actualRevertBidMinor: terminal.actualRevertBidMinor,
+            completedAt: terminal.completedAt,
+            status: terminal.status,
+            terminalReasonCode: terminal.terminalReasonCode,
+          },
+          where: { id: row.id },
+        });
         this.observability.bidExperimentReverts.inc({ reason: terminal.status.toLowerCase() });
       }
       return;
@@ -404,7 +393,7 @@ export class ExperimentRuntimeService {
       policyMaxBidMinor: policy?.policyMaxBidMinor ?? 0n,
       policyMinBidMinor: policy?.policyMinBidMinor ?? null,
       quantumMinor: 1n,
-      wbMinimumBidMinor: row.wbMinimumBidMinor === null ? null : BigInt(row.wbMinimumBidMinor),
+      wbMinimumBidMinor: row.wbMinimumBidMinor,
     });
     if (instruction.bidMinor === null || policy === null) {
       await this.fail(row, now, 'EXPLORATION_REVERT_BLOCKED', true);
@@ -425,47 +414,42 @@ export class ExperimentRuntimeService {
     ) {
       return;
     }
-    if (instruction.bidMinor === BigInt(row.currentBidMinor)) {
+    if (instruction.bidMinor === row.currentBidMinor) {
       const terminal = confirmExperimentRevert(toState(row), instruction.bidMinor, now);
-      await this.pool.query(
-        `UPDATE "BidExperiment"
-            SET "status" = $2::"ExperimentStatus", "actualRevertBidMinor" = $3,
-                "completedAt" = $4, "terminalReasonCode" = $5
-          WHERE "id" = $1`,
-        [
-          row.id,
-          terminal.status,
-          instruction.bidMinor.toString(),
-          now,
-          terminal.terminalReasonCode,
-        ],
-      );
+      await this.database.bidExperiment.update({
+        data: {
+          actualRevertBidMinor: instruction.bidMinor,
+          completedAt: now,
+          status: terminal.status,
+          terminalReasonCode: terminal.terminalReasonCode,
+        },
+        where: { id: row.id },
+      });
       return;
     }
     const decisionResult = revertDecision(row, instruction.bidMinor, policy, now);
     const persisted = await this.decisions.persistDecision({
       calculatedAt: now,
-      currentBidMinor: BigInt(row.currentBidMinor),
+      currentBidMinor: row.currentBidMinor,
       economicsId: row.economicsId,
-      economicsVersion: BigInt(row.economicsVersion),
-      expectedContributionMinor: BigInt(row.expectedContributionMinor),
+      economicsVersion: row.economicsVersion,
+      expectedContributionMinor: row.expectedContributionMinor,
       periodEnd: now.toISOString().slice(0, 10),
       periodStart: now.toISOString().slice(0, 10),
       policyId: row.activePolicyId,
-      policyVersion: BigInt(row.activePolicyVersion),
+      policyVersion: row.activePolicyVersion,
       result: decisionResult,
       targetId: row.targetId,
     });
-    await this.pool.query(
-      `UPDATE "BidExperiment"
-          SET "revertDecisionId" = $2,
-              "terminalReasonCode" = CASE
-                WHEN $3 THEN 'EXPLORATION_REVERT_CONSTRAINED_PENDING'
-                ELSE 'EXPLORATION_REVERT_PENDING'
-              END
-        WHERE "id" = $1 AND "status" = 'REVERTING'`,
-      [row.id, persisted.decisionId, instruction.constrained],
-    );
+    await this.database.bidExperiment.updateMany({
+      data: {
+        revertDecisionId: persisted.decisionId,
+        terminalReasonCode: instruction.constrained
+          ? 'EXPLORATION_REVERT_CONSTRAINED_PENDING'
+          : 'EXPLORATION_REVERT_PENDING',
+      },
+      where: { id: row.id, status: 'REVERTING' },
+    });
   }
 
   /**
@@ -477,17 +461,21 @@ export class ExperimentRuntimeService {
    * @returns Nothing.
    */
   private async beginRevert(id: string, now: Date, reason: string): Promise<void> {
-    await this.pool.query(
-      `UPDATE "BidExperiment"
-          SET "status" = 'REVERTING', "terminalReasonCode" = $3,
-              "revertStartedAt" = COALESCE("revertStartedAt", $2),
-              "revertDeadlineAt" = COALESCE(
-                "revertDeadlineAt",
-                $2 + ($4::integer * INTERVAL '1 millisecond')
-              )
-        WHERE "id" = $1 AND "status" = 'EVALUATING'`,
-      [id, now, reason, this.configuration.writePipeline.experimentRevertDeadlineMs],
-    );
+    const current = await this.database.bidExperiment.findUnique({
+      select: { revertDeadlineAt: true, revertStartedAt: true },
+      where: { id },
+    });
+    await this.database.bidExperiment.updateMany({
+      data: {
+        revertDeadlineAt:
+          current?.revertDeadlineAt ??
+          new Date(now.getTime() + this.configuration.writePipeline.experimentRevertDeadlineMs),
+        revertStartedAt: current?.revertStartedAt ?? now,
+        status: 'REVERTING',
+        terminalReasonCode: reason,
+      },
+      where: { id, status: 'EVALUATING' },
+    });
     this.observability.bidExperimentReverts.inc({ reason: 'started' });
   }
 
@@ -507,37 +495,78 @@ export class ExperimentRuntimeService {
     disableTarget: boolean,
   ): Promise<void> {
     const status = disableTarget ? 'FAILED_REVERT_BLOCKED' : 'FAILED';
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-      await client.query(
-        `UPDATE "BidExperiment"
-            SET "status" = $2::"ExperimentStatus", "completedAt" = $3,
-                "terminalReasonCode" = $4
-          WHERE "id" = $1`,
-        [row.id, status, now, reason],
-      );
+    await this.database.$transaction(async (transaction) => {
+      await transaction.bidExperiment.update({
+        data: { completedAt: now, status, terminalReasonCode: reason },
+        where: { id: row.id },
+      });
       if (disableTarget) {
-        await client.query(
-          `INSERT INTO "TargetAutomation"
-             ("id", "targetId", "mode", "reason", "updatedBy")
-           VALUES ($1, $2, 'DISABLED', $3, 'SYSTEM')
-           ON CONFLICT ("targetId") DO UPDATE SET
-             "mode" = 'DISABLED',
-             "reason" = EXCLUDED."reason",
-             "version" = "TargetAutomation"."version" + 1,
-             "updatedBy" = 'SYSTEM'`,
-          [randomUUID(), row.targetId, reason],
-        );
+        await transaction.targetAutomation.upsert({
+          create: {
+            id: randomUUID(),
+            mode: 'DISABLED',
+            reason,
+            targetId: row.targetId,
+            updatedBy: 'SYSTEM',
+          },
+          update: {
+            mode: 'DISABLED',
+            reason,
+            updatedBy: 'SYSTEM',
+            version: { increment: 1 },
+          },
+          where: { targetId: row.targetId },
+        });
       }
-      await client.query('COMMIT');
-    } catch (error: unknown) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+    });
     this.observability.bidExperimentReverts.inc({ reason: status.toLowerCase() });
+  }
+
+  /**
+   * Resolves the active policy using target, campaign, deployment precedence.
+   *
+   * @param targetId - Target UUID.
+   * @param campaignId - Parent campaign UUID.
+   * @param now - Stable model time.
+   * @returns Most specific active policy, or null.
+   */
+  private async resolvePolicy(
+    targetId: string,
+    campaignId: string,
+    now: Date,
+  ): Promise<{
+    readonly configuration: unknown;
+    readonly id: string;
+    readonly version: bigint;
+  } | null> {
+    const common = {
+      enabled: true,
+      validFrom: { lte: now },
+      OR: [{ validTo: null }, { validTo: { gt: now } }],
+    };
+    const selection = {
+      configuration: true,
+      id: true,
+      version: true,
+    } as const;
+    const [target, campaign, deployment] = await Promise.all([
+      this.database.biddingPolicy.findFirst({
+        orderBy: { version: 'desc' },
+        select: selection,
+        where: { ...common, scope: 'TARGET', targetId },
+      }),
+      this.database.biddingPolicy.findFirst({
+        orderBy: { version: 'desc' },
+        select: selection,
+        where: { ...common, campaignId, scope: 'CAMPAIGN' },
+      }),
+      this.database.biddingPolicy.findFirst({
+        orderBy: { version: 'desc' },
+        select: selection,
+        where: { ...common, scope: 'DEPLOYMENT' },
+      }),
+    ]);
+    return target ?? campaign ?? deployment;
   }
 
   /**
@@ -549,7 +578,7 @@ export class ExperimentRuntimeService {
   private currentPolicy(row: ExperimentRuntimeRow): DecisionPolicy | null {
     if (row.activePolicyConfiguration === null || row.activePolicyVersion === null) return null;
     try {
-      return parseDecisionPolicy(row.activePolicyConfiguration, BigInt(row.activePolicyVersion));
+      return parseDecisionPolicy(row.activePolicyConfiguration, row.activePolicyVersion);
     } catch {
       return null;
     }
@@ -564,19 +593,18 @@ export class ExperimentRuntimeService {
  */
 function toState(row: ExperimentRuntimeRow): ExperimentState {
   return Object.freeze({
-    actualRevertBidMinor:
-      row.actualRevertBidMinor === null ? null : BigInt(row.actualRevertBidMinor),
+    actualRevertBidMinor: row.actualRevertBidMinor,
     collectedEligibleDays: row.collectedEligibleDays,
     completedAt: row.completedAt,
-    desiredRevertBidMinor: BigInt(row.desiredRevertBidMinor),
+    desiredRevertBidMinor: row.desiredRevertBidMinor,
     evaluationNotBefore: row.evaluationNotBefore,
-    experimentBidMinor: BigInt(row.experimentBidMinor),
-    observedExperimentSpendMinor: BigInt(row.observedExperimentSpendMinor),
+    experimentBidMinor: row.experimentBidMinor,
+    observedExperimentSpendMinor: row.observedExperimentSpendMinor,
     plannedFullDays: row.plannedFullDays,
-    reservedUnobservedSpendMinor: BigInt(row.reservedUnobservedSpendMinor),
-    sourceBidMinor: BigInt(row.sourceBidMinor),
-    spendLimitMinor: BigInt(row.spendLimitMinor),
-    spendSafetyBufferMinor: BigInt(row.spendSafetyBufferMinor),
+    reservedUnobservedSpendMinor: row.reservedUnobservedSpendMinor,
+    sourceBidMinor: row.sourceBidMinor,
+    spendLimitMinor: row.spendLimitMinor,
+    spendSafetyBufferMinor: row.spendSafetyBufferMinor,
     status: row.status,
     terminalReasonCode: row.terminalReasonCode,
   });
@@ -597,7 +625,7 @@ function revertDecision(
   policy: DecisionPolicy,
   now: Date,
 ): DecisionResult {
-  const current = BigInt(row.currentBidMinor ?? row.experimentBidMinor);
+  const current = row.currentBidMinor ?? row.experimentBidMinor;
   const inputSnapshotChecksum = scopedChecksum('experiment-revert-input-v1', {
     bidMinor,
     experimentId: row.id,

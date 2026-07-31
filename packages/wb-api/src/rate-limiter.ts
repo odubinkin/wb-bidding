@@ -3,7 +3,7 @@ import {
   type EndpointKey,
   type RateLimitProfile,
 } from '@wb-bidder/contracts';
-import type { Pool, PoolClient } from 'pg';
+import { advisoryTransactionLock, withTransaction, type DatabaseClient } from '@wb-bidder/database';
 
 /**
  * Token profile/environment combination selecting immutable endpoint limits.
@@ -127,15 +127,15 @@ export class InMemoryRateLimitStore implements RateLimitStore {
 /**
  * PostgreSQL-backed store coordinating buckets across all deployment replicas.
  */
-export class PostgresRateLimitStore implements RateLimitStore {
+export class PrismaRateLimitStore implements RateLimitStore {
   /**
-   * Creates a store over an existing application pool.
+   * Creates a store over the shared Prisma Client.
    *
    * The migration must create wb_rate_limit_bucket before scheduler startup.
    *
-   * @param pool - Shared PostgreSQL pool.
+   * @param database - Shared Prisma Client.
    */
-  public constructor(private readonly pool: Pool) {}
+  public constructor(private readonly database: DatabaseClient) {}
 
   /**
    * Consumes one token under a transaction-scoped advisory lock.
@@ -150,57 +150,41 @@ export class PostgresRateLimitStore implements RateLimitStore {
     profile: RateLimitProfile,
     nowMs: number,
   ): Promise<BucketConsumption> {
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-      await lockBucket(client, key);
-      const result = await client.query<{
-        blocked_until_ms: string;
-        last_refill_at_ms: string;
-        tokens: string;
-      }>(
-        `SELECT blocked_until_ms, last_refill_at_ms, tokens
-           FROM wb_rate_limit_bucket
-          WHERE bucket_key = $1
-          FOR UPDATE`,
-        [key],
-      );
-      const row = result.rows[0];
-      const blockedUntilMs = row === undefined ? 0 : Number(row.blocked_until_ms);
+    return withTransaction(this.database, async (transaction) => {
+      await advisoryTransactionLock(transaction, `rate-limit:${key}`);
+      const row = await transaction.wbRateLimitBucket.findUnique({
+        where: { bucketKey: key },
+      });
+      const blockedUntilMs = Number(row?.blockedUntilMs ?? 0n);
       if (blockedUntilMs > nowMs) {
-        await client.query('COMMIT');
         return { allowed: false, retryAtMs: blockedUntilMs };
       }
-      const lastRefillAtMs = row === undefined ? nowMs : Number(row.last_refill_at_ms);
+      const lastRefillAtMs = Number(row?.lastRefillAtMs ?? BigInt(nowMs));
       const refillRate = profile.requests / profile.intervalMs;
       const tokens = Math.min(
         profile.burst,
-        (row === undefined ? profile.burst : Number(row.tokens)) +
+        (row === null ? profile.burst : Number(row.tokens)) +
           Math.max(0, nowMs - lastRefillAtMs) * refillRate,
       );
       if (tokens < 1) {
-        await client.query('COMMIT');
         return { allowed: false, retryAtMs: nowMs + Math.ceil((1 - tokens) / refillRate) };
       }
-      await client.query(
-        `INSERT INTO wb_rate_limit_bucket
-           (bucket_key, blocked_until_ms, tokens, last_refill_at_ms, updated_at)
-         VALUES ($1, $2, $3, $4, NOW())
-         ON CONFLICT (bucket_key) DO UPDATE SET
-           blocked_until_ms = EXCLUDED.blocked_until_ms,
-           tokens = EXCLUDED.tokens,
-           last_refill_at_ms = EXCLUDED.last_refill_at_ms,
-           updated_at = NOW()`,
-        [key, blockedUntilMs, tokens - 1, nowMs],
-      );
-      await client.query('COMMIT');
+      await transaction.wbRateLimitBucket.upsert({
+        create: {
+          blockedUntilMs: BigInt(blockedUntilMs),
+          bucketKey: key,
+          lastRefillAtMs: BigInt(nowMs),
+          tokens: tokens - 1,
+        },
+        update: {
+          blockedUntilMs: BigInt(blockedUntilMs),
+          lastRefillAtMs: BigInt(nowMs),
+          tokens: tokens - 1,
+        },
+        where: { bucketKey: key },
+      });
       return { allowed: true, retryAtMs: nowMs };
-    } catch (error: unknown) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+    });
   }
 
   /**
@@ -211,15 +195,30 @@ export class PostgresRateLimitStore implements RateLimitStore {
    * @returns Promise resolving after persistence.
    */
   public async freeze(key: string, untilMs: number): Promise<void> {
-    await this.pool.query(
-      `INSERT INTO wb_rate_limit_bucket
-         (bucket_key, blocked_until_ms, tokens, last_refill_at_ms, updated_at)
-       VALUES ($1, $2, 0, $2, NOW())
-       ON CONFLICT (bucket_key) DO UPDATE SET
-         blocked_until_ms = GREATEST(wb_rate_limit_bucket.blocked_until_ms, EXCLUDED.blocked_until_ms),
-         updated_at = NOW()`,
-      [key, untilMs],
-    );
+    await withTransaction(this.database, async (transaction) => {
+      await advisoryTransactionLock(transaction, `rate-limit:${key}`);
+      const current = await transaction.wbRateLimitBucket.findUnique({
+        select: { blockedUntilMs: true },
+        where: { bucketKey: key },
+      });
+      await transaction.wbRateLimitBucket.upsert({
+        create: {
+          blockedUntilMs: BigInt(untilMs),
+          bucketKey: key,
+          lastRefillAtMs: BigInt(untilMs),
+          tokens: 0,
+        },
+        update: {
+          blockedUntilMs:
+            current === null
+              ? BigInt(untilMs)
+              : current.blockedUntilMs > BigInt(untilMs)
+                ? current.blockedUntilMs
+                : BigInt(untilMs),
+        },
+        where: { bucketKey: key },
+      });
+    });
   }
 }
 
@@ -394,17 +393,6 @@ export function parseRateLimitHeaders(
     remaining,
     retryAtMs: retryCandidates.length > 0 ? Math.max(nowMs, ...retryCandidates) : null,
   });
-}
-
-/**
- * Acquires a transaction-scoped lock for one storage key.
- *
- * @param client - Active transaction client.
- * @param key - Bucket key.
- * @returns Promise resolving after lock acquisition.
- */
-async function lockBucket(client: PoolClient, key: string): Promise<void> {
-  await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [key]);
 }
 
 /**

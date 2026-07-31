@@ -1,12 +1,12 @@
 import { Inject, Injectable } from '@nestjs/common';
-import type { Pool } from 'pg';
 
 import { APP_CONFIGURATION } from './application-config.js';
-import { DATABASE_POOL } from './database.js';
+import { DATABASE_CLIENT } from './database.js';
 import { RuntimeSafetyState } from './runtime-state.js';
 import { RuntimeClockService } from './runtime-clock.service.js';
 import { CURRENT_ENDPOINT_PROFILE, isCampaignApplyEligibleStatus } from '@wb-bidder/contracts';
 import type { AppConfiguration } from '@wb-bidder/config';
+import type { DatabaseClient } from '@wb-bidder/database';
 import type {
   ClaimedQueueItem,
   LiveBidState,
@@ -30,7 +30,7 @@ interface PreDispatchRow {
   /** Current persisted cluster state. */
   readonly clusterBidState: string | null;
   /** Current decision input bid. */
-  readonly currentBidMinor: string | null;
+  readonly currentBidMinor: bigint | null;
   /** Decision creation time. */
   readonly decisionCreatedAt: Date;
   /** Decision direction. */
@@ -38,17 +38,17 @@ interface PreDispatchRow {
   /** Whether the deployment kill switch is active. */
   readonly globalKill: boolean;
   /** Latest WB minimum. */
-  readonly minimumBidMinor: string | null;
+  readonly minimumBidMinor: bigint | null;
   /** Current product-economics version or null. */
-  readonly currentEconomicsVersion: string | null;
+  readonly currentEconomicsVersion: bigint | null;
   /** Economics version captured by the metric snapshot. */
-  readonly decisionEconomicsVersion: string;
+  readonly decisionEconomicsVersion: bigint | null;
   /** Policy execution mode captured by the metric snapshot. */
   readonly executionMode: string;
   /** Policy JSON used for maximum-bid revalidation. */
   readonly policyConfiguration: unknown;
   /** Policy version captured by the decision. */
-  readonly policyVersion: string;
+  readonly policyVersion: bigint;
   /** Whether the exact policy remains active. */
   readonly policyStillActive: boolean;
   /** Latest target snapshot apply eligibility. */
@@ -67,13 +67,13 @@ export class DatabasePreDispatchValidator implements PreDispatchValidator {
   /**
    * Creates a validator over the authoritative deployment database.
    *
-   * @param pool - Shared PostgreSQL pool.
+   * @param database - Shared Prisma Client.
    * @param configuration - Effective startup write gate.
    * @param runtimeState - Cached binding, integration, capacity, and shutdown gates.
    * @param clock - Wall or deterministic mock model clock.
    */
   public constructor(
-    @Inject(DATABASE_POOL) private readonly pool: Pool,
+    @Inject(DATABASE_CLIENT) private readonly database: DatabaseClient,
     @Inject(APP_CONFIGURATION) private readonly configuration: AppConfiguration,
     private readonly runtimeState: RuntimeSafetyState,
     private readonly clock: RuntimeClockService,
@@ -100,53 +100,95 @@ export class DatabasePreDispatchValidator implements PreDispatchValidator {
     ) {
       return invalid('PREWRITE_STATE_STALE');
     }
-    const result = await this.pool.query<PreDispatchRow>(
-      `SELECT c."status" AS "campaignStatus",
-              t."targetKind"::text AS "targetKind", t."capability",
-              t."minimumBidMinor", t."clusterBaselineBidState"::text,
-              t."clusterOverrideOwned", t."clusterBidState"::text,
-              d."action"::text AS "decisionAction", d."currentBidMinor",
-              d."createdAt" AS "decisionCreatedAt", d."policyVersion",
-              ms."productEconomicsVersion" AS "decisionEconomicsVersion",
-              p."executionMode"::text AS "executionMode",
-              p."configuration" AS "policyConfiguration",
-              (
-                p."enabled" = true
-                AND p."validFrom" <= $2
-                AND (p."validTo" IS NULL OR p."validTo" > $2)
-              ) AS "policyStillActive",
-              (
-                SELECT e."version"
-                  FROM "ProductEconomics" e
-                 WHERE e."nmId" = t."nmId"
-                   AND e."effectiveFrom" <= $2
-                   AND (e."effectiveTo" IS NULL OR e."effectiveTo" > $2)
-                 ORDER BY e."effectiveFrom" DESC, e."version" DESC
-                 LIMIT 1
-              ) AS "currentEconomicsVersion",
-              (
-                SELECT s."applyEligible"
-                  FROM "TargetDataSnapshot" s
-                 WHERE s."targetId" = t."id"
-                 ORDER BY s."createdAt" DESC
-                 LIMIT 1
-              ) AS "snapshotApplyEligible",
-              dc."globalKill",
-              ca."mode"::text AS "campaignAutomation",
-              ta."mode"::text AS "targetAutomation"
-         FROM "BidDecision" d
-         JOIN "MetricSnapshot" ms ON ms."id" = d."metricSnapshotId"
-         JOIN "BiddingPolicy" p ON p."id" = ms."policyId"
-         JOIN "CampaignTarget" t ON t."id" = d."targetId"
-         JOIN "Campaign" c ON c."id" = t."campaignId"
-         JOIN "DeploymentControl" dc ON dc."id" = '00000000-0000-0000-0000-000000000002'
-         LEFT JOIN "CampaignAutomation" ca ON ca."campaignId" = c."id"
-         LEFT JOIN "TargetAutomation" ta ON ta."targetId" = t."id"
-        WHERE d."id" = $1`,
-      [item.decisionId, modelNow],
-    );
-    const row = result.rows[0];
-    if (row === undefined) return invalid('DECISION_NOT_FOUND');
+    const decision = await this.database.bidDecision.findUnique({
+      select: {
+        action: true,
+        createdAt: true,
+        currentBidMinor: true,
+        metricSnapshot: {
+          select: {
+            policy: {
+              select: {
+                configuration: true,
+                enabled: true,
+                executionMode: true,
+                validFrom: true,
+                validTo: true,
+              },
+            },
+            productEconomicsVersion: true,
+          },
+        },
+        policyVersion: true,
+        target: {
+          select: {
+            automation: { select: { mode: true } },
+            campaign: {
+              select: {
+                automation: { select: { mode: true } },
+                status: true,
+              },
+            },
+            capability: true,
+            clusterBaselineBidState: true,
+            clusterBidState: true,
+            clusterOverrideOwned: true,
+            dataSnapshots: {
+              orderBy: { createdAt: 'desc' },
+              select: { applyEligible: true },
+              take: 1,
+            },
+            minimumBidMinor: true,
+            nmId: true,
+            targetKind: true,
+          },
+        },
+      },
+      where: { id: item.decisionId },
+    });
+    if (decision === null) return invalid('DECISION_NOT_FOUND');
+    const [control, currentEconomics] = await Promise.all([
+      this.database.deploymentControl.findUnique({
+        select: { globalKill: true },
+        where: { id: '00000000-0000-0000-0000-000000000002' },
+      }),
+      this.database.productEconomics.findFirst({
+        orderBy: [{ effectiveFrom: 'desc' }, { version: 'desc' }],
+        select: { version: true },
+        where: {
+          effectiveFrom: { lte: modelNow },
+          nmId: decision.target.nmId,
+          OR: [{ effectiveTo: null }, { effectiveTo: { gt: modelNow } }],
+        },
+      }),
+    ]);
+    if (control === null) return invalid('DEPLOYMENT_CONTROL_MISSING');
+    const policy = decision.metricSnapshot.policy;
+    const row: PreDispatchRow = {
+      campaignAutomation: decision.target.campaign.automation?.mode ?? null,
+      campaignStatus: decision.target.campaign.status,
+      capability: decision.target.capability,
+      clusterBaselineBidState: decision.target.clusterBaselineBidState,
+      clusterBidState: decision.target.clusterBidState,
+      clusterOverrideOwned: decision.target.clusterOverrideOwned,
+      currentBidMinor: decision.currentBidMinor,
+      currentEconomicsVersion: currentEconomics?.version ?? null,
+      decisionAction: decision.action,
+      decisionCreatedAt: decision.createdAt,
+      decisionEconomicsVersion: decision.metricSnapshot.productEconomicsVersion,
+      executionMode: policy.executionMode,
+      globalKill: control.globalKill,
+      minimumBidMinor: decision.target.minimumBidMinor,
+      policyConfiguration: policy.configuration,
+      policyStillActive:
+        policy.enabled &&
+        policy.validFrom <= modelNow &&
+        (policy.validTo === null || policy.validTo > modelNow),
+      policyVersion: decision.policyVersion,
+      snapshotApplyEligible: decision.target.dataSnapshots[0]?.applyEligible ?? null,
+      targetAutomation: decision.target.automation?.mode ?? null,
+      targetKind: decision.target.targetKind,
+    };
     if (
       modelNow.getTime() - new Date(row.decisionCreatedAt).getTime() >
       this.configuration.writePipeline.maximumDecisionAgeMinutes * 60_000
@@ -161,7 +203,7 @@ export class DatabasePreDispatchValidator implements PreDispatchValidator {
     if (row.executionMode !== 'APPLY' || !row.policyStillActive) {
       return invalid('POLICY_NOT_APPLY');
     }
-    if (BigInt(row.policyVersion) !== item.policyVersion) {
+    if (row.policyVersion !== item.policyVersion) {
       return invalid('POLICY_VERSION_CHANGED');
     }
     if (row.currentEconomicsVersion !== row.decisionEconomicsVersion) {
@@ -192,7 +234,7 @@ export class DatabasePreDispatchValidator implements PreDispatchValidator {
         row.currentBidMinor === null ||
         !liveState.explicit ||
         liveState.bidMinor === null ||
-        BigInt(row.currentBidMinor) !== liveState.bidMinor
+        row.currentBidMinor !== liveState.bidMinor
       ) {
         return invalid('CLUSTER_RESTORE_PROOF_MISSING');
       }
@@ -203,7 +245,7 @@ export class DatabasePreDispatchValidator implements PreDispatchValidator {
       (row.currentBidMinor === null) !== (liveState.bidMinor === null) ||
       (row.currentBidMinor !== null &&
         liveState.bidMinor !== null &&
-        BigInt(row.currentBidMinor) !== liveState.bidMinor) ||
+        row.currentBidMinor !== liveState.bidMinor) ||
       (clusterWrite &&
         ((row.clusterBidState === 'EXPLICIT') !== liveState.explicit ||
           (row.clusterBidState !== 'EXPLICIT' && row.clusterBidState !== 'ABSENT')))
@@ -211,7 +253,7 @@ export class DatabasePreDispatchValidator implements PreDispatchValidator {
       return invalid('LIVE_BID_CHANGED');
     }
     if (item.bidMinor === null) return invalid('DESIRED_BID_MISSING');
-    if (row.minimumBidMinor === null || item.bidMinor < BigInt(row.minimumBidMinor)) {
+    if (row.minimumBidMinor === null || item.bidMinor < row.minimumBidMinor) {
       return invalid('BELOW_WB_MINIMUM');
     }
     const policyMaximum = readNullableBigInt(row.policyConfiguration, 'policyMaxBidMinor');

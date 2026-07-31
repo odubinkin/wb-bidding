@@ -1,7 +1,11 @@
 /* eslint-disable jsdoc/require-jsdoc */
 import { createHash, randomUUID } from 'node:crypto';
 import canonicalize from 'canonicalize';
-import type { Pool, PoolClient } from 'pg';
+import {
+  createRawDatabaseClient,
+  type DatabaseClient,
+  type RawTransactionClient,
+} from '@wb-bidder/database';
 
 import { redactSecrets } from './redaction.js';
 import { isSafeStableOldRetry, stateChecksum } from './state-machine.js';
@@ -21,7 +25,11 @@ export const DEPLOYMENT_CONTROL_ID = '00000000-0000-0000-0000-000000000002';
  * Transactional PostgreSQL persistence for the write and reconciliation lifecycle.
  */
 export class WritePipelineRepository {
-  public constructor(private readonly pool: Pool) {}
+  private readonly pool;
+
+  public constructor(database: DatabaseClient) {
+    this.pool = createRawDatabaseClient(database);
+  }
 
   public async claim(
     workerId: string,
@@ -1071,7 +1079,7 @@ function parseStoredLiveState(value: unknown): LiveBidState {
 }
 
 async function assertAutomationAllows(
-  client: PoolClient,
+  client: RawTransactionClient,
   entries: readonly { readonly item: { readonly campaignId: string; readonly targetId: string } }[],
 ): Promise<void> {
   const control = await client.query<{ globalKill: boolean }>(
@@ -1133,7 +1141,7 @@ function reconciliationOutcome(
 }
 
 async function applyReconciliationOutcome(
-  client: PoolClient,
+  client: RawTransactionClient,
   input: {
     readonly attemptItemId: string;
     readonly decisionId: string;
@@ -1263,7 +1271,7 @@ function normalize(value: unknown): unknown {
 }
 
 async function appendAudit(
-  client: PoolClient,
+  client: RawTransactionClient,
   event: {
     readonly action: string;
     readonly actor: string;
@@ -1292,7 +1300,7 @@ async function appendAudit(
 }
 
 async function replayIdempotency(
-  client: PoolClient,
+  client: RawTransactionClient,
   scope: string | undefined,
   key: string | undefined,
   requestChecksum: string,
@@ -1316,7 +1324,7 @@ async function replayIdempotency(
 }
 
 async function storeIdempotency(
-  client: PoolClient,
+  client: RawTransactionClient,
   scope: string | undefined,
   key: string | undefined,
   requestChecksum: string,
@@ -1332,7 +1340,7 @@ async function storeIdempotency(
   );
 }
 
-async function rollback(client: PoolClient): Promise<void> {
+async function rollback(client: RawTransactionClient): Promise<void> {
   try {
     await client.query('ROLLBACK');
   } catch {

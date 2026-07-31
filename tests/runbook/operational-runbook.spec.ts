@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { Pool } from 'pg';
 
 import { ObservabilityService } from '../../apps/bidder/src/observability.service.js';
 import { CronSchedule } from '../../apps/bidder/src/scheduler.service.js';
 import { RuntimeSafetyState } from '../../apps/bidder/src/runtime-state.js';
 import type { AppConfiguration } from '@wb-bidder/config';
+import type { DatabaseClient } from '@wb-bidder/database';
 
 const configuration = {
   metricsEnabled: false,
@@ -13,8 +13,11 @@ const configuration = {
 
 describe('operational runbook drills', () => {
   it('fails readiness immediately on a database outage without touching WB', async () => {
-    const query = vi.fn<Pool['query']>().mockRejectedValue(new Error('ECONNREFUSED'));
-    const service = new ObservabilityService({ query } as unknown as Pool, configuration);
+    const queryRaw = vi.fn().mockRejectedValue(new Error('ECONNREFUSED'));
+    const service = new ObservabilityService(
+      { $queryRaw: queryRaw } as unknown as DatabaseClient,
+      configuration,
+    );
 
     const snapshot = await service.readiness();
 
@@ -24,7 +27,7 @@ describe('operational runbook drills', () => {
       name: 'database',
       ok: false,
     });
-    expect(query).toHaveBeenCalledTimes(1);
+    expect(queryRaw).toHaveBeenCalledTimes(1);
   });
 
   it('uses only cached integration authorization during readiness', async () => {
@@ -37,41 +40,23 @@ describe('operational runbook drills', () => {
       '202607291000_stage5_production_runtime',
       '202607291200_stage5_cluster_contract',
     ];
-    const query = vi.fn((statement: string) => {
-      const sql = statement;
-      if (sql.includes('_prisma_migrations')) {
-        return Promise.resolve({
-          command: 'SELECT',
-          fields: [],
-          oid: 0,
-          rowCount: requiredMigrations.length,
-          rows: requiredMigrations.map((migration_name) => ({ migration_name })),
-        });
-      }
-      if (sql.includes('DeploymentAccountBinding')) {
-        return Promise.resolve({
-          command: 'SELECT',
-          fields: [],
-          oid: 0,
-          rowCount: 1,
-          rows: [{ present: true }],
-        });
-      }
-      return Promise.resolve({
-        command: 'SELECT',
-        fields: [],
-        oid: 0,
-        rowCount: 1,
-        rows: [{ '?column?': 1 }],
-      });
-    });
-    const service = new ObservabilityService({ query } as unknown as Pool, configuration);
+    const queryRaw = vi
+      .fn()
+      .mockResolvedValueOnce([{ '?column?': 1 }])
+      .mockResolvedValueOnce(requiredMigrations.map((migration_name) => ({ migration_name })));
+    const service = new ObservabilityService(
+      {
+        $queryRaw: queryRaw,
+        deploymentAccountBinding: { count: vi.fn().mockResolvedValue(1) },
+      } as unknown as DatabaseClient,
+      configuration,
+    );
     service.integrationSucceeded(new Date());
 
     const snapshot = await service.readiness();
 
     expect(snapshot.ready).toBe(true);
-    expect(query).toHaveBeenCalledTimes(3);
+    expect(queryRaw).toHaveBeenCalledTimes(2);
   });
 
   it('keeps the shutdown write gate closed and validates non-overlapping schedules', () => {

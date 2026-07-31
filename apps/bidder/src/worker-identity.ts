@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
-import type { Pool } from 'pg';
+import type { DatabaseClient } from '@wb-bidder/database';
 
 /** Immutable process incarnation used to own durable worker leases. */
 export interface WorkerIdentity {
@@ -47,24 +47,28 @@ export const PROCESS_WORKER_IDENTITY = createWorkerIdentity({
 /**
  * Releases only scheduler leases owned by the exact shutting-down process.
  *
- * @param pool - Shared PostgreSQL pool.
+ * @param database - Shared Prisma Client.
  * @param identity - Exact process incarnation.
  * @returns Nothing after import and manual-job leases are released.
  */
 export async function releaseOwnedSchedulerLeases(
-  pool: Pool,
+  database: DatabaseClient,
   identity: WorkerIdentity,
 ): Promise<void> {
-  await pool.query(
-    `UPDATE "ProductEconomicsImport"
-        SET "status" = 'QUEUED', "leaseOwner" = NULL, "leaseUntil" = NULL
-      WHERE "status" = 'PROCESSING' AND "leaseOwner" = $1`,
-    [identity.owner('economics-import')],
-  );
-  await pool.query(
-    `UPDATE "ManualJob"
-        SET "status" = 'QUEUED', "leaseOwner" = NULL, "leaseUntil" = NULL
-      WHERE "status" = 'RUNNING' AND "leaseOwner" = $1`,
-    [identity.owner('manual-job')],
-  );
+  await database.$transaction([
+    database.productEconomicsImport.updateMany({
+      data: { leaseOwner: null, leaseUntil: null, status: 'QUEUED' },
+      where: {
+        leaseOwner: identity.owner('economics-import'),
+        status: 'PROCESSING',
+      },
+    }),
+    database.manualJob.updateMany({
+      data: { leaseOwner: null, leaseUntil: null, status: 'QUEUED' },
+      where: {
+        leaseOwner: identity.owner('manual-job'),
+        status: 'RUNNING',
+      },
+    }),
+  ]);
 }

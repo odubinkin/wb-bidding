@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { Pool } from 'pg';
+import { createTestDatabaseClient, type TestDatabaseClient } from '@wb-bidder/database';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { DecisionRepository, decideBid, type DecisionResult } from '@wb-bidder/decision-engine';
@@ -12,14 +12,15 @@ const databaseUrl = process.env.DATABASE_URL;
 const describeWithDatabase = databaseUrl === undefined ? describe.skip : describe;
 
 describeWithDatabase('Decision Engine PostgreSQL invariants', () => {
-  let pool: Pool;
+  let pool: TestDatabaseClient;
   let repository: DecisionRepository;
   const campaignId = randomUUID();
   const targetId = randomUUID();
   const correlationId = randomUUID();
 
   beforeAll(async () => {
-    pool = new Pool({ connectionString: databaseUrl });
+    if (databaseUrl === undefined) throw new Error('DATABASE_URL is required');
+    pool = createTestDatabaseClient({ connectionString: databaseUrl });
     repository = new DecisionRepository(pool);
     await new DataSyncRepository(pool).ensureAccountBinding(
       {
@@ -498,7 +499,7 @@ describeWithDatabase('Decision Engine PostgreSQL invariants', () => {
       [persistedTargetId],
     );
     expect(persisted.rows[0]).toEqual({
-      experimentBidMinor: '90',
+      experimentBidMinor: 90n,
       startDecisionId: created.decisionId,
       status: 'PLANNED',
     });
@@ -533,11 +534,11 @@ describeWithDatabase('Decision Engine PostgreSQL invariants', () => {
     adminUrl.pathname = '/postgres';
     const isolatedUrl = new URL(sourceUrl);
     isolatedUrl.pathname = `/${databaseName}`;
-    const admin = new Pool({ connectionString: adminUrl.toString() });
-    let isolated: Pool | undefined;
+    const admin = createTestDatabaseClient({ connectionString: adminUrl.toString() });
+    let isolated: TestDatabaseClient | undefined;
     try {
       await admin.query(`CREATE DATABASE "${databaseName}"`);
-      isolated = new Pool({ connectionString: isolatedUrl.toString() });
+      isolated = createTestDatabaseClient({ connectionString: isolatedUrl.toString() });
       for (const migration of [
         '202607281330_initial',
         '202607281410_stage1_rate_limiter',

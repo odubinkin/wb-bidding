@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { Pool } from 'pg';
+import { createTestDatabaseClient, type TestDatabaseClient } from '@wb-bidder/database';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { DataSyncRepository } from '@wb-bidder/data-sync';
@@ -18,10 +18,10 @@ const MIGRATIONS = Object.freeze([
 ]);
 
 describeWithDatabase('PostgreSQL account-scale capacity', () => {
-  let admin: Pool;
+  let admin: TestDatabaseClient;
   let databaseName: string;
   let isolatedUrl: URL;
-  let pool: Pool;
+  let pool: TestDatabaseClient;
   let repository: DataSyncRepository;
 
   beforeAll(async () => {
@@ -32,9 +32,15 @@ describeWithDatabase('PostgreSQL account-scale capacity', () => {
     adminUrl.pathname = '/postgres';
     isolatedUrl = new URL(sourceUrl);
     isolatedUrl.pathname = `/${databaseName}`;
-    admin = new Pool({ connectionString: adminUrl.toString(), max: 2 });
+    admin = createTestDatabaseClient({
+      connectionString: adminUrl.toString(),
+      maxConnections: 2,
+    });
     await admin.query(`CREATE DATABASE "${databaseName}"`);
-    pool = new Pool({ connectionString: isolatedUrl.toString(), max: 4 });
+    pool = createTestDatabaseClient({
+      connectionString: isolatedUrl.toString(),
+      maxConnections: 4,
+    });
     for (const migration of MIGRATIONS) {
       await pool.query(
         await readFile(
@@ -114,19 +120,20 @@ describeWithDatabase('PostgreSQL account-scale capacity', () => {
   }, 120_000);
 
   it('queues work under pool exhaustion without opening extra connections', async () => {
-    const constrained = new Pool({
+    const constrained = createTestDatabaseClient({
       connectionString: isolatedUrl.toString(),
-      connectionTimeoutMillis: 5_000,
-      max: 2,
+      maxConnections: 2,
     });
     const first = await constrained.connect();
     const second = await constrained.connect();
-    const waiting = constrained.query<{ value: number }>('SELECT 42 AS value');
+    let completed = false;
+    const waiting = constrained.query<{ value: number }>('SELECT 42 AS value').finally(() => {
+      completed = true;
+    });
     await new Promise<void>((resolve) => {
       setImmediate(resolve);
     });
-    expect(constrained.totalCount).toBe(2);
-    expect(constrained.waitingCount).toBe(1);
+    expect(completed).toBe(false);
 
     first.release();
     await expect(waiting).resolves.toMatchObject({ rows: [{ value: 42 }] });

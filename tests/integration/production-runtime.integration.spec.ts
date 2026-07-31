@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { Pool } from 'pg';
+import { createTestDatabaseClient, type TestDatabaseClient } from '@wb-bidder/database';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { ExperimentRuntimeService } from '../../apps/bidder/src/experiment-runtime.service.js';
@@ -25,10 +25,10 @@ const MIGRATIONS = Object.freeze([
 ]);
 
 describeWithDatabase('production runtime PostgreSQL lifecycle', () => {
-  let admin: Pool;
+  let admin: TestDatabaseClient;
   let databaseName: string;
   let isolatedUrl: URL;
-  let pool: Pool;
+  let pool: TestDatabaseClient;
 
   beforeAll(async () => {
     if (databaseUrl === undefined) return;
@@ -38,9 +38,9 @@ describeWithDatabase('production runtime PostgreSQL lifecycle', () => {
     adminUrl.pathname = '/postgres';
     isolatedUrl = new URL(sourceUrl);
     isolatedUrl.pathname = `/${databaseName}`;
-    admin = new Pool({ connectionString: adminUrl.toString() });
+    admin = createTestDatabaseClient({ connectionString: adminUrl.toString() });
     await admin.query(`CREATE DATABASE "${databaseName}"`);
-    pool = new Pool({ connectionString: isolatedUrl.toString() });
+    pool = createTestDatabaseClient({ connectionString: isolatedUrl.toString() });
     for (const migration of MIGRATIONS) {
       await pool.query(
         await readFile(
@@ -222,7 +222,7 @@ describeWithDatabase('production runtime PostgreSQL lifecycle', () => {
     );
 
     expect(rows).toHaveLength(1);
-    expect(rows[0]?.dailyAnchorBidMinor).toBe('120');
+    expect(rows[0]?.dailyAnchorBidMinor).toBe(120n);
 
     for (const [status, expectedCount] of [
       [4, 0],

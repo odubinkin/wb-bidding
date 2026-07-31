@@ -1,35 +1,35 @@
 /* eslint-disable jsdoc/require-jsdoc */
 import { Inject, Injectable, type OnApplicationShutdown } from '@nestjs/common';
-import { Pool } from 'pg';
 
 import { APP_CONFIGURATION } from './application-config.js';
 import type { AppConfiguration } from '@wb-bidder/config';
+import { createDatabaseClient, type DatabaseClient } from '@wb-bidder/database';
 
-/** Nest dependency-injection token for the shared PostgreSQL connection pool. */
-export const DATABASE_POOL = Symbol('DATABASE_POOL');
+/** Nest dependency-injection token for the shared Prisma Client. */
+export const DATABASE_CLIENT = Symbol('DATABASE_CLIENT');
 
-/** Builds the bounded PostgreSQL pool from already validated configuration. */
-export const databasePoolProvider = {
-  provide: DATABASE_POOL,
+/** Builds the bounded Prisma Client from already validated configuration. */
+export const databaseClientProvider = {
+  provide: DATABASE_CLIENT,
   inject: [APP_CONFIGURATION],
-  useFactory(configuration: AppConfiguration): Pool {
-    return new Pool({
-      application_name: 'wb-bidder',
+  useFactory(configuration: AppConfiguration): DatabaseClient {
+    return createDatabaseClient({
+      applicationName: 'wb-bidder',
       connectionString: configuration.databaseUrl,
-      max: 20,
-      statement_timeout: 30_000,
+      maxConnections: 20,
+      statementTimeoutMs: 30_000,
     });
   },
 };
 
 /**
- * Closes PostgreSQL connections during graceful shutdown.
+ * Closes Prisma-managed PostgreSQL connections during graceful shutdown.
  */
 @Injectable()
 export class DatabaseLifecycle implements OnApplicationShutdown {
-  public constructor(@Inject(DATABASE_POOL) private readonly pool: Pool) {}
+  public constructor(@Inject(DATABASE_CLIENT) private readonly database: DatabaseClient) {}
 
   public async onApplicationShutdown(): Promise<void> {
-    await this.pool.end();
+    await this.database.$disconnect();
   }
 }

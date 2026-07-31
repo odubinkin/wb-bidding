@@ -1,10 +1,9 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { BeforeApplicationShutdown } from '@nestjs/common';
 import { performance } from 'node:perf_hooks';
-import type { Pool } from 'pg';
 
 import { APP_CONFIGURATION } from './application-config.js';
-import { DATABASE_POOL } from './database.js';
+import { DATABASE_CLIENT } from './database.js';
 import { DecisionJobService } from './decision-job.service.js';
 import { ExperimentRuntimeService } from './experiment-runtime.service.js';
 import { claimManualJob } from './manual-job-lease.js';
@@ -21,6 +20,7 @@ import { RuntimeClockService } from './runtime-clock.service.js';
 import { PROCESS_WORKER_IDENTITY, releaseOwnedSchedulerLeases } from './worker-identity.js';
 import { WriteRuntimeService } from './write-runtime.service.js';
 import type { AppConfiguration } from '@wb-bidder/config';
+import { Prisma, type DatabaseClient } from '@wb-bidder/database';
 import {
   DataSyncRepository,
   WbDataSyncWorker,
@@ -160,7 +160,7 @@ export class SchedulerService implements BeforeApplicationShutdown {
    * Creates the scheduler and all job dependencies.
    *
    * @param configuration - Independent schedules and intervals.
-   * @param pool - Shared database pool.
+   * @param database - Shared Prisma Client.
    * @param dataWorker - Current/slow synchronization worker.
    * @param dataRepository - Cross-replica scheduler lock persistence.
    * @param decisionRepository - Economics import worker.
@@ -175,7 +175,7 @@ export class SchedulerService implements BeforeApplicationShutdown {
    */
   public constructor(
     @Inject(APP_CONFIGURATION) private readonly configuration: AppConfiguration,
-    @Inject(DATABASE_POOL) private readonly pool: Pool,
+    @Inject(DATABASE_CLIENT) private readonly database: DatabaseClient,
     @Inject(DATA_SYNC_WORKER) private readonly dataWorker: WbDataSyncWorker,
     @Inject(DATA_SYNC_REPOSITORY) private readonly dataRepository: DataSyncRepository,
     @Inject(DECISION_REPOSITORY) private readonly decisionRepository: DecisionRepository,
@@ -298,7 +298,7 @@ export class SchedulerService implements BeforeApplicationShutdown {
       }),
     ]);
     await this.writeRuntime.releaseLeases();
-    await releaseOwnedSchedulerLeases(this.pool, PROCESS_WORKER_IDENTITY);
+    await releaseOwnedSchedulerLeases(this.database, PROCESS_WORKER_IDENTITY);
   }
 
   /**
@@ -428,7 +428,7 @@ export class SchedulerService implements BeforeApplicationShutdown {
    */
   private async processManualJob(): Promise<void> {
     await this.runLocked('MANUAL_JOB', 10 * 60_000, async ({ signal }) => {
-      const job = await claimManualJob(this.pool, this.workerId('manual-job'));
+      const job = await claimManualJob(this.database, this.workerId('manual-job'));
       if (job === null) return null;
       try {
         const scope = parseManualScope(job.scope);
@@ -436,23 +436,37 @@ export class SchedulerService implements BeforeApplicationShutdown {
           job.type === 'RECALCULATE'
             ? await this.decisionJob.run(signal, scope)
             : await this.runManualResync(scope);
-        const completed = await this.pool.query(
-          `UPDATE "ManualJob"
-              SET "status" = 'SUCCEEDED', "finishedAt" = NOW(),
-                  "leaseOwner" = NULL, "leaseUntil" = NULL, "result" = $2::jsonb
-            WHERE "id" = $1 AND "status" = 'RUNNING' AND "leaseOwner" = $3`,
-          [job.id, JSON.stringify(result), job.leaseOwner],
-        );
-        if (completed.rowCount !== 1) throw new Error('MANUAL_JOB_LEASE_LOST');
+        const completed = await this.database.manualJob.updateMany({
+          data: {
+            finishedAt: new Date(),
+            leaseOwner: null,
+            leaseUntil: null,
+            result: JSON.parse(JSON.stringify(result)) as Prisma.InputJsonValue,
+            status: 'SUCCEEDED',
+          },
+          where: {
+            id: job.id,
+            leaseOwner: job.leaseOwner,
+            status: 'RUNNING',
+          },
+        });
+        if (completed.count !== 1) throw new Error('MANUAL_JOB_LEASE_LOST');
       } catch (error: unknown) {
-        const failed = await this.pool.query(
-          `UPDATE "ManualJob"
-              SET "status" = 'FAILED', "finishedAt" = NOW(),
-                  "leaseOwner" = NULL, "leaseUntil" = NULL, "errorCode" = $2
-            WHERE "id" = $1 AND "status" = 'RUNNING' AND "leaseOwner" = $3`,
-          [job.id, safeErrorCode(error), job.leaseOwner],
-        );
-        if (failed.rowCount !== 1) throw new Error('MANUAL_JOB_LEASE_LOST');
+        const failed = await this.database.manualJob.updateMany({
+          data: {
+            errorCode: safeErrorCode(error),
+            finishedAt: new Date(),
+            leaseOwner: null,
+            leaseUntil: null,
+            status: 'FAILED',
+          },
+          where: {
+            id: job.id,
+            leaseOwner: job.leaseOwner,
+            status: 'RUNNING',
+          },
+        });
+        if (failed.count !== 1) throw new Error('MANUAL_JOB_LEASE_LOST');
       }
       return job.id;
     });
