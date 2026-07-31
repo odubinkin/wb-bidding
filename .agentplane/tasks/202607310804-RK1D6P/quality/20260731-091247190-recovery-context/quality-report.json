@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "task_id": "202607310804-RK1D6P",
+  "evaluator_id": "recovery-context",
+  "evaluator_profile": "EVALUATOR",
+  "generated_at": "2026-07-31T09:12:47.190Z",
+  "verdict": "pass",
+  "summary": "Scheduler and write-worker lease owners are now unique per process incarnation, and graceful shutdown releases only exact owners from that process.",
+  "evaluated_sha": "1cc2255dd7c2ed233cc1bd86c2773f71fa1769de",
+  "blueprint_digest": "d0b493722424e2768d3007e62d199a0863d7b42cb5ff2bf3c1c19d6d76f034bd",
+  "findings": [
+    "A module-level identity combines hostname, PID, and a random boot UUID once, remaining stable for the process lifetime while changing across replicas and restarts.",
+    "Scheduler import and manual-job cleanup uses leaseOwner equality with exact purpose-specific owners; the former prefix LIKE predicate is removed.",
+    "Write executors share the same process incarnation prefix, preventing hostname-and-PID reuse from inheriting a prior process owner."
+  ],
+  "evidence_refs": [
+    ".agentplane/tasks/202607310804-RK1D6P/README.md",
+    "commit:1cc2255dd7c2",
+    "tests/unit/worker-identity.spec.ts",
+    "targeted worker identity unit suite: 2 passed",
+    "pnpm run format:check; pnpm run lint; pnpm run typecheck; pnpm run test:unit (117 passed)"
+  ],
+  "missing_tests": [],
+  "hidden_assumptions": [],
+  "residual_risks": [
+    "Abruptly terminated processes still rely on lease expiry and recovery rather than graceful exact-owner release."
+  ]
+}

@@ -1,10 +1,11 @@
 ---
 id: "202607310804-RK1D6P"
 title: "Make scheduler worker identities replica-safe"
-status: "DOING"
+result_summary: "Made scheduler and write-worker identities replica-safe and constrained shutdown cleanup to exact owners."
+status: "DONE"
 priority: "high"
 owner: "CODER"
-revision: 9
+revision: 11
 origin:
   system: "manual"
 depends_on: []
@@ -27,11 +28,37 @@ verification:
   updated_by: "CODER"
   note: "Scheduler identity and exact shutdown-release tests passed; format, lint, typecheck, and 117 unit tests passed."
   attempts: 0
-commit: null
+quality_review:
+  state: "pass"
+  updated_at: "2026-07-31T09:12:47.190Z"
+  updated_by: "EVALUATOR"
+  note: "Scheduler and write-worker lease owners are now unique per process incarnation, and graceful shutdown releases only exact owners from that process."
+  evaluated_sha: "1cc2255dd7c2ed233cc1bd86c2773f71fa1769de"
+  blueprint_digest: "d0b493722424e2768d3007e62d199a0863d7b42cb5ff2bf3c1c19d6d76f034bd"
+  evidence_refs:
+    - ".agentplane/tasks/202607310804-RK1D6P/README.md"
+    - ".agentplane/tasks/202607310804-RK1D6P/quality/20260731-091247190-recovery-context/quality-report.json"
+    - ".agentplane/tasks/202607310804-RK1D6P/quality/20260731-091247190-recovery-context/evaluator-prompt.md"
+    - ".agentplane/tasks/202607310804-RK1D6P/quality/20260731-091247190-recovery-context/evaluator-opinion.md"
+    - ".agentplane/tasks/202607310804-RK1D6P/blueprint/resolved-snapshot.json"
+    - "commit:1cc2255dd7c2"
+    - "tests/unit/worker-identity.spec.ts"
+    - "targeted worker identity unit suite: 2 passed"
+    - "pnpm run format:check; pnpm run lint; pnpm run typecheck; pnpm run test:unit (117 passed)"
+  findings:
+    - "A module-level identity combines hostname, PID, and a random boot UUID once, remaining stable for the process lifetime while changing across replicas and restarts."
+    - "Scheduler import and manual-job cleanup uses leaseOwner equality with exact purpose-specific owners; the former prefix LIKE predicate is removed."
+    - "Write executors share the same process incarnation prefix, preventing hostname-and-PID reuse from inheriting a prior process owner."
+commit:
+  hash: "1cc2255dd7c2ed233cc1bd86c2773f71fa1769de"
+  message: "🚧 RK1D6P task: make worker identities replica-safe"
 comments:
   -
     author: "CODER"
     body: "Start: make scheduler worker identities unique per replica and scope shutdown cleanup to the exact process."
+  -
+    author: "CODER"
+    body: "Verified: lease owners are unique per process incarnation and shutdown cleanup cannot match another replica or restart."
 events:
   -
     type: "status"
@@ -46,8 +73,15 @@ events:
     author: "CODER"
     state: "ok"
     note: "Scheduler identity and exact shutdown-release tests passed; format, lint, typecheck, and 117 unit tests passed."
+  -
+    type: "status"
+    at: "2026-07-31T09:12:53.715Z"
+    author: "CODER"
+    from: "DOING"
+    to: "DONE"
+    note: "Verified: lease owners are unique per process incarnation and shutdown cleanup cannot match another replica or restart."
 doc_version: 3
-doc_updated_at: "2026-07-31T09:12:32.098Z"
+doc_updated_at: "2026-07-31T09:12:53.716Z"
 doc_updated_by: "CODER"
 description: "Replace PID-only scheduler lease owners with a process-stable replica-unique identity and constrain graceful-shutdown lease release to the exact owning process; add coverage."
 sections:
