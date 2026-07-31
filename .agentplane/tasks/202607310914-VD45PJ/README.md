@@ -1,10 +1,11 @@
 ---
 id: "202607310914-VD45PJ"
 title: "Migrate all database access to Prisma Client"
-status: "DOING"
+result_summary: "verified-202607310914-VD45PJ"
+status: "DONE"
 priority: "high"
 owner: "CODER"
-revision: 10
+revision: 13
 origin:
   system: "manual"
 depends_on: []
@@ -19,9 +20,9 @@ plan_approval:
   note: null
 verification:
   state: "ok"
-  updated_at: "2026-07-31T09:56:29.963Z"
+  updated_at: "2026-07-31T09:57:09.164Z"
   updated_by: "CODER"
-  note: "verified-202607310914-VD45PJ"
+  note: "All database access now uses the shared Prisma Client; verified across static, unit, integration, e2e, load, runbook, build, and smoke checks."
   attempts: 0
 quality_review:
   state: "pass"
@@ -39,11 +40,16 @@ quality_review:
     - "pnpm run quality; pnpm run test:property; pnpm run test:integration; pnpm run test:e2e; pnpm run test:load; pnpm run test:runbook; pnpm run build; pnpm run smoke:built; pnpm run verify:database-architecture"
   findings:
     - "No direct pg dependency/import, Pool type, or Prisma raw API outside the shared database package remains; all prescribed checks pass."
-commit: null
+commit:
+  hash: "d5281df449d42f6dcca39eebd2cc3d18eba8d37e"
+  message: "🚧 VD45PJ task: record evaluator pass"
 comments:
   -
     author: "CODER"
     body: "Start: migrate every database access path to the shared Prisma Client, isolate unavoidable raw SQL in shared Prisma helpers, remove direct pg usage, and verify all database-backed behavior."
+  -
+    author: "CODER"
+    body: "Verified: verified-202607310914-VD45PJ. Guided shortcut recorded verification and is closing the direct task with traceable commit metadata."
 events:
   -
     type: "status"
@@ -70,8 +76,27 @@ events:
     author: "CODER"
     state: "ok"
     note: "verified-202607310914-VD45PJ"
+  -
+    type: "verify"
+    at: "2026-07-31T09:56:50.955Z"
+    author: "CODER"
+    state: "ok"
+    note: "verified-202607310914-VD45PJ"
+  -
+    type: "status"
+    at: "2026-07-31T09:56:51.141Z"
+    author: "CODER"
+    from: "DOING"
+    to: "DONE"
+    note: "Verified: verified-202607310914-VD45PJ. Guided shortcut recorded verification and is closing the direct task with traceable commit metadata."
+  -
+    type: "verify"
+    at: "2026-07-31T09:57:09.164Z"
+    author: "CODER"
+    state: "ok"
+    note: "All database access now uses the shared Prisma Client; verified across static, unit, integration, e2e, load, runbook, build, and smoke checks."
 doc_version: 3
-doc_updated_at: "2026-07-31T09:56:30.043Z"
+doc_updated_at: "2026-07-31T09:57:09.238Z"
 doc_updated_by: "CODER"
 description: "Replace every runtime and test database access path based on node-postgres with the shared Prisma Client; isolate unavoidable raw SQL in shared Prisma helpers; remove direct pg dependencies and verify all database-backed modules end to end."
 sections:
@@ -184,6 +209,66 @@ sections:
     - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
     - risks: none
 
+    ### 2026-07-31T09:56:50.955Z — VERIFY — ok
+
+    By: CODER
+
+    Note: verified-202607310914-VD45PJ
+    Attempts: 0
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-31T09:56:30.043Z, excerpt_hash=sha256:8453c2acc6469c4fcb8bcca8bef13a3487e59eda600fe90e2b1c23cbdd6317c0
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607310914-VD45PJ/blueprint/resolved-snapshot.json
+    - old_digest: 24ec3179fa3ca38e3c58d72530660a82b68bd4759ad99992dcb9354d58a437a9
+    - current_digest: 24ec3179fa3ca38e3c58d72530660a82b68bd4759ad99992dcb9354d58a437a9
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202607310914-VD45PJ
+
+    DecisionContextRef:
+    - operator_action: run_exact_argv
+    - can_execute_now: true
+    - safe_command: agentplane task complete 202607310914-VD45PJ --result verified-202607310914-VD45PJ --commit d5281df449d42f6dcca39eebd2cc3d18eba8d37e
+    - diagnostic_command: none
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: true
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: none
+
+    ### 2026-07-31T09:57:09.164Z — VERIFY — ok
+
+    By: CODER
+
+    Note: All database access now uses the shared Prisma Client; verified across static, unit, integration, e2e, load, runbook, build, and smoke checks.
+    Attempts: 0
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-31T09:56:51.142Z, excerpt_hash=sha256:8453c2acc6469c4fcb8bcca8bef13a3487e59eda600fe90e2b1c23cbdd6317c0
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607310914-VD45PJ/blueprint/resolved-snapshot.json
+    - old_digest: 24ec3179fa3ca38e3c58d72530660a82b68bd4759ad99992dcb9354d58a437a9
+    - current_digest: 24ec3179fa3ca38e3c58d72530660a82b68bd4759ad99992dcb9354d58a437a9
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202607310914-VD45PJ
+
+    DecisionContextRef:
+    - operator_action: run_exact_argv
+    - can_execute_now: true
+    - safe_command: agentplane commit 202607310914-VD45PJ --close --unstage-others
+    - diagnostic_command: none
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: true
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: none
+
     <!-- END VERIFICATION RESULTS -->
   Rollback Plan: |-
     - Revert task-related commit(s).
@@ -192,6 +277,10 @@ sections:
     - Observation: All database consumers use the shared Prisma Client; direct pg imports/dependencies and direct raw API calls outside packages/database are absent.
       Impact: Decision, synchronization, rate-limit, write, admin, runtime, and test database paths retain transaction and concurrency behavior through Prisma.
       Resolution: Centralized generated client and PostgreSQL-only raw primitives in @wb-bidder/database and added a regression guard.
+extensions:
+  implementation_commit:
+    hash: "3891608b46a193fd1cf96dad1502ebee87b0bcce"
+    message: "🚧 VD45PJ task: migrate database access to Prisma Client"
 id_source: "generated"
 ---
 ## Summary
@@ -306,6 +395,66 @@ DecisionContextRef:
 - operator_action: run_exact_argv
 - can_execute_now: true
 - safe_command: agentplane task complete 202607310914-VD45PJ --result verified-202607310914-VD45PJ --commit 3891608b46a193fd1cf96dad1502ebee87b0bcce
+- diagnostic_command: none
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: true
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: none
+
+### 2026-07-31T09:56:50.955Z — VERIFY — ok
+
+By: CODER
+
+Note: verified-202607310914-VD45PJ
+Attempts: 0
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-31T09:56:30.043Z, excerpt_hash=sha256:8453c2acc6469c4fcb8bcca8bef13a3487e59eda600fe90e2b1c23cbdd6317c0
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607310914-VD45PJ/blueprint/resolved-snapshot.json
+- old_digest: 24ec3179fa3ca38e3c58d72530660a82b68bd4759ad99992dcb9354d58a437a9
+- current_digest: 24ec3179fa3ca38e3c58d72530660a82b68bd4759ad99992dcb9354d58a437a9
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202607310914-VD45PJ
+
+DecisionContextRef:
+- operator_action: run_exact_argv
+- can_execute_now: true
+- safe_command: agentplane task complete 202607310914-VD45PJ --result verified-202607310914-VD45PJ --commit d5281df449d42f6dcca39eebd2cc3d18eba8d37e
+- diagnostic_command: none
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: true
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: none
+
+### 2026-07-31T09:57:09.164Z — VERIFY — ok
+
+By: CODER
+
+Note: All database access now uses the shared Prisma Client; verified across static, unit, integration, e2e, load, runbook, build, and smoke checks.
+Attempts: 0
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-31T09:56:51.142Z, excerpt_hash=sha256:8453c2acc6469c4fcb8bcca8bef13a3487e59eda600fe90e2b1c23cbdd6317c0
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607310914-VD45PJ/blueprint/resolved-snapshot.json
+- old_digest: 24ec3179fa3ca38e3c58d72530660a82b68bd4759ad99992dcb9354d58a437a9
+- current_digest: 24ec3179fa3ca38e3c58d72530660a82b68bd4759ad99992dcb9354d58a437a9
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202607310914-VD45PJ
+
+DecisionContextRef:
+- operator_action: run_exact_argv
+- can_execute_now: true
+- safe_command: agentplane commit 202607310914-VD45PJ --close --unstage-others
 - diagnostic_command: none
 - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
 - freshness: route=computed_local remote=remote_skipped
