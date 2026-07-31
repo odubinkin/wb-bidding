@@ -1,10 +1,11 @@
 ---
 id: "202607310803-GHSSR3"
 title: "Enforce fail-closed campaign status eligibility"
-status: "DOING"
+result_summary: "Restricted APPLY to statuses 9 and 11 while keeping status 7 statistics-only."
+status: "DONE"
 priority: "high"
 owner: "CODER"
-revision: 9
+revision: 11
 origin:
   system: "manual"
 depends_on: []
@@ -28,11 +29,39 @@ verification:
   updated_by: "CODER"
   note: "Campaign status unit matrix passed; format, lint, typecheck, 113 unit tests, PostgreSQL 18 migrations, and 27 integration tests passed."
   attempts: 0
-commit: null
+quality_review:
+  state: "pass"
+  updated_at: "2026-07-31T08:31:24.141Z"
+  updated_by: "EVALUATOR"
+  note: "The implementation enforces the documented fail-closed campaign lifecycle matrix across synchronization, decision construction, and dispatch validation."
+  evaluated_sha: "2325f5766933b57dc828bbfa7a53988e5f072459"
+  blueprint_digest: "95a45f2d08778ee73eca811e4f6f71a09b6626c493ed17b4c826a25531983a11"
+  evidence_refs:
+    - ".agentplane/tasks/202607310803-GHSSR3/README.md"
+    - ".agentplane/tasks/202607310803-GHSSR3/quality/20260731-083124141-recovery-context/quality-report.json"
+    - ".agentplane/tasks/202607310803-GHSSR3/quality/20260731-083124141-recovery-context/evaluator-prompt.md"
+    - ".agentplane/tasks/202607310803-GHSSR3/quality/20260731-083124141-recovery-context/evaluator-opinion.md"
+    - ".agentplane/tasks/202607310803-GHSSR3/blueprint/resolved-snapshot.json"
+    - "commit:2325f5766933"
+    - "tests/unit/campaign-status.spec.ts"
+    - "tests/unit/pre-dispatch-validator.spec.ts"
+    - "tests/integration/data-sync.integration.spec.ts"
+    - "tests/integration/production-runtime.integration.spec.ts"
+    - "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run test:unit (113 passed)"
+    - "PostgreSQL 18 migrations + pnpm run test:integration (27 passed)"
+  findings:
+    - "Shared contracts explicitly allow statistics for statuses 7, 9, and 11 while allowing APPLY only for 9 and 11."
+    - "Current-state and slow-sync stages keep status 7 statistics-only; Decision Job and pre-dispatch independently exclude all non-9/11 statuses."
+commit:
+  hash: "2325f5766933b57dc828bbfa7a53988e5f072459"
+  message: "🚧 GHSSR3 task: enforce campaign status eligibility"
 comments:
   -
     author: "CODER"
     body: "Start: enforce fail-closed campaign status eligibility across synchronization, decision inputs, and pre-dispatch validation."
+  -
+    author: "CODER"
+    body: "Verified: campaign status eligibility is fail-closed across synchronization, decision generation, and pre-dispatch validation."
 events:
   -
     type: "status"
@@ -47,8 +76,15 @@ events:
     author: "CODER"
     state: "ok"
     note: "Campaign status unit matrix passed; format, lint, typecheck, 113 unit tests, PostgreSQL 18 migrations, and 27 integration tests passed."
+  -
+    type: "status"
+    at: "2026-07-31T08:31:39.438Z"
+    author: "CODER"
+    from: "DOING"
+    to: "DONE"
+    note: "Verified: campaign status eligibility is fail-closed across synchronization, decision generation, and pre-dispatch validation."
 doc_version: 3
-doc_updated_at: "2026-07-31T08:31:08.402Z"
+doc_updated_at: "2026-07-31T08:31:39.439Z"
 doc_updated_by: "CODER"
 description: "Allow bid application only for WB campaign statuses 9 and 11, keep status 7 statistics-only, reject stopped and unknown statuses, and add status-matrix coverage."
 sections:

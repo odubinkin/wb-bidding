@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "task_id": "202607310803-GHSSR3",
+  "evaluator_id": "recovery-context",
+  "evaluator_profile": "EVALUATOR",
+  "generated_at": "2026-07-31T08:31:24.141Z",
+  "verdict": "pass",
+  "summary": "The implementation enforces the documented fail-closed campaign lifecycle matrix across synchronization, decision construction, and dispatch validation.",
+  "evaluated_sha": "2325f5766933b57dc828bbfa7a53988e5f072459",
+  "blueprint_digest": "95a45f2d08778ee73eca811e4f6f71a09b6626c493ed17b4c826a25531983a11",
+  "findings": [
+    "Shared contracts explicitly allow statistics for statuses 7, 9, and 11 while allowing APPLY only for 9 and 11.",
+    "Current-state and slow-sync stages keep status 7 statistics-only; Decision Job and pre-dispatch independently exclude all non-9/11 statuses."
+  ],
+  "evidence_refs": [
+    ".agentplane/tasks/202607310803-GHSSR3/README.md",
+    "commit:2325f5766933",
+    "tests/unit/campaign-status.spec.ts",
+    "tests/unit/pre-dispatch-validator.spec.ts",
+    "tests/integration/data-sync.integration.spec.ts",
+    "tests/integration/production-runtime.integration.spec.ts",
+    "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run test:unit (113 passed)",
+    "PostgreSQL 18 migrations + pnpm run test:integration (27 passed)"
+  ],
+  "missing_tests": [],
+  "hidden_assumptions": [],
+  "residual_risks": [
+    "Future WB lifecycle statuses remain intentionally blocked until explicitly classified."
+  ]
+}
