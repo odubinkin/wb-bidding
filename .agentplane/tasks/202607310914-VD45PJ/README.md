@@ -4,7 +4,7 @@ title: "Migrate all database access to Prisma Client"
 status: "DOING"
 priority: "high"
 owner: "CODER"
-revision: 8
+revision: 10
 origin:
   system: "manual"
 depends_on: []
@@ -19,10 +19,26 @@ plan_approval:
   note: null
 verification:
   state: "ok"
-  updated_at: "2026-07-31T09:55:01.278Z"
+  updated_at: "2026-07-31T09:56:29.963Z"
   updated_by: "CODER"
   note: "verified-202607310914-VD45PJ"
   attempts: 0
+quality_review:
+  state: "pass"
+  updated_at: "2026-07-31T09:56:16.498Z"
+  updated_by: "EVALUATOR"
+  note: "Prisma Client migration is complete and fully verified across static, domain, PostgreSQL, build, and smoke layers."
+  evaluated_sha: "3891608b46a193fd1cf96dad1502ebee87b0bcce"
+  blueprint_digest: "24ec3179fa3ca38e3c58d72530660a82b68bd4759ad99992dcb9354d58a437a9"
+  evidence_refs:
+    - ".agentplane/tasks/202607310914-VD45PJ/README.md"
+    - ".agentplane/tasks/202607310914-VD45PJ/quality/20260731-095616498-recovery-context/quality-report.json"
+    - ".agentplane/tasks/202607310914-VD45PJ/quality/20260731-095616498-recovery-context/evaluator-prompt.md"
+    - ".agentplane/tasks/202607310914-VD45PJ/quality/20260731-095616498-recovery-context/evaluator-opinion.md"
+    - ".agentplane/tasks/202607310914-VD45PJ/blueprint/resolved-snapshot.json"
+    - "pnpm run quality; pnpm run test:property; pnpm run test:integration; pnpm run test:e2e; pnpm run test:load; pnpm run test:runbook; pnpm run build; pnpm run smoke:built; pnpm run verify:database-architecture"
+  findings:
+    - "No direct pg dependency/import, Pool type, or Prisma raw API outside the shared database package remains; all prescribed checks pass."
 commit: null
 comments:
   -
@@ -48,8 +64,14 @@ events:
     author: "CODER"
     state: "ok"
     note: "verified-202607310914-VD45PJ"
+  -
+    type: "verify"
+    at: "2026-07-31T09:56:29.963Z"
+    author: "CODER"
+    state: "ok"
+    note: "verified-202607310914-VD45PJ"
 doc_version: 3
-doc_updated_at: "2026-07-31T09:55:01.353Z"
+doc_updated_at: "2026-07-31T09:56:30.043Z"
 doc_updated_by: "CODER"
 description: "Replace every runtime and test database access path based on node-postgres with the shared Prisma Client; isolate unavoidable raw SQL in shared Prisma helpers; remove direct pg dependencies and verify all database-backed modules end to end."
 sections:
@@ -125,6 +147,36 @@ sections:
     - operator_action: run_exact_argv
     - can_execute_now: true
     - safe_command: agentplane task complete 202607310914-VD45PJ --result verified-202607310914-VD45PJ --commit 3a97875e50a083febffd8dd0568f41dd2e478e2a
+    - diagnostic_command: none
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: true
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: none
+
+    ### 2026-07-31T09:56:29.963Z — VERIFY — ok
+
+    By: CODER
+
+    Note: verified-202607310914-VD45PJ
+    Attempts: 0
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-31T09:55:01.353Z, excerpt_hash=sha256:8453c2acc6469c4fcb8bcca8bef13a3487e59eda600fe90e2b1c23cbdd6317c0
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607310914-VD45PJ/blueprint/resolved-snapshot.json
+    - old_digest: 24ec3179fa3ca38e3c58d72530660a82b68bd4759ad99992dcb9354d58a437a9
+    - current_digest: 24ec3179fa3ca38e3c58d72530660a82b68bd4759ad99992dcb9354d58a437a9
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202607310914-VD45PJ
+
+    DecisionContextRef:
+    - operator_action: run_exact_argv
+    - can_execute_now: true
+    - safe_command: agentplane task complete 202607310914-VD45PJ --result verified-202607310914-VD45PJ --commit 3891608b46a193fd1cf96dad1502ebee87b0bcce
     - diagnostic_command: none
     - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
     - freshness: route=computed_local remote=remote_skipped
@@ -224,6 +276,36 @@ DecisionContextRef:
 - operator_action: run_exact_argv
 - can_execute_now: true
 - safe_command: agentplane task complete 202607310914-VD45PJ --result verified-202607310914-VD45PJ --commit 3a97875e50a083febffd8dd0568f41dd2e478e2a
+- diagnostic_command: none
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: true
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: none
+
+### 2026-07-31T09:56:29.963Z — VERIFY — ok
+
+By: CODER
+
+Note: verified-202607310914-VD45PJ
+Attempts: 0
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-31T09:55:01.353Z, excerpt_hash=sha256:8453c2acc6469c4fcb8bcca8bef13a3487e59eda600fe90e2b1c23cbdd6317c0
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607310914-VD45PJ/blueprint/resolved-snapshot.json
+- old_digest: 24ec3179fa3ca38e3c58d72530660a82b68bd4759ad99992dcb9354d58a437a9
+- current_digest: 24ec3179fa3ca38e3c58d72530660a82b68bd4759ad99992dcb9354d58a437a9
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202607310914-VD45PJ
+
+DecisionContextRef:
+- operator_action: run_exact_argv
+- can_execute_now: true
+- safe_command: agentplane task complete 202607310914-VD45PJ --result verified-202607310914-VD45PJ --commit 3891608b46a193fd1cf96dad1502ebee87b0bcce
 - diagnostic_command: none
 - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
 - freshness: route=computed_local remote=remote_skipped

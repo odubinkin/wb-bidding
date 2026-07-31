@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "task_id": "202607310914-VD45PJ",
+  "evaluator_id": "recovery-context",
+  "evaluator_profile": "EVALUATOR",
+  "generated_at": "2026-07-31T09:56:16.498Z",
+  "verdict": "pass",
+  "summary": "Prisma Client migration is complete and fully verified across static, domain, PostgreSQL, build, and smoke layers.",
+  "evaluated_sha": "3891608b46a193fd1cf96dad1502ebee87b0bcce",
+  "blueprint_digest": "24ec3179fa3ca38e3c58d72530660a82b68bd4759ad99992dcb9354d58a437a9",
+  "findings": [
+    "No direct pg dependency/import, Pool type, or Prisma raw API outside the shared database package remains; all prescribed checks pass."
+  ],
+  "evidence_refs": [
+    ".agentplane/tasks/202607310914-VD45PJ/README.md",
+    "pnpm run quality; pnpm run test:property; pnpm run test:integration; pnpm run test:e2e; pnpm run test:load; pnpm run test:runbook; pnpm run build; pnpm run smoke:built; pnpm run verify:database-architecture"
+  ],
+  "missing_tests": [],
+  "hidden_assumptions": [],
+  "residual_risks": [
+    "Complex PostgreSQL-only locking and bulk primitives remain raw by necessity, but execute exclusively through the shared Prisma database boundary and are covered by concurrency integration tests."
+  ]
+}
