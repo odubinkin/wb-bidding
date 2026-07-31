@@ -1,10 +1,11 @@
 ---
 id: "202607310804-H5383N"
 title: "Renew write leases during pre-dispatch validation"
-status: "DOING"
+result_summary: "Renewed active write leases throughout pre-dispatch validation with fail-closed ownership checks."
+status: "DONE"
 priority: "high"
 owner: "CODER"
-revision: 9
+revision: 11
 origin:
   system: "manual"
 depends_on: []
@@ -28,11 +29,38 @@ verification:
   updated_by: "CODER"
   note: "Slow-validation lease-heartbeat tests passed; format, lint, typecheck, 115 unit tests, PostgreSQL 18 migrations, and 31 integration tests passed."
   attempts: 0
-commit: null
+quality_review:
+  state: "pass"
+  updated_at: "2026-07-31T08:59:09.274Z"
+  updated_by: "EVALUATOR"
+  note: "WriteExecutor now renews active owned leases throughout slow pre-dispatch validation and fails closed before dispatch on ownership loss."
+  evaluated_sha: "2881252ff077b4b03ec7599316f503f2751cc7ed"
+  blueprint_digest: "d560dde85b977119bae4cf44c81fee486143477128fddbb8b1b63a3671ca1582"
+  evidence_refs:
+    - ".agentplane/tasks/202607310804-H5383N/README.md"
+    - ".agentplane/tasks/202607310804-H5383N/quality/20260731-085909274-recovery-context/quality-report.json"
+    - ".agentplane/tasks/202607310804-H5383N/quality/20260731-085909274-recovery-context/evaluator-prompt.md"
+    - ".agentplane/tasks/202607310804-H5383N/quality/20260731-085909274-recovery-context/evaluator-opinion.md"
+    - ".agentplane/tasks/202607310804-H5383N/blueprint/resolved-snapshot.json"
+    - "commit:2881252ff077"
+    - "tests/unit/write-pipeline.spec.ts"
+    - "targeted write-pipeline unit suite: 7 passed"
+    - "pnpm run format:check; pnpm run lint; pnpm run typecheck; pnpm run test:unit (115 passed)"
+    - "PostgreSQL 18 migrations and full integration suite (31 passed)"
+  findings:
+    - "A per-batch heartbeat renews leases every third of the configured lease window and performs explicit ownership checks before prepare and commitDispatch."
+    - "Rejected, released, and stale items are removed from the active heartbeat set before their queue transition, preventing unnecessary renewal."
+    - "Focused tests cover validation beyond the original lease duration and prove that a short renewal count prevents admission, prepare, and dispatch."
+commit:
+  hash: "2881252ff077b4b03ec7599316f503f2751cc7ed"
+  message: "🚧 H5383N task: renew pre-dispatch write leases"
 comments:
   -
     author: "CODER"
     body: "Start: renew owned write leases across pre-dispatch validation and fail closed on lease loss."
+  -
+    author: "CODER"
+    body: "Verified: write leases remain owned through slow validation, rejected items leave renewal, and lease loss prevents dispatch."
 events:
   -
     type: "status"
@@ -47,8 +75,15 @@ events:
     author: "CODER"
     state: "ok"
     note: "Slow-validation lease-heartbeat tests passed; format, lint, typecheck, 115 unit tests, PostgreSQL 18 migrations, and 31 integration tests passed."
+  -
+    type: "status"
+    at: "2026-07-31T08:59:19.464Z"
+    author: "CODER"
+    from: "DOING"
+    to: "DONE"
+    note: "Verified: write leases remain owned through slow validation, rejected items leave renewal, and lease loss prevents dispatch."
 doc_version: 3
-doc_updated_at: "2026-07-31T08:57:07.388Z"
+doc_updated_at: "2026-07-31T08:59:19.465Z"
 doc_updated_by: "CODER"
 description: "Heartbeat owned write-queue leases throughout potentially slow live reads and validation, fail safely on lease loss, and add regression coverage for long batches."
 sections:
