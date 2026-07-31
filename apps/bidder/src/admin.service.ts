@@ -616,6 +616,7 @@ export class AdminService {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
+      await lockIdempotencyKey(client, scope, input.idempotencyKey);
       const replay = await client.query<{ requestChecksum: string; responseBody: unknown }>(
         `SELECT "requestChecksum", "responseBody" FROM "IdempotencyRecord"
           WHERE "scope" = $1 AND "idempotencyKey" = $2 FOR UPDATE`,
@@ -667,6 +668,12 @@ export class AdminService {
       client.release();
     }
   }
+}
+
+async function lockIdempotencyKey(client: PoolClient, scope: string, key: string): Promise<void> {
+  await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
+    `admin-idempotency:${scope}:${key}`,
+  ]);
 }
 
 /** Optional cursor and page-size query parameters accepted by list endpoints. */

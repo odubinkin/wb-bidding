@@ -1298,6 +1298,9 @@ async function replayIdempotency(
   requestChecksum: string,
 ): Promise<{ readonly version: string } | null> {
   if (scope === undefined || key === undefined) return null;
+  await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
+    `admin-idempotency:${scope}:${key}`,
+  ]);
   const result = await client.query<{
     requestChecksum: string;
     responseBody: { version: string };

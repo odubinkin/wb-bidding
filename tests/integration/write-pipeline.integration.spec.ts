@@ -545,7 +545,7 @@ describeWithDatabase('write pipeline PostgreSQL invariants', () => {
     const item = claimed.find((candidate) => candidate.decisionId === fixture.decisionId);
     expect(item).toBeDefined();
     if (item === undefined) return;
-    const enabledVersion = await repository.setGlobalKill({
+    const enable = {
       actor: 'ADMIN:kill-test',
       correlationId: randomUUID(),
       enabled: true,
@@ -553,18 +553,12 @@ describeWithDatabase('write pipeline PostgreSQL invariants', () => {
       idempotencyKey: 'global-kill-enable',
       idempotencyScope: 'POST:/api/v1/automation/global-kill',
       reason: 'integration emergency stop',
-    });
-    await expect(
-      repository.setGlobalKill({
-        actor: 'ADMIN:kill-test',
-        correlationId: randomUUID(),
-        enabled: true,
-        expectedVersion: 1n,
-        idempotencyKey: 'global-kill-enable',
-        idempotencyScope: 'POST:/api/v1/automation/global-kill',
-        reason: 'integration emergency stop',
-      }),
-    ).resolves.toBe(enabledVersion);
+    };
+    const [enabledVersion, enabledReplay] = await Promise.all([
+      repository.setGlobalKill(enable),
+      repository.setGlobalKill({ ...enable, correlationId: randomUUID() }),
+    ]);
+    expect(enabledReplay).toBe(enabledVersion);
     await expect(
       repository.prepare({
         endpointKey: 'cardBidsWrite',
@@ -622,18 +616,10 @@ describeWithDatabase('write pipeline PostgreSQL invariants', () => {
       scope: 'CAMPAIGN' as const,
       validFrom: new Date(Date.now() + 60_000).toISOString(),
     };
-    const first = await service.createPolicy(
-      'ADMIN:policy-test',
-      randomUUID(),
-      'policy-create-idempotency',
-      dto,
-    );
-    const replay = await service.createPolicy(
-      'ADMIN:policy-test',
-      randomUUID(),
-      'policy-create-idempotency',
-      dto,
-    );
+    const [first, replay] = await Promise.all([
+      service.createPolicy('ADMIN:policy-test', randomUUID(), 'policy-create-idempotency', dto),
+      service.createPolicy('ADMIN:policy-test', randomUUID(), 'policy-create-idempotency', dto),
+    ]);
     expect((replay.body as { id: string }).id).toBe((first.body as { id: string }).id);
     const created = await pool.query<{ enabled: boolean; version: string }>(
       `SELECT "enabled", "version" FROM "BiddingPolicy" WHERE "id" = $1`,
@@ -649,10 +635,17 @@ describeWithDatabase('write pipeline PostgreSQL invariants', () => {
       policyId: (first.body as { id: string }).id,
       scope: `POST:/api/v1/policies/${(first.body as { id: string }).id}/activations`,
     };
-    await expect(service.activatePolicy(activation)).resolves.toMatchObject({
+    const activationResults = (await Promise.all([
+      service.activatePolicy(activation),
+      service.activatePolicy({ ...activation, correlationId: randomUUID() }),
+    ])) as { enabled: boolean; id: string; version: string }[];
+    const activated = activationResults[0];
+    const activationReplay = activationResults[1];
+    expect(activated).toMatchObject({
       enabled: true,
       version: '1',
     });
+    expect(activationReplay).toEqual(activated);
     const assignmentInput = {
       actor: 'ADMIN:policy-test',
       correlationId: randomUUID(),
@@ -665,11 +658,13 @@ describeWithDatabase('write pipeline PostgreSQL invariants', () => {
       scopeId: fixture.targetId,
       scopeType: 'target',
     };
-    const assigned = await service.assignPolicy(assignmentInput);
-    const assignmentReplay = await service.assignPolicy({
-      ...assignmentInput,
-      correlationId: randomUUID(),
-    });
+    const [assigned, assignmentReplay] = await Promise.all([
+      service.assignPolicy(assignmentInput),
+      service.assignPolicy({
+        ...assignmentInput,
+        correlationId: randomUUID(),
+      }),
+    ]);
     expect(assignmentReplay.body).toMatchObject({
       id: (assigned.body as unknown as { id: string }).id,
       version: '2',
@@ -683,10 +678,6 @@ describeWithDatabase('write pipeline PostgreSQL invariants', () => {
         )
       ).rows[0]?.status,
     ).toBe('SUPERSEDED');
-    await expect(service.activatePolicy(activation)).resolves.toMatchObject({
-      enabled: true,
-      version: '1',
-    });
     const evidence = await pool.query<{ auditCount: string; idempotencyCount: string }>(
       `SELECT
          (SELECT COUNT(*)::text FROM "AuditEvent"
@@ -695,6 +686,107 @@ describeWithDatabase('write pipeline PostgreSQL invariants', () => {
            WHERE "idempotencyKey" = 'policy-activation-idempotency') AS "idempotencyCount"`,
     );
     expect(evidence.rows[0]).toEqual({ auditCount: '1', idempotencyCount: '1' });
+  });
+
+  it('rejects concurrent idempotency-key reuse after committing only one manual job', async () => {
+    const service = new AdminService(pool, {
+      now: () => new Date(),
+    } as RuntimeClockService);
+    const actor = `ADMIN:idempotency-mismatch-${randomUUID()}`;
+    const idempotencyKey = `manual-job-mismatch-${randomUUID()}`;
+    const scope = 'POST:/api/v1/jobs/resync';
+    const outcomes = await Promise.allSettled([
+      service.createJob({
+        actor,
+        correlationId: randomUUID(),
+        dto: {
+          campaignIds: [randomUUID()],
+          changeReason: 'first concurrent request',
+        },
+        expectedVersion: 0n,
+        idempotencyKey,
+        scope,
+        type: 'RESYNC',
+      }),
+      service.createJob({
+        actor,
+        correlationId: randomUUID(),
+        dto: {
+          campaignIds: [randomUUID()],
+          changeReason: 'conflicting concurrent request',
+        },
+        expectedVersion: 0n,
+        idempotencyKey,
+        scope,
+        type: 'RESYNC',
+      }),
+    ]);
+    const fulfilled = outcomes.filter(
+      (outcome): outcome is PromiseFulfilledResult<unknown> => outcome.status === 'fulfilled',
+    );
+    const rejected = outcomes.filter(
+      (outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected',
+    );
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]?.reason).toMatchObject({ message: 'IDEMPOTENCY_KEY_REUSED' });
+    const evidence = await pool.query<{ idempotencyCount: string; jobCount: string }>(
+      `SELECT
+         (SELECT COUNT(*)::text FROM "IdempotencyRecord"
+           WHERE "scope" = $1 AND "idempotencyKey" = $2) AS "idempotencyCount",
+         (SELECT COUNT(*)::text FROM "ManualJob"
+           WHERE "requestedBy" = $3) AS "jobCount"`,
+      [scope, idempotencyKey, actor],
+    );
+    expect(evidence.rows[0]).toEqual({ idempotencyCount: '1', jobCount: '1' });
+  });
+
+  it('does not serialize independent Admin idempotency keys', async () => {
+    const service = new AdminService(pool, {
+      now: () => new Date(),
+    } as RuntimeClockService);
+    const scope = 'POST:/api/v1/jobs/resync';
+    const blockedKey = `manual-job-blocked-${randomUUID()}`;
+    const holder = await pool.connect();
+    await holder.query('BEGIN');
+    await holder.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
+      `admin-idempotency:${scope}:${blockedKey}`,
+    ]);
+    const blocked = service.createJob({
+      actor: 'ADMIN:scoped-lock-test',
+      correlationId: randomUUID(),
+      dto: {
+        targetIds: [randomUUID()],
+        changeReason: 'request waiting on its own key',
+      },
+      expectedVersion: 0n,
+      idempotencyKey: blockedKey,
+      scope,
+      type: 'RESYNC',
+    });
+    try {
+      await expect(
+        withTimeout(
+          service.createJob({
+            actor: 'ADMIN:scoped-lock-test',
+            correlationId: randomUUID(),
+            dto: {
+              targetIds: [randomUUID()],
+              changeReason: 'independent key',
+            },
+            expectedVersion: 0n,
+            idempotencyKey: `manual-job-independent-${randomUUID()}`,
+            scope,
+            type: 'RESYNC',
+          }),
+          2_000,
+        ),
+      ).resolves.toMatchObject({ status: 'QUEUED' });
+    } finally {
+      await holder.query('ROLLBACK');
+      holder.release();
+    }
+    await expect(blocked).resolves.toMatchObject({ status: 'QUEUED' });
   });
 
   it('claims a queue burst across executor replicas without duplicate ownership', async () => {
@@ -814,6 +906,22 @@ function createNumericSuffix(): string {
 
 function checksumFor(value: string): string {
   return Buffer.from(value).toString('hex').padEnd(64, '0').slice(0, 64);
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`Timed out after ${timeoutMs.toString()} ms`));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 async function claimFixtures(

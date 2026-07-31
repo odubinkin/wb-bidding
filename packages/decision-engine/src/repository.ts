@@ -87,6 +87,7 @@ export class DecisionRepository {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
+      await lockIdempotencyKey(client, 'product-economics', mutation.mutationKey);
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended('economics:' || $1, 0))", [
         mutation.nmId.toString(),
       ]);
@@ -212,6 +213,7 @@ export class DecisionRepository {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
+      await lockIdempotencyKey(client, request.idempotencyScope, request.idempotencyKey);
       const existing = await client.query<{ id: string; requestChecksum: string }>(
         `SELECT "id", "requestChecksum" FROM "ProductEconomicsImport"
           WHERE "idempotencyScope" = $1 AND "idempotencyKey" = $2 FOR UPDATE`,
@@ -424,6 +426,7 @@ export class DecisionRepository {
         },
       );
       if (request.idempotencyKey !== undefined && request.idempotencyScope !== undefined) {
+        await lockIdempotencyKey(client, request.idempotencyScope, request.idempotencyKey);
         const replay = await client.query<{
           requestChecksum: string;
           responseBody: { id: string; version: string };
@@ -841,6 +844,12 @@ export class DecisionRepository {
       client.release();
     }
   }
+}
+
+async function lockIdempotencyKey(client: PoolClient, scope: string, key: string): Promise<void> {
+  await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
+    `admin-idempotency:${scope}:${key}`,
+  ]);
 }
 
 interface ClaimedImport {
