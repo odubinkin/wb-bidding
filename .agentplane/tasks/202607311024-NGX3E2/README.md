@@ -4,7 +4,7 @@ title: "Reduce raw SQL to irreducible Prisma primitives"
 status: "DOING"
 priority: "high"
 owner: "CODER"
-revision: 6
+revision: 8
 origin:
   system: "manual"
 depends_on: []
@@ -18,10 +18,30 @@ plan_approval:
   note: null
 verification:
   state: "ok"
-  updated_at: "2026-07-31T11:16:26.650Z"
+  updated_at: "2026-07-31T11:52:21.778Z"
   updated_by: "CODER"
-  note: "Refactor verified: raw.ts removed; non-SQL single-consumer readiness probe moved to ObservabilityService; shared transaction/lock utilities and domain SQL queries split into named modules. Quality, PostgreSQL 18 integration/e2e/load/runbook, build, and smoke checks pass."
+  note: "verified-202607311024-NGX3E2"
   attempts: 0
+quality_review:
+  state: "pass"
+  updated_at: "2026-07-31T11:52:42.905Z"
+  updated_by: "EVALUATOR"
+  note: "Database refactor satisfies the approved scope and preserves behavior."
+  evaluated_sha: "3becf058e988da5a61f16f9a05d2c08fdfc72a06"
+  blueprint_digest: "e719322ab32bedf0df1aeba3b8704af3b5fcb43a594e105aaccee75e1b8390ec"
+  evidence_refs:
+    - ".agentplane/tasks/202607311024-NGX3E2/README.md"
+    - ".agentplane/tasks/202607311024-NGX3E2/quality/20260731-115242905-recovery-context/quality-report.json"
+    - ".agentplane/tasks/202607311024-NGX3E2/quality/20260731-115242905-recovery-context/evaluator-prompt.md"
+    - ".agentplane/tasks/202607311024-NGX3E2/quality/20260731-115242905-recovery-context/evaluator-opinion.md"
+    - ".agentplane/tasks/202607311024-NGX3E2/blueprint/resolved-snapshot.json"
+    - "pnpm run quality"
+    - "PostgreSQL 18: test:integration (33), test:load (4), test:runbook (28), test:e2e (3)"
+    - "pnpm run build && pnpm run smoke:built"
+    - "pnpm run verify:database-architecture"
+  findings:
+    - "Generic raw database facade was removed; non-SQL single-consumer logic moved to its consumer; shared helpers and PostgreSQL-specific queries are responsibility-scoped."
+    - "Architecture, static, unit, integration, load, runbook, E2E, build, and smoke validation all passed."
 commit: null
 comments:
   -
@@ -41,8 +61,14 @@ events:
     author: "CODER"
     state: "ok"
     note: "Refactor verified: raw.ts removed; non-SQL single-consumer readiness probe moved to ObservabilityService; shared transaction/lock utilities and domain SQL queries split into named modules. Quality, PostgreSQL 18 integration/e2e/load/runbook, build, and smoke checks pass."
+  -
+    type: "verify"
+    at: "2026-07-31T11:52:21.778Z"
+    author: "CODER"
+    state: "ok"
+    note: "verified-202607311024-NGX3E2"
 doc_version: 3
-doc_updated_at: "2026-07-31T11:16:26.776Z"
+doc_updated_at: "2026-07-31T11:52:21.886Z"
 doc_updated_by: "CODER"
 description: "Replace straightforward raw SQL in admin, data-sync, decision, and write-pipeline paths with generated Prisma delegates; isolate unavoidable PostgreSQL operations as typed shared database functions; remove the generic raw SQL facade; strengthen the architecture guard; preserve locking, concurrency, and API behavior."
 sections:
@@ -113,6 +139,36 @@ sections:
     - operator_action: run_exact_argv
     - can_execute_now: true
     - safe_command: agentplane task verify-show 202607311024-NGX3E2
+    - diagnostic_command: none
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: true
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: none
+
+    ### 2026-07-31T11:52:21.778Z — VERIFY — ok
+
+    By: CODER
+
+    Note: verified-202607311024-NGX3E2
+    Attempts: 0
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-31T11:16:26.776Z, excerpt_hash=sha256:8c91eb3791b99c0913c50a769f13a2e2b59c04729a15eacbb168a5a70a3167d3
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607311024-NGX3E2/blueprint/resolved-snapshot.json
+    - old_digest: e719322ab32bedf0df1aeba3b8704af3b5fcb43a594e105aaccee75e1b8390ec
+    - current_digest: e719322ab32bedf0df1aeba3b8704af3b5fcb43a594e105aaccee75e1b8390ec
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202607311024-NGX3E2
+
+    DecisionContextRef:
+    - operator_action: run_exact_argv
+    - can_execute_now: true
+    - safe_command: agentplane task complete 202607311024-NGX3E2 --result verified-202607311024-NGX3E2 --commit 3becf058e988da5a61f16f9a05d2c08fdfc72a06
     - diagnostic_command: none
     - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
     - freshness: route=computed_local remote=remote_skipped
@@ -206,6 +262,36 @@ DecisionContextRef:
 - operator_action: run_exact_argv
 - can_execute_now: true
 - safe_command: agentplane task verify-show 202607311024-NGX3E2
+- diagnostic_command: none
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: true
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: none
+
+### 2026-07-31T11:52:21.778Z — VERIFY — ok
+
+By: CODER
+
+Note: verified-202607311024-NGX3E2
+Attempts: 0
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-31T11:16:26.776Z, excerpt_hash=sha256:8c91eb3791b99c0913c50a769f13a2e2b59c04729a15eacbb168a5a70a3167d3
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607311024-NGX3E2/blueprint/resolved-snapshot.json
+- old_digest: e719322ab32bedf0df1aeba3b8704af3b5fcb43a594e105aaccee75e1b8390ec
+- current_digest: e719322ab32bedf0df1aeba3b8704af3b5fcb43a594e105aaccee75e1b8390ec
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202607311024-NGX3E2
+
+DecisionContextRef:
+- operator_action: run_exact_argv
+- can_execute_now: true
+- safe_command: agentplane task complete 202607311024-NGX3E2 --result verified-202607311024-NGX3E2 --commit 3becf058e988da5a61f16f9a05d2c08fdfc72a06
 - diagnostic_command: none
 - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
 - freshness: route=computed_local remote=remote_skipped

@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "task_id": "202607311024-NGX3E2",
+  "evaluator_id": "recovery-context",
+  "evaluator_profile": "EVALUATOR",
+  "generated_at": "2026-07-31T11:52:42.905Z",
+  "verdict": "pass",
+  "summary": "Database refactor satisfies the approved scope and preserves behavior.",
+  "evaluated_sha": "3becf058e988da5a61f16f9a05d2c08fdfc72a06",
+  "blueprint_digest": "e719322ab32bedf0df1aeba3b8704af3b5fcb43a594e105aaccee75e1b8390ec",
+  "findings": [
+    "Generic raw database facade was removed; non-SQL single-consumer logic moved to its consumer; shared helpers and PostgreSQL-specific queries are responsibility-scoped.",
+    "Architecture, static, unit, integration, load, runbook, E2E, build, and smoke validation all passed."
+  ],
+  "evidence_refs": [
+    ".agentplane/tasks/202607311024-NGX3E2/README.md",
+    "pnpm run quality",
+    "PostgreSQL 18: test:integration (33), test:load (4), test:runbook (28), test:e2e (3)",
+    "pnpm run build && pnpm run smoke:built",
+    "pnpm run verify:database-architecture"
+  ],
+  "missing_tests": [],
+  "hidden_assumptions": [],
+  "residual_risks": [
+    "Raw SQL remains only for PostgreSQL operations Prisma cannot express and is centralized under packages/database."
+  ]
+}
