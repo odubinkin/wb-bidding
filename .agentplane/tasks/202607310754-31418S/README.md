@@ -4,7 +4,7 @@ title: "Document purpose and usage of every data model table and column"
 status: "DOING"
 priority: "med"
 owner: "DOCS"
-revision: 14
+revision: 15
 origin:
   system: "manual"
 depends_on: []
@@ -48,7 +48,7 @@ events:
     state: "needs_rework"
     note: "Lifecycle rework only: create the required allowlisted implementation commit before recording the already completed verification evidence."
 doc_version: 3
-doc_updated_at: "2026-07-31T08:08:35.460Z"
+doc_updated_at: "2026-07-31T08:18:36.742Z"
 doc_updated_by: "DOCS"
 description: "Expand docs/data-model.md so each Prisma-backed table has a standalone description of what it stores, why it exists, and where it is used, and every physical column has an individual description of meaning and usage grounded in the schema and implementation."
 sections:
@@ -66,13 +66,14 @@ sections:
     3. Review the resulting diff against schema and code evidence, then run targeted documentation and repository policy checks.
     4. Record verification evidence and finish the direct-mode task.
   Verify Steps: |-
-    1. Compare docs/data-model.md with prisma/schema.prisma. Expected: all 28 current models have standalone sections and all 416 stored scalar columns appear exactly once as individual field rows; Prisma-only relation fields are explicitly excluded.
-    2. Review descriptions against the repositories and services that read or write the fields. Expected: every table and field states what it is for and where it is used without claiming unshipped behavior.
-    3. Run `pnpm exec prettier --check docs/data-model.md`. Expected: pass.
-    4. Run the schema-to-document coverage check recorded in Verification. Expected: `models=28`, `scalarColumns=416`, `result=PASS`.
-    5. Run `pnpm run docs:check`. Expected: pass with all required documents, links, Mermaid, and model tracing present.
-    6. Run `node .agentplane/policy/check-routing.mjs`. Expected: pass.
-    7. Run `ap doctor`. Expected: pass or report only pre-existing non-task issues, recorded explicitly.
+    1. Compare docs/data-model.md with prisma/schema.prisma. Expected: all 28 current models have exactly one table heading in the whole document and all 416 stored scalar columns appear exactly once as individual field rows; Prisma-only relation fields are explicitly excluded.
+    2. Review document structure. Expected: the introduction, ER model, enums, lifecycle, implementation tracing, and one canonical detailed reference remain coherent; the earlier short per-table catalog is absent.
+    3. Review descriptions against the repositories and services that read or write the fields. Expected: every table and field states what it is for and where it is used without claiming unshipped behavior.
+    4. Run `pnpm exec prettier --check docs/data-model.md`. Expected: pass.
+    5. Run the schema-to-document coverage and duplicate-heading check recorded in Verification. Expected: `models=28`, `scalarColumns=416`, `duplicateModelHeadings=0`, `result=PASS`.
+    6. Run `pnpm run docs:check`. Expected: pass with all required documents, links, Mermaid, and model tracing present.
+    7. Run `node .agentplane/policy/check-routing.mjs`. Expected: pass.
+    8. Run `ap doctor`. Expected: pass or report only pre-existing non-task issues, recorded explicitly.
   Verification: |-
     <!-- BEGIN VERIFICATION RESULTS -->
     ### 2026-07-31T08:07:45.406Z — VERIFY — ok
@@ -176,13 +177,14 @@ Expand the canonical PostgreSQL reference so every Prisma-backed table and every
 
 ## Verify Steps
 
-1. Compare docs/data-model.md with prisma/schema.prisma. Expected: all 28 current models have standalone sections and all 416 stored scalar columns appear exactly once as individual field rows; Prisma-only relation fields are explicitly excluded.
-2. Review descriptions against the repositories and services that read or write the fields. Expected: every table and field states what it is for and where it is used without claiming unshipped behavior.
-3. Run `pnpm exec prettier --check docs/data-model.md`. Expected: pass.
-4. Run the schema-to-document coverage check recorded in Verification. Expected: `models=28`, `scalarColumns=416`, `result=PASS`.
-5. Run `pnpm run docs:check`. Expected: pass with all required documents, links, Mermaid, and model tracing present.
-6. Run `node .agentplane/policy/check-routing.mjs`. Expected: pass.
-7. Run `ap doctor`. Expected: pass or report only pre-existing non-task issues, recorded explicitly.
+1. Compare docs/data-model.md with prisma/schema.prisma. Expected: all 28 current models have exactly one table heading in the whole document and all 416 stored scalar columns appear exactly once as individual field rows; Prisma-only relation fields are explicitly excluded.
+2. Review document structure. Expected: the introduction, ER model, enums, lifecycle, implementation tracing, and one canonical detailed reference remain coherent; the earlier short per-table catalog is absent.
+3. Review descriptions against the repositories and services that read or write the fields. Expected: every table and field states what it is for and where it is used without claiming unshipped behavior.
+4. Run `pnpm exec prettier --check docs/data-model.md`. Expected: pass.
+5. Run the schema-to-document coverage and duplicate-heading check recorded in Verification. Expected: `models=28`, `scalarColumns=416`, `duplicateModelHeadings=0`, `result=PASS`.
+6. Run `pnpm run docs:check`. Expected: pass with all required documents, links, Mermaid, and model tracing present.
+7. Run `node .agentplane/policy/check-routing.mjs`. Expected: pass.
+8. Run `ap doctor`. Expected: pass or report only pre-existing non-task issues, recorded explicitly.
 
 ## Verification
 
