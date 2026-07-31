@@ -1,10 +1,11 @@
 ---
 id: "202607310804-Q3FC51"
 title: "Recover expired manual-job and economics-import leases"
-status: "DOING"
+result_summary: "Recovered expired import and manual-job leases with ownership and replay safety."
+status: "DONE"
 priority: "high"
 owner: "CODER"
-revision: 9
+revision: 11
 origin:
   system: "manual"
 depends_on: []
@@ -28,11 +29,38 @@ verification:
   updated_by: "CODER"
   note: "Expired lease recovery tests passed; format, lint, typecheck, 113 unit tests, PostgreSQL 18 migrations, and 29 integration tests passed."
   attempts: 0
-commit: null
+quality_review:
+  state: "pass"
+  updated_at: "2026-07-31T08:40:12.623Z"
+  updated_by: "EVALUATOR"
+  note: "Expired import and manual-job leases are reclaimed atomically without duplicating terminal import effects."
+  evaluated_sha: "74f39e396b5caf7942ba2db49b410b79a5e27628"
+  blueprint_digest: "8434e0de52759011097bae959fb282a1d1f0a906d1739350d8e042c1a2dfd787"
+  evidence_refs:
+    - ".agentplane/tasks/202607310804-Q3FC51/README.md"
+    - ".agentplane/tasks/202607310804-Q3FC51/quality/20260731-084012623-recovery-context/quality-report.json"
+    - ".agentplane/tasks/202607310804-Q3FC51/quality/20260731-084012623-recovery-context/evaluator-prompt.md"
+    - ".agentplane/tasks/202607310804-Q3FC51/quality/20260731-084012623-recovery-context/evaluator-opinion.md"
+    - ".agentplane/tasks/202607310804-Q3FC51/blueprint/resolved-snapshot.json"
+    - "commit:74f39e396b5c"
+    - "tests/integration/decision-engine.integration.spec.ts"
+    - "tests/integration/production-runtime.integration.spec.ts"
+    - "pnpm run format:check; pnpm run lint; pnpm run typecheck; pnpm run test:unit (113 passed)"
+    - "PostgreSQL 18 migrations and full integration suite (29 passed)"
+  findings:
+    - "Expired PROCESSING economics imports are reclaimed under the existing advisory transaction lock, with owner-guarded heartbeats and completion."
+    - "Previously terminal import items are skipped, while crash-window row effects replay through the existing idempotency key without duplicate ProductEconomics rows."
+    - "Expired RUNNING manual jobs are claimable, active leases are not stolen, and terminal updates require the current lease owner."
+commit:
+  hash: "74f39e396b5caf7942ba2db49b410b79a5e27628"
+  message: "🚧 Q3FC51 task: recover expired worker leases"
 comments:
   -
     author: "CODER"
     body: "Start: recover expired manual-job and economics-import leases without duplicating completed item effects."
+  -
+    author: "CODER"
+    body: "Verified: expired import and manual-job leases recover safely without duplicate completed item effects."
 events:
   -
     type: "status"
@@ -47,8 +75,15 @@ events:
     author: "CODER"
     state: "ok"
     note: "Expired lease recovery tests passed; format, lint, typecheck, 113 unit tests, PostgreSQL 18 migrations, and 29 integration tests passed."
+  -
+    type: "status"
+    at: "2026-07-31T08:40:19.844Z"
+    author: "CODER"
+    from: "DOING"
+    to: "DONE"
+    note: "Verified: expired import and manual-job leases recover safely without duplicate completed item effects."
 doc_version: 3
-doc_updated_at: "2026-07-31T08:40:00.717Z"
+doc_updated_at: "2026-07-31T08:40:19.845Z"
 doc_updated_by: "CODER"
 description: "Atomically reclaim expired RUNNING ManualJob and PROCESSING ProductEconomicsImport work after worker crashes without duplicating completed item effects; add recovery coverage."
 sections:

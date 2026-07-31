@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "task_id": "202607310804-Q3FC51",
+  "evaluator_id": "recovery-context",
+  "evaluator_profile": "EVALUATOR",
+  "generated_at": "2026-07-31T08:40:12.623Z",
+  "verdict": "pass",
+  "summary": "Expired import and manual-job leases are reclaimed atomically without duplicating terminal import effects.",
+  "evaluated_sha": "74f39e396b5caf7942ba2db49b410b79a5e27628",
+  "blueprint_digest": "8434e0de52759011097bae959fb282a1d1f0a906d1739350d8e042c1a2dfd787",
+  "findings": [
+    "Expired PROCESSING economics imports are reclaimed under the existing advisory transaction lock, with owner-guarded heartbeats and completion.",
+    "Previously terminal import items are skipped, while crash-window row effects replay through the existing idempotency key without duplicate ProductEconomics rows.",
+    "Expired RUNNING manual jobs are claimable, active leases are not stolen, and terminal updates require the current lease owner."
+  ],
+  "evidence_refs": [
+    ".agentplane/tasks/202607310804-Q3FC51/README.md",
+    "commit:74f39e396b5c",
+    "tests/integration/decision-engine.integration.spec.ts",
+    "tests/integration/production-runtime.integration.spec.ts",
+    "pnpm run format:check; pnpm run lint; pnpm run typecheck; pnpm run test:unit (113 passed)",
+    "PostgreSQL 18 migrations and full integration suite (29 passed)"
+  ],
+  "missing_tests": [],
+  "hidden_assumptions": [],
+  "residual_risks": [
+    "Manual job bodies rely on their existing idempotent or upsert behavior when replayed after an expired lease."
+  ]
+}
