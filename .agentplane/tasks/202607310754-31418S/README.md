@@ -4,7 +4,7 @@ title: "Document purpose and usage of every data model table and column"
 status: "DOING"
 priority: "med"
 owner: "DOCS"
-revision: 15
+revision: 16
 origin:
   system: "manual"
 depends_on: []
@@ -17,11 +17,11 @@ plan_approval:
   updated_by: "ORCHESTRATOR"
   note: null
 verification:
-  state: "needs_rework"
-  updated_at: "2026-07-31T08:08:35.380Z"
+  state: "ok"
+  updated_at: "2026-07-31T08:20:12.661Z"
   updated_by: "DOCS"
-  note: "Lifecycle rework only: create the required allowlisted implementation commit before recording the already completed verification evidence."
-  attempts: 1
+  note: "User-requested deduplication is complete in commit f2ac30cf6432: all 28 models have one canonical heading, all 416 scalar columns remain covered, and formatting, docs, routing, doctor, and commit diff checks passed."
+  attempts: 0
 commit: null
 comments:
   -
@@ -47,8 +47,14 @@ events:
     author: "DOCS"
     state: "needs_rework"
     note: "Lifecycle rework only: create the required allowlisted implementation commit before recording the already completed verification evidence."
+  -
+    type: "verify"
+    at: "2026-07-31T08:20:12.661Z"
+    author: "DOCS"
+    state: "ok"
+    note: "User-requested deduplication is complete in commit f2ac30cf6432: all 28 models have one canonical heading, all 416 scalar columns remain covered, and formatting, docs, routing, doctor, and commit diff checks passed."
 doc_version: 3
-doc_updated_at: "2026-07-31T08:18:36.742Z"
+doc_updated_at: "2026-07-31T08:20:12.882Z"
 doc_updated_by: "DOCS"
 description: "Expand docs/data-model.md so each Prisma-backed table has a standalone description of what it stores, why it exists, and where it is used, and every physical column has an individual description of meaning and usage grounded in the schema and implementation."
 sections:
@@ -135,6 +141,36 @@ sections:
     - repeat_allowed: false
     - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
     - risks: unsafe_shell_chain_route
+
+    ### 2026-07-31T08:20:12.661Z — VERIFY — ok
+
+    By: DOCS
+
+    Note: User-requested deduplication is complete in commit f2ac30cf6432: all 28 models have one canonical heading, all 416 scalar columns remain covered, and formatting, docs, routing, doctor, and commit diff checks passed.
+    Attempts: 0
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-31T08:18:36.742Z, excerpt_hash=sha256:3bca6a92f106924ce74074b830b14eecfbc48f5e2331f24e7e23f572e02ef9a0
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607310754-31418S/blueprint/resolved-snapshot.json
+    - old_digest: a7d87495e8fb3332ce0b914f6a923c45f4f725d29cec177e576226727457f654
+    - current_digest: a7d87495e8fb3332ce0b914f6a923c45f4f725d29cec177e576226727457f654
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202607310754-31418S
+
+    DecisionContextRef:
+    - operator_action: run_exact_argv
+    - can_execute_now: true
+    - safe_command: agentplane task verify-show 202607310754-31418S
+    - diagnostic_command: none
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: true
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: none
 
     <!-- END VERIFICATION RESULTS -->
   Rollback Plan: |-
@@ -248,6 +284,36 @@ DecisionContextRef:
 - repeat_allowed: false
 - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
 - risks: unsafe_shell_chain_route
+
+### 2026-07-31T08:20:12.661Z — VERIFY — ok
+
+By: DOCS
+
+Note: User-requested deduplication is complete in commit f2ac30cf6432: all 28 models have one canonical heading, all 416 scalar columns remain covered, and formatting, docs, routing, doctor, and commit diff checks passed.
+Attempts: 0
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-31T08:18:36.742Z, excerpt_hash=sha256:3bca6a92f106924ce74074b830b14eecfbc48f5e2331f24e7e23f572e02ef9a0
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607310754-31418S/blueprint/resolved-snapshot.json
+- old_digest: a7d87495e8fb3332ce0b914f6a923c45f4f725d29cec177e576226727457f654
+- current_digest: a7d87495e8fb3332ce0b914f6a923c45f4f725d29cec177e576226727457f654
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202607310754-31418S
+
+DecisionContextRef:
+- operator_action: run_exact_argv
+- can_execute_now: true
+- safe_command: agentplane task verify-show 202607310754-31418S
+- diagnostic_command: none
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: true
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: none
 
 <!-- END VERIFICATION RESULTS -->
 
