@@ -1,10 +1,11 @@
 ---
 id: "202607310754-31418S"
 title: "Document purpose and usage of every data model table and column"
-status: "DOING"
+result_summary: "Documented all 28 data-model tables and 416 stored columns in one canonical reference without duplicate table descriptions."
+status: "DONE"
 priority: "med"
 owner: "DOCS"
-revision: 27
+revision: 29
 origin:
   system: "manual"
 depends_on: []
@@ -18,7 +19,7 @@ plan_approval:
   note: null
 verification:
   state: "ok"
-  updated_at: "2026-07-31T09:00:21.771Z"
+  updated_at: "2026-07-31T09:00:39.766Z"
   updated_by: "DOCS"
   note: "Verification and fresh EVALUATOR pass are recorded for the clean landed state."
   attempts: 0
@@ -44,12 +45,15 @@ quality_review:
     - "PASS: 28 model headings are unique and all 416 stored scalar columns have individual purpose-and-usage rows."
     - "PASS: documentation commits 9a87a78104f7 and f2ac30cf6432 are present; all formatting, documentation, routing, doctor, and diff checks passed."
 commit:
-  hash: "067444d10b96d9c5bd4540a372660ca421e641f5"
-  message: "🚧 H5383N task: record verification evidence"
+  hash: "95865a9be3dd1d29964b3bc31d208578b8b59111"
+  message: "🚧 31418S task: prepare evaluator closure"
 comments:
   -
     author: "DOCS"
     body: "Start: Expand the data model reference with standalone table descriptions and one usage-grounded row for every stored column."
+  -
+    author: "DOCS"
+    body: "Verified: all current data-model tables and stored columns have implementation-grounded purpose and usage descriptions; duplicate short descriptions were removed and all checks passed."
 events:
   -
     type: "status"
@@ -106,8 +110,21 @@ events:
     author: "DOCS"
     state: "ok"
     note: "Verification and fresh EVALUATOR pass are recorded for the clean landed state."
+  -
+    type: "verify"
+    at: "2026-07-31T09:00:39.766Z"
+    author: "DOCS"
+    state: "ok"
+    note: "Verification and fresh EVALUATOR pass are recorded for the clean landed state."
+  -
+    type: "status"
+    at: "2026-07-31T09:00:39.922Z"
+    author: "DOCS"
+    from: "DOING"
+    to: "DONE"
+    note: "Verified: all current data-model tables and stored columns have implementation-grounded purpose and usage descriptions; duplicate short descriptions were removed and all checks passed."
 doc_version: 3
-doc_updated_at: "2026-07-31T09:00:21.853Z"
+doc_updated_at: "2026-07-31T09:00:39.923Z"
 doc_updated_by: "DOCS"
 description: "Expand docs/data-model.md so each Prisma-backed table has a standalone description of what it stores, why it exists, and where it is used, and every physical column has an individual description of meaning and usage grounded in the schema and implementation."
 sections:
@@ -293,6 +310,36 @@ sections:
     Attempts: 0
 
     VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-31T08:58:40.015Z, excerpt_hash=sha256:3bca6a92f106924ce74074b830b14eecfbc48f5e2331f24e7e23f572e02ef9a0
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607310754-31418S/blueprint/resolved-snapshot.json
+    - old_digest: a7d87495e8fb3332ce0b914f6a923c45f4f725d29cec177e576226727457f654
+    - current_digest: a7d87495e8fb3332ce0b914f6a923c45f4f725d29cec177e576226727457f654
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202607310754-31418S
+
+    DecisionContextRef:
+    - operator_action: run_exact_argv
+    - can_execute_now: true
+    - safe_command: agentplane task complete 202607310754-31418S --result verified-202607310754-31418S --commit 067444d10b96d9c5bd4540a372660ca421e641f5
+    - diagnostic_command: none
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: true
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: none
+
+    ### 2026-07-31T09:00:39.766Z — VERIFY — ok
+
+    By: DOCS
+
+    Note: Verification and fresh EVALUATOR pass are recorded for the clean landed state.
+    Attempts: 0
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-31T09:00:21.853Z, excerpt_hash=sha256:3bca6a92f106924ce74074b830b14eecfbc48f5e2331f24e7e23f572e02ef9a0
 
     Details:
 
@@ -526,6 +573,36 @@ Note: Verification and fresh EVALUATOR pass are recorded for the clean landed st
 Attempts: 0
 
 VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-31T08:58:40.015Z, excerpt_hash=sha256:3bca6a92f106924ce74074b830b14eecfbc48f5e2331f24e7e23f572e02ef9a0
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202607310754-31418S/blueprint/resolved-snapshot.json
+- old_digest: a7d87495e8fb3332ce0b914f6a923c45f4f725d29cec177e576226727457f654
+- current_digest: a7d87495e8fb3332ce0b914f6a923c45f4f725d29cec177e576226727457f654
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202607310754-31418S
+
+DecisionContextRef:
+- operator_action: run_exact_argv
+- can_execute_now: true
+- safe_command: agentplane task complete 202607310754-31418S --result verified-202607310754-31418S --commit 067444d10b96d9c5bd4540a372660ca421e641f5
+- diagnostic_command: none
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: true
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: none
+
+### 2026-07-31T09:00:39.766Z — VERIFY — ok
+
+By: DOCS
+
+Note: Verification and fresh EVALUATOR pass are recorded for the clean landed state.
+Attempts: 0
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-07-31T09:00:21.853Z, excerpt_hash=sha256:3bca6a92f106924ce74074b830b14eecfbc48f5e2331f24e7e23f572e02ef9a0
 
 Details:
 
