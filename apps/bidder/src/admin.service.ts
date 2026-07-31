@@ -1,4 +1,4 @@
-/* eslint-disable jsdoc/require-jsdoc, @typescript-eslint/no-base-to-string, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return */
+/* eslint-disable jsdoc/require-jsdoc, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return */
 import { Inject, Injectable } from '@nestjs/common';
 import { createHash, randomUUID } from 'node:crypto';
 import canonicalize from 'canonicalize';
@@ -16,41 +16,57 @@ import type {
 } from './admin-dto.js';
 import { DecisionRepository, type DecisionPolicy } from '@wb-bidder/decision-engine';
 import {
-  createRawDatabaseClient,
+  advisoryTransactionLock,
+  Prisma,
   type DatabaseClient,
-  type RawTransactionClient,
+  type DatabaseTransaction,
+  type DecisionAction,
+  type ImportItemStatus,
+  loadAuditEventPage,
+  type PolicyScope,
+  withTransaction,
 } from '@wb-bidder/database';
 import { WritePipelineRepository } from '@wb-bidder/write-pipeline';
 
 @Injectable()
 export class AdminService {
+  private readonly database: DatabaseClient;
   private readonly decisions: DecisionRepository;
-  private readonly pool;
   private readonly writes: WritePipelineRepository;
 
   public constructor(
     @Inject(DATABASE_CLIENT) database: DatabaseClient,
     private readonly clock: RuntimeClockService,
   ) {
-    this.pool = createRawDatabaseClient(database);
+    this.database = database;
     this.decisions = new DecisionRepository(database);
     this.writes = new WritePipelineRepository(database);
   }
 
   public async getEconomics(nmId: bigint, at?: Date) {
     const effectiveAt = at ?? this.clock.now();
-    const result = await this.pool.query(
-      `SELECT "id", "nmId", "expectedContributionBeforeAdsMinor", "effectiveFrom",
-              "effectiveTo", "source"::text, "sourceUpdatedAt", "sourceReference", "version",
-              "createdAt", "createdByActor"
-         FROM "ProductEconomics"
-        WHERE "nmId" = $1 AND "effectiveFrom" <= $2
-          AND ("effectiveTo" IS NULL OR "effectiveTo" > $2)
-        ORDER BY "version" DESC LIMIT 1`,
-      [nmId.toString(), effectiveAt],
-    );
-    const row = result.rows[0];
-    if (row === undefined)
+    const row = await this.database.productEconomics.findFirst({
+      orderBy: { version: 'desc' },
+      select: {
+        createdAt: true,
+        createdByActor: true,
+        effectiveFrom: true,
+        effectiveTo: true,
+        expectedContributionBeforeAdsMinor: true,
+        id: true,
+        nmId: true,
+        source: true,
+        sourceReference: true,
+        sourceUpdatedAt: true,
+        version: true,
+      },
+      where: {
+        effectiveFrom: { lte: effectiveAt },
+        nmId,
+        OR: [{ effectiveTo: null }, { effectiveTo: { gt: effectiveAt } }],
+      },
+    });
+    if (row === null)
       throw new AdminApiError(404, 'PRODUCT_ECONOMICS_NOT_FOUND', 'No effective version exists.');
     return { body: serialize(row), etag: economicsEtag(row.version) };
   }
@@ -125,67 +141,93 @@ export class AdminService {
   }
 
   public async getImport(importId: string) {
-    const result = await this.pool.query(
-      `SELECT "id" AS "importId", "status"::text, "dryRun", "changeReason",
-              "totalItems", "processedItems",
-              "validatedItems", "succeededItems", "failedItems", "createdAt", "startedAt",
-              "finishedAt", "requestChecksum", "lastError"
-         FROM "ProductEconomicsImport" WHERE "id" = $1`,
-      [importId],
-    );
-    const row = result.rows[0];
-    if (row === undefined) throw new AdminApiError(404, 'IMPORT_NOT_FOUND', 'Import not found.');
-    return serialize(row);
+    const row = await this.database.productEconomicsImport.findUnique({
+      select: {
+        changeReason: true,
+        createdAt: true,
+        dryRun: true,
+        failedItems: true,
+        finishedAt: true,
+        id: true,
+        lastError: true,
+        processedItems: true,
+        requestChecksum: true,
+        startedAt: true,
+        status: true,
+        succeededItems: true,
+        totalItems: true,
+        validatedItems: true,
+      },
+      where: { id: importId },
+    });
+    if (row === null) throw new AdminApiError(404, 'IMPORT_NOT_FOUND', 'Import not found.');
+    const { id, ...body } = row;
+    return serialize({ ...body, importId: id });
   }
 
   public async listImportItems(importId: string, query: ListQuery & { status?: string }) {
     const page = pageFrom(query);
-    const status = enumFilter(query.status, [
+    const status = enumFilter<ImportItemStatus>(query.status, [
       'PENDING',
       'PROCESSING',
       'VALIDATED',
       'SUCCEEDED',
       'FAILED',
     ]);
-    const result = await this.pool.query(
-      `SELECT "rowId", "nmId", "status"::text, "errorCode" AS "code",
-              "errorDetail" AS "detail", "actualCurrentVersion", "createdVersion",
-              "createdAt", "id"
-         FROM "ProductEconomicsImportItem"
-        WHERE "importId" = $1 AND ($2::text IS NULL OR "status"::text = $2)
-          AND ($3::timestamptz IS NULL OR ("createdAt", "id") > ($3, $4::uuid))
-        ORDER BY "createdAt", "id" LIMIT $5`,
-      [importId, status, page.cursorAt, page.cursorId, page.limit + 1],
+    const rows = await this.database.productEconomicsImportItem.findMany({
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: {
+        actualCurrentVersion: true,
+        createdAt: true,
+        createdVersion: true,
+        errorCode: true,
+        errorDetail: true,
+        id: true,
+        nmId: true,
+        rowId: true,
+        status: true,
+      },
+      take: page.limit + 1,
+      where: {
+        importId,
+        ...(status === null ? {} : { status }),
+        ...createdCursorWhere(page),
+      },
+    });
+    return listResponse(
+      rows.map(({ errorCode, errorDetail, ...row }) => ({
+        ...row,
+        code: errorCode,
+        detail: errorDetail,
+      })),
+      page.limit,
     );
-    return listResponse(result.rows, page.limit);
   }
 
   public async listPolicies(query: ListQuery & { scope?: string }) {
     const page = pageFrom(query);
-    const scope = enumFilter(query.scope, ['DEPLOYMENT', 'CAMPAIGN', 'TARGET']);
-    const result = await this.pool.query(
-      `SELECT "id", "scope"::text, "campaignId", "targetId", "executionMode"::text,
-              "configuration", "enabled", "version", "validFrom", "validTo",
-              "inputChecksum", "createdAt", "createdByActor"
-         FROM "BiddingPolicy"
-        WHERE ($1::text IS NULL OR "scope"::text = $1)
-          AND ($2::timestamptz IS NULL OR ("createdAt", "id") > ($2, $3::uuid))
-        ORDER BY "createdAt", "id" LIMIT $4`,
-      [scope, page.cursorAt, page.cursorId, page.limit + 1],
+    const scope = enumFilter<PolicyScope>(query.scope, ['DEPLOYMENT', 'CAMPAIGN', 'TARGET']);
+    const rows = await this.database.biddingPolicy.findMany({
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: policySelect,
+      take: page.limit + 1,
+      where: {
+        ...(scope === null ? {} : { scope }),
+        ...createdCursorWhere(page),
+      },
+    });
+    return listResponse(
+      rows.map((row) => ({ ...row })),
+      page.limit,
     );
-    return listResponse(result.rows, page.limit);
   }
 
   public async getPolicy(id: string) {
-    const result = await this.pool.query(
-      `SELECT "id", "scope"::text, "campaignId", "targetId", "executionMode"::text,
-              "configuration", "enabled", "version", "validFrom", "validTo",
-              "inputChecksum", "createdAt", "createdByActor"
-         FROM "BiddingPolicy" WHERE "id" = $1`,
-      [id],
-    );
-    const row = result.rows[0];
-    if (row === undefined) throw new AdminApiError(404, 'POLICY_NOT_FOUND', 'Policy not found.');
+    const row = await this.database.biddingPolicy.findUnique({
+      select: policySelect,
+      where: { id },
+    });
+    if (row === null) throw new AdminApiError(404, 'POLICY_NOT_FOUND', 'Policy not found.');
     return { body: serialize(row), etag: versionEtag('policy', row.version) };
   }
 
@@ -221,49 +263,46 @@ export class AdminService {
   }
 
   public async activatePolicy(input: MutationContext & { readonly policyId: string }) {
-    return this.transactionalMutation(input, async (client, audit) => {
-      const row = await client.query<{
-        campaignId: string | null;
-        enabled: boolean;
-        scope: string;
-        targetId: string | null;
-        validFrom: Date;
-        version: string;
-      }>(
-        `SELECT "campaignId", "enabled", "scope"::text, "targetId", "validFrom", "version"
-           FROM "BiddingPolicy" WHERE "id" = $1 FOR UPDATE`,
-        [input.policyId],
-      );
-      const policy = row.rows[0];
-      if (policy === undefined) throw new Error('POLICY_NOT_FOUND');
+    return this.transactionalMutation(input, async (transaction, audit) => {
+      const policy = await transaction.biddingPolicy.findUnique({
+        select: {
+          campaignId: true,
+          enabled: true,
+          scope: true,
+          targetId: true,
+          validFrom: true,
+          version: true,
+        },
+        where: { id: input.policyId },
+      });
+      if (policy === null) throw new Error('POLICY_NOT_FOUND');
       audit.before = policy;
-      if (BigInt(policy.version) !== input.expectedVersion) throw new Error('VERSION_MISMATCH');
+      if (policy.version !== input.expectedVersion) throw new Error('VERSION_MISMATCH');
       if (!policy.enabled) {
-        await client.query(
-          `UPDATE "BiddingPolicy"
-              SET "validTo" = $4
-            WHERE "scope" = $1::"PolicyScope"
-              AND "campaignId" IS NOT DISTINCT FROM $2
-              AND "targetId" IS NOT DISTINCT FROM $3
-              AND "enabled" = true AND "validTo" IS NULL AND "id" <> $5`,
-          [policy.scope, policy.campaignId, policy.targetId, policy.validFrom, input.policyId],
-        );
-        await client.query(`UPDATE "BiddingPolicy" SET "enabled" = true WHERE "id" = $1`, [
-          input.policyId,
-        ]);
-        await client.query(
-          `UPDATE "DecisionQueueItem" q
-              SET "status" = 'SUPERSEDED', "version" = q."version" + 1
-             FROM "BidDecision" d, "CampaignTarget" t
-            WHERE q."decisionId" = d."id" AND t."id" = d."targetId"
-              AND q."status" IN ('QUEUED','RETRY_WAIT')
-              AND (($1 = 'TARGET' AND d."targetId" = $2)
-                OR ($1 = 'CAMPAIGN' AND t."campaignId" = $3)
-                OR $1 = 'DEPLOYMENT')`,
-          [policy.scope, policy.targetId, policy.campaignId],
-        );
+        await transaction.biddingPolicy.updateMany({
+          data: { validTo: policy.validFrom },
+          where: {
+            campaignId: policy.campaignId,
+            enabled: true,
+            id: { not: input.policyId },
+            scope: policy.scope,
+            targetId: policy.targetId,
+            validTo: null,
+          },
+        });
+        await transaction.biddingPolicy.update({
+          data: { enabled: true },
+          where: { id: input.policyId },
+        });
+        await transaction.decisionQueueItem.updateMany({
+          data: { status: 'SUPERSEDED', version: { increment: 1n } },
+          where: {
+            status: { in: ['QUEUED', 'RETRY_WAIT'] },
+            ...policyDecisionQueueScope(policy),
+          },
+        });
       }
-      return { enabled: true, id: input.policyId, version: policy.version };
+      return { enabled: true, id: input.policyId, version: policy.version.toString() };
     });
   }
 
@@ -311,39 +350,80 @@ export class AdminService {
     const page = pageFrom(query);
     const campaignId = uuidFilter(query.campaignId);
     const targetId = uuidFilter(query.targetId);
-    const result = await this.pool.query(
-      `SELECT "id" AS "policyId", "scope"::text AS "scopeType",
-              COALESCE("campaignId", "targetId") AS "scopeId", "version", "validFrom", "validTo",
-              "createdAt", "id"
-         FROM "BiddingPolicy"
-        WHERE "enabled" = true
-          AND ($1::uuid IS NULL OR "campaignId" = $1)
-          AND ($2::uuid IS NULL OR "targetId" = $2)
-          AND ($3::timestamptz IS NULL OR ("createdAt", "id") > ($3, $4::uuid))
-        ORDER BY "createdAt", "id" LIMIT $5`,
-      [campaignId, targetId, page.cursorAt, page.cursorId, page.limit + 1],
+    const rows = await this.database.biddingPolicy.findMany({
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: {
+        campaignId: true,
+        createdAt: true,
+        id: true,
+        scope: true,
+        targetId: true,
+        validFrom: true,
+        validTo: true,
+        version: true,
+      },
+      take: page.limit + 1,
+      where: {
+        enabled: true,
+        ...(campaignId === null ? {} : { campaignId }),
+        ...(targetId === null ? {} : { targetId }),
+        ...createdCursorWhere(page),
+      },
+    });
+    return listResponse(
+      rows.map((row) => ({
+        createdAt: row.createdAt,
+        id: row.id,
+        policyId: row.id,
+        scopeId: row.campaignId ?? row.targetId,
+        scopeType: row.scope,
+        validFrom: row.validFrom,
+        validTo: row.validTo,
+        version: row.version,
+      })),
+      page.limit,
     );
-    return listResponse(result.rows, page.limit);
   }
 
   public async getAutomation() {
-    const control = await this.pool.query(
-      `SELECT "globalKill", "reason", "version", "updatedAt", "updatedBy"
-         FROM "DeploymentControl" WHERE "id" = $1`,
-      ['00000000-0000-0000-0000-000000000002'],
-    );
-    const campaigns = await this.pool.query(
-      `SELECT "campaignId", "mode"::text, "reason", "version", "updatedAt", "updatedBy"
-         FROM "CampaignAutomation" ORDER BY "campaignId"`,
-    );
-    const targets = await this.pool.query(
-      `SELECT "targetId", "mode"::text, "reason", "version", "updatedAt", "updatedBy"
-         FROM "TargetAutomation" ORDER BY "targetId"`,
-    );
+    const [control, campaigns, targets] = await Promise.all([
+      this.database.deploymentControl.findUnique({
+        select: {
+          globalKill: true,
+          reason: true,
+          updatedAt: true,
+          updatedBy: true,
+          version: true,
+        },
+        where: { id: '00000000-0000-0000-0000-000000000002' },
+      }),
+      this.database.campaignAutomation.findMany({
+        orderBy: { campaignId: 'asc' },
+        select: {
+          campaignId: true,
+          mode: true,
+          reason: true,
+          updatedAt: true,
+          updatedBy: true,
+          version: true,
+        },
+      }),
+      this.database.targetAutomation.findMany({
+        orderBy: { targetId: 'asc' },
+        select: {
+          mode: true,
+          reason: true,
+          targetId: true,
+          updatedAt: true,
+          updatedBy: true,
+          version: true,
+        },
+      }),
+    ]);
     return serialize({
-      deployment: control.rows[0],
-      campaigns: campaigns.rows,
-      targets: targets.rows,
+      deployment: control ?? undefined,
+      campaigns,
+      targets,
     });
   }
 
@@ -354,35 +434,41 @@ export class AdminService {
       readonly entityType: 'campaign' | 'target';
     },
   ) {
-    const table = input.entityType === 'campaign' ? 'CampaignAutomation' : 'TargetAutomation';
-    const column = input.entityType === 'campaign' ? 'campaignId' : 'targetId';
-    return this.transactionalMutation(input, async (client, audit) => {
-      const current = await client.query(
-        `SELECT "id", "mode"::text, "version" FROM "${table}" WHERE "${column}" = $1 FOR UPDATE`,
-        [input.entityId],
-      );
-      const previous = current.rows[0];
+    return this.transactionalMutation(input, async (transaction, audit) => {
+      const previous =
+        input.entityType === 'campaign'
+          ? await transaction.campaignAutomation.findUnique({
+              select: { id: true, mode: true, version: true },
+              where: { campaignId: input.entityId },
+            })
+          : await transaction.targetAutomation.findUnique({
+              select: { id: true, mode: true, version: true },
+              where: { targetId: input.entityId },
+            });
       audit.before = previous ?? null;
-      const actualVersion = BigInt(String(previous?.version ?? 0));
+      const actualVersion = previous?.version ?? 0n;
       if (actualVersion !== input.expectedVersion) throw new Error('VERSION_MISMATCH');
       const version = actualVersion + 1n;
-      const id = String(previous?.id ?? randomUUID());
-      await client.query(
-        `INSERT INTO "${table}"
-           ("id", "${column}", "mode", "reason", "version", "updatedAt", "updatedBy")
-         VALUES ($1, $2, $3::"AutomationMode", $4, $5, NOW(), $6)
-         ON CONFLICT ("${column}") DO UPDATE SET
-           "mode" = EXCLUDED."mode", "reason" = EXCLUDED."reason",
-           "version" = EXCLUDED."version", "updatedAt" = NOW(), "updatedBy" = EXCLUDED."updatedBy"`,
-        [
-          id,
-          input.entityId,
-          input.dto.mode,
-          input.dto.changeReason,
-          version.toString(),
-          input.actor,
-        ],
-      );
+      const id = previous?.id ?? randomUUID();
+      const data = {
+        mode: input.dto.mode,
+        reason: input.dto.changeReason,
+        updatedBy: input.actor,
+        version,
+      };
+      if (input.entityType === 'campaign') {
+        await transaction.campaignAutomation.upsert({
+          create: { ...data, campaignId: input.entityId, id },
+          update: data,
+          where: { campaignId: input.entityId },
+        });
+      } else {
+        await transaction.targetAutomation.upsert({
+          create: { ...data, id, targetId: input.entityId },
+          update: data,
+          where: { targetId: input.entityId },
+        });
+      }
       return {
         [`${input.entityType}Id`]: input.entityId,
         mode: input.dto.mode,
@@ -416,7 +502,7 @@ export class AdminService {
       readonly type: 'RECALCULATE' | 'RESYNC';
     },
   ) {
-    return this.transactionalMutation(input, async (client, audit) => {
+    return this.transactionalMutation(input, async (transaction, audit) => {
       if ((input.dto.campaignIds?.length ?? 0) === 0 && (input.dto.targetIds?.length ?? 0) === 0) {
         throw new AdminApiError(
           422,
@@ -425,40 +511,54 @@ export class AdminService {
         );
       }
       const scope = jobScope(input.dto);
-      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
-        `manual-job:${input.type}:${checksum(scope)}`,
-      ]);
-      const active = await client.query<{ id: string; status: 'QUEUED' | 'RUNNING' }>(
-        `SELECT "id", "status"::text FROM "ManualJob"
-          WHERE "type" = $1 AND "status" IN ('QUEUED','RUNNING')
-            AND "scope" = $2::jsonb LIMIT 1 FOR UPDATE`,
-        [input.type, json(scope)],
-      );
-      audit.before = active.rows[0] ?? null;
-      if (active.rows[0] !== undefined) {
-        return { jobId: active.rows[0].id, status: active.rows[0].status };
+      await advisoryTransactionLock(transaction, `manual-job:${input.type}:${checksum(scope)}`);
+      const active = await transaction.manualJob.findFirst({
+        select: { id: true, status: true },
+        where: {
+          scope: { equals: scope },
+          status: { in: ['QUEUED', 'RUNNING'] },
+          type: input.type,
+        },
+      });
+      audit.before = active;
+      if (active !== null) {
+        return { jobId: active.id, status: active.status };
       }
       const jobId = randomUUID();
-      await client.query(
-        `INSERT INTO "ManualJob"
-           ("id", "type", "status", "scope", "requestedBy", "correlationId")
-         VALUES ($1, $2, 'QUEUED', $3::jsonb, $4, $5)`,
-        [jobId, input.type, json(scope), input.actor, input.correlationId],
-      );
+      await transaction.manualJob.create({
+        data: {
+          correlationId: input.correlationId,
+          id: jobId,
+          requestedBy: input.actor,
+          scope,
+          status: 'QUEUED',
+          type: input.type,
+        },
+      });
       return { jobId, status: 'QUEUED' };
     });
   }
 
   public async getJob(jobId: string) {
-    const result = await this.pool.query(
-      `SELECT "id" AS "jobId", "type", "status"::text, "scope", "requestedAt",
-              "requestedBy", "correlationId", "startedAt", "finishedAt", "result", "errorCode"
-         FROM "ManualJob" WHERE "id" = $1`,
-      [jobId],
-    );
-    const row = result.rows[0];
-    if (row === undefined) throw new AdminApiError(404, 'JOB_NOT_FOUND', 'Job not found.');
-    return serialize(row);
+    const row = await this.database.manualJob.findUnique({
+      select: {
+        correlationId: true,
+        errorCode: true,
+        finishedAt: true,
+        id: true,
+        requestedAt: true,
+        requestedBy: true,
+        result: true,
+        scope: true,
+        startedAt: true,
+        status: true,
+        type: true,
+      },
+      where: { id: jobId },
+    });
+    if (row === null) throw new AdminApiError(404, 'JOB_NOT_FOUND', 'Job not found.');
+    const { id, ...body } = row;
+    return serialize({ ...body, jobId: id });
   }
 
   public async listDecisions(
@@ -471,69 +571,116 @@ export class AdminService {
     const page = pageFrom(query);
     const campaignId = uuidFilter(query.campaignId);
     const targetId = uuidFilter(query.targetId);
-    const action = enumFilter(query.action, [
+    const action = enumFilter<DecisionAction>(query.action, [
       'NO_CHANGE',
       'INCREASE',
       'DECREASE',
       'RESTORE_ABSENT_OVERRIDE',
       'BLOCKED',
     ]);
-    const result = await this.pool.query(
-      `SELECT d."id", d."targetId", t."campaignId", d."action"::text,
-              d."currentBidMinor", d."proposedBidMinor", d."boundedBidMinor",
-              d."outcomeReasonCode", d."guardrailCodes", d."policyVersion",
-              d."algorithmVersion", d."decisionInputChecksum", d."createdAt",
-              q."status"::text AS "queueStatus"
-         FROM "BidDecision" d
-         JOIN "CampaignTarget" t ON t."id" = d."targetId"
-         LEFT JOIN "DecisionQueueItem" q ON q."decisionId" = d."id"
-        WHERE ($1::uuid IS NULL OR t."campaignId" = $1)
-          AND ($2::uuid IS NULL OR d."targetId" = $2)
-          AND ($3::text IS NULL OR d."action"::text = $3)
-          AND ($4::timestamptz IS NULL OR (d."createdAt", d."id") > ($4, $5::uuid))
-        ORDER BY d."createdAt", d."id" LIMIT $6`,
-      [campaignId, targetId, action, page.cursorAt, page.cursorId, page.limit + 1],
+    const rows = await this.database.bidDecision.findMany({
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: {
+        action: true,
+        algorithmVersion: true,
+        boundedBidMinor: true,
+        createdAt: true,
+        currentBidMinor: true,
+        decisionInputChecksum: true,
+        guardrailCodes: true,
+        id: true,
+        outcomeReasonCode: true,
+        policyVersion: true,
+        proposedBidMinor: true,
+        queueItem: { select: { status: true } },
+        target: { select: { campaignId: true } },
+        targetId: true,
+      },
+      take: page.limit + 1,
+      where: {
+        ...(action === null ? {} : { action }),
+        ...(targetId === null ? {} : { targetId }),
+        ...(campaignId === null ? {} : { target: { campaignId } }),
+        ...createdCursorWhere(page),
+      },
+    });
+    return listResponse(
+      rows.map(({ queueItem, target, ...row }) => ({
+        ...row,
+        campaignId: target.campaignId,
+        queueStatus: queueItem?.status ?? null,
+      })),
+      page.limit,
     );
-    return listResponse(result.rows, page.limit);
   }
 
   public async getDecision(decisionId: string) {
-    const result = await this.pool.query(
-      `SELECT d.*, q."status"::text AS "queueStatus", q."failureClassification",
-              q."manualRetryBlocked", q."version" AS "queueVersion",
-              COALESCE(jsonb_agg(jsonb_build_object(
-                'id', i."id", 'attemptId', i."attemptId", 'attemptNumber', i."attemptNumber",
-                'status', i."status"::text, 'httpStatus', i."httpStatus",
-                'errorCode', i."errorCode", 'reconciliationStatus', i."reconciliationStatus"::text,
-                'reconciledAt', i."reconciledAt"
-              ) ORDER BY i."attemptNumber") FILTER (WHERE i."id" IS NOT NULL), '[]') AS "attempts"
-         FROM "BidDecision" d
-         LEFT JOIN "DecisionQueueItem" q ON q."decisionId" = d."id"
-         LEFT JOIN "WbWriteAttemptItem" i ON i."decisionId" = d."id"
-        WHERE d."id" = $1 GROUP BY d."id", q."id"`,
-      [decisionId],
-    );
-    const row = result.rows[0];
-    if (row === undefined)
-      throw new AdminApiError(404, 'DECISION_NOT_FOUND', 'Decision not found.');
-    return serialize(row);
+    const row = await this.database.bidDecision.findUnique({
+      include: {
+        queueItem: {
+          select: {
+            failureClassification: true,
+            manualRetryBlocked: true,
+            status: true,
+            version: true,
+          },
+        },
+        writeAttemptItems: {
+          orderBy: { attemptNumber: 'asc' },
+          select: {
+            attemptId: true,
+            attemptNumber: true,
+            errorCode: true,
+            httpStatus: true,
+            id: true,
+            reconciledAt: true,
+            reconciliationStatus: true,
+            status: true,
+          },
+        },
+      },
+      where: { id: decisionId },
+    });
+    if (row === null) throw new AdminApiError(404, 'DECISION_NOT_FOUND', 'Decision not found.');
+    const { queueItem, writeAttemptItems, ...decision } = row;
+    return serialize({
+      ...decision,
+      attempts: writeAttemptItems,
+      failureClassification: queueItem?.failureClassification ?? null,
+      manualRetryBlocked: queueItem?.manualRetryBlocked ?? null,
+      queueStatus: queueItem?.status ?? null,
+      queueVersion: queueItem?.version ?? null,
+    });
   }
 
   public async listFailures(query: ListQuery & { classification?: string }) {
     const page = pageFrom(query);
     const classification = codeFilter(query.classification);
-    const result = await this.pool.query(
-      `SELECT q."decisionId", q."status"::text, q."failureClassification",
-              q."lastErrorCode", q."lastHttpStatus", q."attemptCount",
-              q."manualRetryBlocked", q."version", d."createdAt", q."id"
-         FROM "DecisionQueueItem" q JOIN "BidDecision" d ON d."id" = q."decisionId"
-        WHERE q."status" = 'FAILED'
-          AND ($1::text IS NULL OR q."failureClassification" = $1)
-          AND ($2::timestamptz IS NULL OR (d."createdAt", q."id") > ($2, $3::uuid))
-        ORDER BY d."createdAt", q."id" LIMIT $4`,
-      [classification, page.cursorAt, page.cursorId, page.limit + 1],
+    const rows = await this.database.decisionQueueItem.findMany({
+      orderBy: [{ decision: { createdAt: 'asc' } }, { id: 'asc' }],
+      select: {
+        attemptCount: true,
+        decision: { select: { createdAt: true } },
+        decisionId: true,
+        failureClassification: true,
+        id: true,
+        lastErrorCode: true,
+        lastHttpStatus: true,
+        manualRetryBlocked: true,
+        status: true,
+        version: true,
+      },
+      take: page.limit + 1,
+      where: {
+        ...(classification === null ? {} : { failureClassification: classification }),
+        status: 'FAILED',
+        ...decisionCreatedCursorWhere(page),
+      },
+    });
+    return listResponse(
+      rows.map(({ decision, ...row }) => ({ ...row, createdAt: decision.createdAt })),
+      page.limit,
     );
-    return listResponse(result.rows, page.limit);
   }
 
   public async retryFailure(input: {
@@ -573,123 +720,94 @@ export class AdminService {
     if (createdFrom !== null && createdTo !== null && createdFrom >= createdTo) {
       throw new AdminApiError(422, 'INVALID_DATE_RANGE', 'createdFrom must precede createdTo.');
     }
-    const result = await this.pool.query(
-      `SELECT "id", "actor", "action", "entityType", "entityId", "before", "after",
-              "correlationId", "causationId", "createdAt"
-         FROM "AuditEvent"
-        WHERE ($1::text IS NULL OR "actor" = $1)
-          AND ($2::text IS NULL OR "action" = $2)
-          AND ($3::text IS NULL OR "entityType" = $3)
-          AND ($4::text IS NULL OR "entityId" = $4)
-          AND ($5::uuid IS NULL OR "correlationId" = $5)
-          AND ($6::uuid IS NULL OR "entityId" = $6::text
-            OR "entityId" IN (
-              SELECT t."id"::text FROM "CampaignTarget" t WHERE t."campaignId" = $6
-              UNION
-              SELECT d."id"::text FROM "BidDecision" d
-                JOIN "CampaignTarget" t ON t."id" = d."targetId"
-               WHERE t."campaignId" = $6
-            ))
-          AND ($7::uuid IS NULL OR "entityId" = $7::text
-            OR "entityId" IN (
-              SELECT d."id"::text FROM "BidDecision" d WHERE d."targetId" = $7
-            ))
-          AND ($8::timestamptz IS NULL OR "createdAt" >= $8)
-          AND ($9::timestamptz IS NULL OR "createdAt" < $9)
-          AND ($10::timestamptz IS NULL OR ("createdAt", "id") > ($10, $11::uuid))
-        ORDER BY "createdAt", "id" LIMIT $12`,
-      [
-        query.actor ?? null,
-        query.action ?? null,
-        query.entityType ?? null,
-        query.entityId ?? null,
-        correlationId,
-        campaignId,
-        targetId,
-        createdFrom,
-        createdTo,
-        page.cursorAt,
-        page.cursorId,
-        page.limit + 1,
-      ],
+    const rows = await loadAuditEventPage(this.database, {
+      action: query.action ?? null,
+      actor: query.actor ?? null,
+      campaignId,
+      correlationId,
+      createdFrom,
+      createdTo,
+      cursorAt: page.cursorAt,
+      cursorId: page.cursorId,
+      entityId: query.entityId ?? null,
+      entityType: query.entityType ?? null,
+      limit: page.limit + 1,
+      targetId,
+    });
+    return listResponse(
+      rows.map((row) => ({ ...row })),
+      page.limit,
     );
-    return listResponse(result.rows, page.limit);
   }
 
   private async transactionalMutation(
     input: MutationContext,
-    mutation: (client: RawTransactionClient, audit: { before?: unknown }) => Promise<unknown>,
+    mutation: (transaction: DatabaseTransaction, audit: { before?: unknown }) => Promise<unknown>,
   ) {
     const scope = input.scope;
     const requestChecksum = checksum({
       dto: input.dto,
       expectedVersion: input.expectedVersion,
     });
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-      await lockIdempotencyKey(client, scope, input.idempotencyKey);
-      const replay = await client.query<{ requestChecksum: string; responseBody: unknown }>(
-        `SELECT "requestChecksum", "responseBody" FROM "IdempotencyRecord"
-          WHERE "scope" = $1 AND "idempotencyKey" = $2 FOR UPDATE`,
-        [scope, input.idempotencyKey],
-      );
-      if (replay.rows[0] !== undefined) {
-        if (replay.rows[0].requestChecksum !== requestChecksum)
-          throw new Error('IDEMPOTENCY_KEY_REUSED');
-        await client.query('COMMIT');
-        return serialize(replay.rows[0].responseBody);
-      }
-      const audit: { before?: unknown } = {};
-      const body = await mutation(client, audit);
-      await client.query(
-        `INSERT INTO "AuditEvent"
-           ("id", "actor", "action", "entityType", "entityId",
-            "before", "after", "correlationId")
-         VALUES ($1, $2, $3, 'AdminMutation', $4, $5::jsonb, $6::jsonb, $7)`,
-        [
-          randomUUID(),
-          input.actor,
-          scope,
-          scope,
-          audit.before === undefined ? null : json(audit.before),
-          json({
-            body,
-            changeReason:
-              typeof input.dto === 'object' && input.dto !== null && 'changeReason' in input.dto
-                ? input.dto.changeReason
-                : null,
+    return withTransaction(
+      this.database,
+      async (transaction) => {
+        await advisoryTransactionLock(
+          transaction,
+          `admin-idempotency:${scope}:${input.idempotencyKey}`,
+        );
+        const replay = await transaction.idempotencyRecord.findUnique({
+          select: { requestChecksum: true, responseBody: true },
+          where: {
+            scope_idempotencyKey: {
+              idempotencyKey: input.idempotencyKey,
+              scope,
+            },
+          },
+        });
+        if (replay !== null) {
+          if (replay.requestChecksum !== requestChecksum) throw new Error('IDEMPOTENCY_KEY_REUSED');
+          return serialize(replay.responseBody);
+        }
+        const audit: { before?: unknown } = {};
+        const body = await mutation(transaction, audit);
+        await transaction.auditEvent.create({
+          data: {
+            action: scope,
+            actor: input.actor,
+            after: inputJson({
+              body,
+              changeReason:
+                typeof input.dto === 'object' && input.dto !== null && 'changeReason' in input.dto
+                  ? input.dto.changeReason
+                  : null,
+              idempotencyKey: input.idempotencyKey,
+            }),
+            before: audit.before === undefined ? Prisma.DbNull : inputJson(audit.before),
+            correlationId: input.correlationId,
+            entityId: scope,
+            entityType: 'AdminMutation',
+            id: randomUUID(),
+          },
+        });
+        const expiresAt = new Date(Date.now() + 400 * 24 * 60 * 60 * 1_000);
+        await transaction.idempotencyRecord.create({
+          data: {
+            expiresAt,
+            id: randomUUID(),
             idempotencyKey: input.idempotencyKey,
-          }),
-          input.correlationId,
-        ],
-      );
-      await client.query(
-        `INSERT INTO "IdempotencyRecord"
-           ("id", "scope", "idempotencyKey", "requestChecksum", "responseStatus",
-            "responseHeaders", "responseBody", "expiresAt")
-         VALUES ($1, $2, $3, $4, 200, '{}'::jsonb, $5::jsonb, NOW() + INTERVAL '400 days')`,
-        [randomUUID(), scope, input.idempotencyKey, requestChecksum, json(body)],
-      );
-      await client.query('COMMIT');
-      return serialize(body);
-    } catch (error: unknown) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+            requestChecksum,
+            responseBody: inputJson(body),
+            responseHeaders: {},
+            responseStatus: 200,
+            scope,
+          },
+        });
+        return serialize(body);
+      },
+      { timeoutMs: 60_000 },
+    );
   }
-}
-
-async function lockIdempotencyKey(
-  client: RawTransactionClient,
-  scope: string,
-  key: string,
-): Promise<void> {
-  await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
-    `admin-idempotency:${scope}:${key}`,
-  ]);
 }
 
 /** Optional cursor and page-size query parameters accepted by list endpoints. */
@@ -707,7 +825,29 @@ interface MutationContext {
   readonly scope: string;
 }
 
-function pageFrom(query: ListQuery) {
+interface Page {
+  readonly cursorAt: Date | null;
+  readonly cursorId: string | null;
+  readonly limit: number;
+}
+
+const policySelect = {
+  campaignId: true,
+  configuration: true,
+  createdAt: true,
+  createdByActor: true,
+  enabled: true,
+  executionMode: true,
+  id: true,
+  inputChecksum: true,
+  scope: true,
+  targetId: true,
+  validFrom: true,
+  validTo: true,
+  version: true,
+} satisfies Prisma.BiddingPolicySelect;
+
+function pageFrom(query: ListQuery): Page {
   const limit = query.limit === undefined ? 100 : Number(query.limit);
   if (!Number.isInteger(limit) || limit < 1 || limit > 500)
     throw new AdminApiError(422, 'INVALID_LIMIT', 'limit must be in range 1..500.');
@@ -725,6 +865,40 @@ function pageFrom(query: ListQuery) {
   } catch {
     throw new AdminApiError(422, 'INVALID_CURSOR', 'Cursor is malformed.');
   }
+}
+
+function createdCursorWhere(page: Page) {
+  if (page.cursorAt === null || page.cursorId === null) return {};
+  return {
+    OR: [
+      { createdAt: { gt: page.cursorAt } },
+      { createdAt: page.cursorAt, id: { gt: page.cursorId } },
+    ],
+  };
+}
+
+function decisionCreatedCursorWhere(page: Page) {
+  if (page.cursorAt === null || page.cursorId === null) return {};
+  return {
+    OR: [
+      { decision: { createdAt: { gt: page.cursorAt } } },
+      { decision: { createdAt: page.cursorAt }, id: { gt: page.cursorId } },
+    ],
+  };
+}
+
+function policyDecisionQueueScope(policy: {
+  readonly campaignId: string | null;
+  readonly scope: PolicyScope;
+  readonly targetId: string | null;
+}) {
+  if (policy.scope === 'DEPLOYMENT') return {};
+  if (policy.scope === 'CAMPAIGN') {
+    if (policy.campaignId === null) throw new Error('CAMPAIGN_POLICY_MISSING_CAMPAIGN');
+    return { decision: { target: { campaignId: policy.campaignId } } };
+  }
+  if (policy.targetId === null) throw new Error('TARGET_POLICY_MISSING_TARGET');
+  return { decision: { targetId: policy.targetId } };
 }
 
 function listResponse(rows: readonly Record<string, unknown>[], limit: number, idKey = 'id') {
@@ -815,8 +989,8 @@ function checksum(value: unknown): string {
   return createHash('sha256').update(canonical).digest('hex');
 }
 
-function json(value: unknown): string {
-  return JSON.stringify(serialize(value));
+function inputJson(value: unknown): Prisma.InputJsonValue {
+  return JSON.parse(JSON.stringify(serialize(value))) as Prisma.InputJsonValue;
 }
 
 function serialize(value: unknown): any {

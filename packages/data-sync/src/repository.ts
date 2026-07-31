@@ -1,10 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import {
   advisoryTransactionLock,
-  createRawDatabaseClient,
+  loadDataSyncCampaignWorkPage,
+  loadDataSyncPerformanceCandidates,
+  type Prisma,
+  upsertCardCampaignTarget,
+  upsertClusterCampaignTarget,
+  upsertClusterStatisticRecord,
+  upsertSyncSourceSnapshot,
   withTransaction,
   type DatabaseClient,
-  type RawTransactionClient,
+  type DatabaseTransaction,
 } from '@wb-bidder/database';
 
 import { accountSettingsChecksum, validateAccountBindingTransition } from './binding.js';
@@ -206,8 +212,6 @@ export interface PerformanceFinalizationConfiguration {
 export class DataSyncRepository {
   /** Generated Prisma model surface. */
   private readonly database: DatabaseClient;
-  /** Prisma-backed facade for irreducible PostgreSQL synchronization primitives. */
-  private readonly pool;
 
   /**
    * Creates a repository over the shared Prisma Client.
@@ -216,7 +220,6 @@ export class DataSyncRepository {
    */
   public constructor(database: DatabaseClient) {
     this.database = database;
-    this.pool = createRawDatabaseClient(database);
   }
 
   /**
@@ -230,24 +233,25 @@ export class DataSyncRepository {
     candidate: AccountBindingCandidate,
     correlationId: string,
   ): Promise<{ readonly transition: string; readonly version: bigint }> {
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-      await client.query(
-        "SELECT pg_advisory_xact_lock(hashtextextended('deployment-account-binding', 0))",
-      );
-      const existingResult = await client.query<BindingRow>(
-        `SELECT "sellerSid", "wbEnvironment", "tokenType", "tokenCategory", "tokenFor",
-                "tokenAccessFingerprint", "accountCurrency", "accountTimezone",
-                "accountSettingsChecksum", "bindingVersion"
-           FROM "DeploymentAccountBinding"
-          WHERE "id" = $1
-          FOR UPDATE`,
-        [BINDING_ID],
-      );
-      const existing =
-        existingResult.rows[0] === undefined ? null : mapExistingBinding(existingResult.rows[0]);
-      const businessDataExists = existing === null ? await hasBusinessData(client) : false;
+    return withTransaction(this.database, async (transaction) => {
+      await advisoryTransactionLock(transaction, 'deployment-account-binding');
+      const stored = await transaction.deploymentAccountBinding.findUnique({
+        select: {
+          accountCurrency: true,
+          accountSettingsChecksum: true,
+          accountTimezone: true,
+          bindingVersion: true,
+          sellerSid: true,
+          tokenAccessFingerprint: true,
+          tokenCategory: true,
+          tokenFor: true,
+          tokenType: true,
+          wbEnvironment: true,
+        },
+        where: { id: BINDING_ID },
+      });
+      const existing = stored === null ? null : mapExistingBinding(stored);
+      const businessDataExists = existing === null ? await hasBusinessData(transaction) : false;
       const transition = validateAccountBindingTransition(existing, candidate, businessDataExists);
       const settingsChecksum = accountSettingsChecksum(
         candidate.accountCurrency,
@@ -257,50 +261,39 @@ export class DataSyncRepository {
       let version: bigint;
       if (transition === 'CREATE') {
         version = 1n;
-        await client.query(
-          `INSERT INTO "DeploymentAccountBinding"
-             ("id", "sellerSid", "wbEnvironment", "tokenType", "tokenCategory", "tokenFor",
-              "tokenAccessFingerprint", "accountCurrency", "accountTimezone",
-              "accountSettingsSource", "accountSettingsChecksum", "initializedAt",
-              "lastValidatedAt", "bindingVersion")
-           VALUES ($1, $2, $3::"WbEnvironment", $4::"WbTokenType", $5, $6, $7, $8, $9,
-                   'ENV_OPERATOR_PROVISIONED', $10, $11, $11, 1)`,
-          [
-            BINDING_ID,
-            candidate.sellerSid,
-            candidate.environment,
-            candidate.tokenType,
-            candidate.tokenCategory,
-            candidate.tokenFor,
-            candidate.tokenFingerprint,
-            candidate.accountCurrency,
-            candidate.accountTimezone,
-            settingsChecksum,
-            now,
-          ],
-        );
+        await transaction.deploymentAccountBinding.create({
+          data: {
+            accountCurrency: candidate.accountCurrency,
+            accountSettingsChecksum: settingsChecksum,
+            accountSettingsSource: 'ENV_OPERATOR_PROVISIONED',
+            accountTimezone: candidate.accountTimezone,
+            bindingVersion: version,
+            id: BINDING_ID,
+            initializedAt: now,
+            lastValidatedAt: now,
+            sellerSid: candidate.sellerSid,
+            tokenAccessFingerprint: candidate.tokenFingerprint,
+            tokenCategory: candidate.tokenCategory,
+            tokenFor: candidate.tokenFor,
+            tokenType: candidate.tokenType,
+            wbEnvironment: candidate.environment,
+          },
+        });
       } else {
         const changesIdentityToken = transition === 'ROTATE' || transition === 'UPGRADE';
         version = (existing?.bindingVersion ?? 0n) + (changesIdentityToken ? 1n : 0n);
-        await client.query(
-          `UPDATE "DeploymentAccountBinding"
-              SET "tokenType" = $2::"WbTokenType",
-                  "tokenFor" = $3,
-                  "tokenAccessFingerprint" = $4,
-                  "lastValidatedAt" = $5,
-                  "bindingVersion" = $6
-            WHERE "id" = $1`,
-          [
-            BINDING_ID,
-            candidate.tokenType,
-            candidate.tokenFor,
-            candidate.tokenFingerprint,
-            now,
-            version.toString(),
-          ],
-        );
+        await transaction.deploymentAccountBinding.update({
+          data: {
+            bindingVersion: version,
+            lastValidatedAt: now,
+            tokenAccessFingerprint: candidate.tokenFingerprint,
+            tokenFor: candidate.tokenFor,
+            tokenType: candidate.tokenType,
+          },
+          where: { id: BINDING_ID },
+        });
       }
-      await appendAudit(client, {
+      await appendAudit(transaction, {
         action: `ACCOUNT_BINDING_${transition}`,
         actor: 'SYSTEM',
         after: {
@@ -313,14 +306,8 @@ export class DataSyncRepository {
         entityId: BINDING_ID,
         entityType: 'DeploymentAccountBinding',
       });
-      await client.query('COMMIT');
       return Object.freeze({ transition, version });
-    } catch (error: unknown) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+    });
   }
 
   /**
@@ -416,54 +403,50 @@ export class DataSyncRepository {
     syncRunId: string,
     externalWriteControlMode: 'EXCLUSIVE' | 'SHARED',
   ): Promise<{ readonly campaigns: number; readonly targets: number }> {
-    const client = await this.pool.connect();
     let targetCount = 0;
-    try {
-      await client.query('BEGIN');
+    await withTransaction(this.database, async (transaction) => {
       for (const campaign of details.adverts) {
         const detailsChecksum = evidenceChecksum(campaign);
         const supported = isCampaignStatisticsEligibleStatus(campaign.status);
-        const campaignResult = await client.query<{ id: string }>(
-          `INSERT INTO "Campaign"
-             ("id", "wbCampaignId", "type", "status", "bidType", "paymentType", "name",
-              "lastSyncedAt", "supported", "unsupportedReason", "detailsFetchedAt",
-              "detailsChecksum", "detailsSyncRunId")
-           VALUES ($1, $2, 9, $3, $4::"CampaignBidType", $5::"CampaignPaymentType", $6,
-                   $7, $8, $9, $7, $10, $11)
-           ON CONFLICT ("wbCampaignId") DO UPDATE SET
-             "status" = EXCLUDED."status",
-             "bidType" = EXCLUDED."bidType",
-             "paymentType" = EXCLUDED."paymentType",
-             "name" = EXCLUDED."name",
-             "lastSyncedAt" = EXCLUDED."lastSyncedAt",
-             "supported" = EXCLUDED."supported",
-             "unsupportedReason" = EXCLUDED."unsupportedReason",
-             "detailsFetchedAt" = EXCLUDED."detailsFetchedAt",
-             "detailsChecksum" = EXCLUDED."detailsChecksum",
-             "detailsSyncRunId" = EXCLUDED."detailsSyncRunId"
-           RETURNING "id"`,
-          [
-            randomUUID(),
-            String(campaign.id),
-            campaign.status,
-            campaign.bid_type.toUpperCase(),
-            campaign.settings.payment_type.toUpperCase(),
-            campaign.settings.name,
-            fetchedAt,
+        const storedCampaign = await transaction.campaign.upsert({
+          create: {
+            bidType: campaign.bid_type.toUpperCase() as 'MANUAL' | 'UNIFIED' | 'UNKNOWN',
+            detailsChecksum,
+            detailsFetchedAt: fetchedAt,
+            detailsSyncRunId: syncRunId,
+            id: randomUUID(),
+            lastSyncedAt: fetchedAt,
+            name: campaign.settings.name,
+            paymentType: campaign.settings.payment_type.toUpperCase() as 'CPC' | 'CPM' | 'UNKNOWN',
+            status: campaign.status,
             supported,
-            supported
+            type: 9,
+            unsupportedReason: supported
               ? null
               : campaign.status === 4
                 ? 'CAMPAIGN_NOT_RUNNING'
                 : 'UNSUPPORTED_CAMPAIGN',
+            wbCampaignId: BigInt(campaign.id),
+          },
+          update: {
+            bidType: campaign.bid_type.toUpperCase() as 'MANUAL' | 'UNIFIED' | 'UNKNOWN',
             detailsChecksum,
-            syncRunId,
-          ],
-        );
-        const campaignId = campaignResult.rows[0]?.id;
-        if (campaignId === undefined) {
-          throw new Error('Campaign upsert did not return an identifier');
-        }
+            detailsFetchedAt: fetchedAt,
+            detailsSyncRunId: syncRunId,
+            lastSyncedAt: fetchedAt,
+            name: campaign.settings.name,
+            paymentType: campaign.settings.payment_type.toUpperCase() as 'CPC' | 'CPM' | 'UNKNOWN',
+            status: campaign.status,
+            supported,
+            unsupportedReason: supported
+              ? null
+              : campaign.status === 4
+                ? 'CAMPAIGN_NOT_RUNNING'
+                : 'UNSUPPORTED_CAMPAIGN',
+          },
+          where: { wbCampaignId: BigInt(campaign.id) },
+        });
+        const campaignId = storedCampaign.id;
         for (const nm of campaign.nm_settings) {
           const placements = activeCardPlacements(campaign.settings.placements);
           for (const placement of placements) {
@@ -474,77 +457,53 @@ export class DataSyncRepository {
               detailsChecksum,
               placement,
             });
-            const targetResult = await client.query<{ id: string }>(
-              `INSERT INTO "CampaignTarget"
-                 ("id", "campaignId", "nmId", "targetKind", "placement", "currentBidMinor",
-                  "lastConfirmedAt", "currentBidChecksum", "currentBidSyncRunId", "capability")
-               VALUES ($1, $2, $3, 'CARD', $4::"CampaignPlacement", $5, $6, $7, $8,
-                       'OBSERVE_ONLY')
-               ON CONFLICT ("campaignId", "nmId", "placement")
-                 WHERE "targetKind" = 'CARD'
-               DO UPDATE SET
-                 "currentBidMinor" = EXCLUDED."currentBidMinor",
-                 "lastConfirmedAt" = EXCLUDED."lastConfirmedAt",
-                 "currentBidChecksum" = EXCLUDED."currentBidChecksum",
-                 "currentBidSyncRunId" = EXCLUDED."currentBidSyncRunId"
-               RETURNING "id"`,
-              [
-                randomUUID(),
-                campaignId,
-                String(nm.nm_id),
-                placement,
-                String(bidMinor),
-                fetchedAt,
-                bidChecksum,
-                syncRunId,
-              ],
-            );
-            const targetId = targetResult.rows[0]?.id;
-            if (targetId === undefined) {
-              throw new Error('Campaign target upsert did not return an identifier');
-            }
-            await client.query(
-              `INSERT INTO "BidStateObservation"
-                 ("id", "targetId", "observedAt", "currentBidMinor", "campaignStatus",
-                  "bidType", "paymentType", "activePlacementConfig",
-                  "configurationChecksum", "syncRunId", "externalWriteControlMode",
-                  "changeMarkerObserved")
-               VALUES ($1, $2, $3, $4, $5, $6::"CampaignBidType",
-                       $7::"CampaignPaymentType", $8::jsonb, $9, $10,
-                       $11::"ExternalWriteControlMode", $12)
-               ON CONFLICT ("targetId", "observedAt", "configurationChecksum") DO NOTHING`,
-              [
-                randomUUID(),
-                targetId,
-                fetchedAt,
-                String(bidMinor),
-                campaign.status,
-                campaign.bid_type.toUpperCase(),
-                campaign.settings.payment_type.toUpperCase(),
-                JSON.stringify(campaign.settings.placements),
-                evidenceChecksum({
-                  bidType: campaign.bid_type,
-                  paymentType: campaign.settings.payment_type,
-                  placements: campaign.settings.placements,
-                  status: campaign.status,
-                }),
-                syncRunId,
+            const targetId = await upsertCardCampaignTarget(transaction, {
+              bidChecksum,
+              bidMinor: BigInt(bidMinor),
+              campaignId,
+              fetchedAt,
+              id: randomUUID(),
+              nmId: BigInt(nm.nm_id),
+              placement,
+              syncRunId,
+            });
+            const configurationChecksum = evidenceChecksum({
+              bidType: campaign.bid_type,
+              paymentType: campaign.settings.payment_type,
+              placements: campaign.settings.placements,
+              status: campaign.status,
+            });
+            await transaction.bidStateObservation.upsert({
+              create: {
+                activePlacementConfig: inputJson(campaign.settings.placements),
+                bidType: campaign.bid_type.toUpperCase() as 'MANUAL' | 'UNIFIED' | 'UNKNOWN',
+                campaignStatus: campaign.status,
+                changeMarkerObserved: externalWriteControlMode === 'EXCLUSIVE',
+                configurationChecksum,
+                currentBidMinor: BigInt(bidMinor),
                 externalWriteControlMode,
-                externalWriteControlMode === 'EXCLUSIVE',
-              ],
-            );
+                id: randomUUID(),
+                observedAt: fetchedAt,
+                paymentType: campaign.settings.payment_type.toUpperCase() as
+                  'CPC' | 'CPM' | 'UNKNOWN',
+                syncRunId,
+                targetId,
+              },
+              update: {},
+              where: {
+                targetId_observedAt_configurationChecksum: {
+                  configurationChecksum,
+                  observedAt: fetchedAt,
+                  targetId,
+                },
+              },
+            });
             targetCount += 1;
           }
         }
       }
-      await client.query('COMMIT');
-      return Object.freeze({ campaigns: details.adverts.length, targets: targetCount });
-    } catch (error: unknown) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+    });
+    return Object.freeze({ campaigns: details.adverts.length, targets: targetCount });
   }
 
   /**
@@ -562,30 +521,31 @@ export class DataSyncRepository {
     }[],
     fetchedAt: Date,
   ): Promise<number> {
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
+    await withTransaction(this.database, async (transaction) => {
       for (const campaign of campaigns) {
-        await client.query(
-          `INSERT INTO "Campaign"
-             ("id", "wbCampaignId", "type", "status", "bidType", "paymentType", "name",
-              "lastSyncedAt", "supported", "unsupportedReason")
-           VALUES ($1, $2, $3, $4, 'UNKNOWN', 'UNKNOWN', '', $5, false, 'DETAILS_PENDING')
-           ON CONFLICT ("wbCampaignId") DO UPDATE SET
-             "type" = EXCLUDED."type",
-             "status" = EXCLUDED."status",
-             "lastSyncedAt" = EXCLUDED."lastSyncedAt"`,
-          [randomUUID(), String(campaign.wbCampaignId), campaign.type, campaign.status, fetchedAt],
-        );
+        await transaction.campaign.upsert({
+          create: {
+            bidType: 'UNKNOWN',
+            id: randomUUID(),
+            lastSyncedAt: fetchedAt,
+            name: '',
+            paymentType: 'UNKNOWN',
+            status: campaign.status,
+            supported: false,
+            type: campaign.type,
+            unsupportedReason: 'DETAILS_PENDING',
+            wbCampaignId: BigInt(campaign.wbCampaignId),
+          },
+          update: {
+            lastSyncedAt: fetchedAt,
+            status: campaign.status,
+            type: campaign.type,
+          },
+          where: { wbCampaignId: BigInt(campaign.wbCampaignId) },
+        });
       }
-      await client.query('COMMIT');
-      return campaigns.length;
-    } catch (error: unknown) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+    });
+    return campaigns.length;
   }
 
   /**
@@ -612,57 +572,15 @@ export class DataSyncRepository {
         : [...scope.campaignIds];
     const targetIds =
       scope.targetIds === undefined || scope.targetIds.length === 0 ? null : [...scope.targetIds];
-    const result = await this.pool.query<CampaignWorkRow>(
-      `SELECT c."id" AS "campaignId", c."wbCampaignId", c."status",
-              c."bidType", c."paymentType",
-              c."detailsChecksum", c."detailsFetchedAt",
-              COALESCE(
-                jsonb_agg(
-                  jsonb_build_object(
-                    'targetId', t."id",
-                    'nmId', t."nmId"::text,
-                    'placement', t."placement",
-                    'targetKind', t."targetKind",
-                    'normQueryWire', t."normQueryWire",
-                    'currentBidChecksum', t."currentBidChecksum",
-                    'currentBidConfirmedAt', t."lastConfirmedAt",
-                    'minimumBidChecksum', t."minimumBidChecksum",
-                    'minimumBidConfirmedAt', t."minimumBidConfirmedAt",
-                    'recommendationFetchedAt', (
-                      SELECT MAX(recommendation."fetchedAt")
-                        FROM "SyncSourceSnapshot" recommendation
-                       WHERE recommendation."campaignId" = c."id"
-                         AND recommendation."dataKind" = 'BID_RECOMMENDATION'
-                         AND recommendation."valid" = true
-                         AND recommendation."normalizedData"->>'nmId' = t."nmId"::text
-                    )
-                  ) ORDER BY t."nmId", t."placement"
-                ) FILTER (WHERE t."id" IS NOT NULL),
-                '[]'::jsonb
-              ) AS targets
-         FROM "Campaign" c
-         LEFT JOIN "CampaignTarget" t
-           ON t."campaignId" = c."id"
-          AND ($4::uuid[] IS NULL OR t."id" = ANY($4::uuid[]))
-        WHERE c."supported" = true
-          AND ($5::boolean OR c."status" <> 4)
-          AND c."wbCampaignId" > $1
-          AND ($3::uuid[] IS NULL OR c."id" = ANY($3::uuid[]))
-          AND (
-            $4::uuid[] IS NULL
-            OR EXISTS (
-              SELECT 1 FROM "CampaignTarget" scoped
-               WHERE scoped."campaignId" = c."id"
-                 AND scoped."id" = ANY($4::uuid[])
-            )
-          )
-        GROUP BY c."id"
-        ORDER BY c."wbCampaignId"
-        LIMIT $2`,
-      [afterWbCampaignId.toString(), limit, campaignIds, targetIds, includeReadyCampaigns],
-    );
+    const rows = await loadDataSyncCampaignWorkPage(this.database, {
+      afterWbCampaignId,
+      campaignIds,
+      includeReadyCampaigns,
+      limit,
+      targetIds,
+    });
     return Object.freeze(
-      result.rows.map((row) =>
+      rows.map((row) =>
         Object.freeze({
           bidType: row.bidType,
           campaignId: row.campaignId,
@@ -711,29 +629,30 @@ export class DataSyncRepository {
     wbCampaignIds: readonly bigint[],
   ): Promise<readonly ClusterCurrentWorkItem[]> {
     if (wbCampaignIds.length === 0) return Object.freeze([]);
-    const result = await this.pool.query<{
-      campaignId: string;
-      nmIds: string[];
-      wbCampaignId: string;
-    }>(
-      `SELECT campaign."id" AS "campaignId", campaign."wbCampaignId",
-              array_agg(DISTINCT target."nmId"::text ORDER BY target."nmId"::text) AS "nmIds"
-         FROM "Campaign" campaign
-         JOIN "CampaignTarget" target ON target."campaignId" = campaign."id"
-        WHERE campaign."wbCampaignId" = ANY($1::bigint[])
-          AND campaign."bidType" = 'MANUAL'
-          AND campaign."paymentType" = 'CPM'
-          AND target."targetKind" = 'CLUSTER'
-        GROUP BY campaign."id", campaign."wbCampaignId"
-        ORDER BY campaign."wbCampaignId"`,
-      [wbCampaignIds.map(String)],
-    );
+    const rows = await this.database.campaign.findMany({
+      orderBy: { wbCampaignId: 'asc' },
+      select: {
+        id: true,
+        targets: {
+          orderBy: { nmId: 'asc' },
+          select: { nmId: true },
+          where: { targetKind: 'CLUSTER' },
+        },
+        wbCampaignId: true,
+      },
+      where: {
+        bidType: 'MANUAL',
+        paymentType: 'CPM',
+        targets: { some: { targetKind: 'CLUSTER' } },
+        wbCampaignId: { in: [...wbCampaignIds] },
+      },
+    });
     return Object.freeze(
-      result.rows.map((row) =>
+      rows.map((row) =>
         Object.freeze({
-          campaignId: row.campaignId,
-          nmIds: Object.freeze(row.nmIds.map(BigInt)),
-          wbCampaignId: BigInt(row.wbCampaignId),
+          campaignId: row.id,
+          nmIds: Object.freeze([...new Set(row.targets.map(({ nmId }) => nmId))]),
+          wbCampaignId: row.wbCampaignId,
         }),
       ),
     );
@@ -746,11 +665,11 @@ export class DataSyncRepository {
    * @returns Cursor or zero when no pass has started.
    */
   public async loadNumericCheckpoint(dataKind: SyncDataKind): Promise<bigint> {
-    const result = await this.pool.query<{ cursor: { value?: unknown } }>(
-      `SELECT "cursor" FROM "SyncCheckpoint" WHERE "dataKind" = $1::"SyncDataKind"`,
-      [dataKind],
-    );
-    const value = result.rows[0]?.cursor.value;
+    const checkpoint = await this.database.syncCheckpoint.findUnique({
+      select: { cursor: true },
+      where: { dataKind },
+    });
+    const value = readJsonObject(checkpoint?.cursor).value;
     return typeof value === 'string' && /^\d+$/.test(value) ? BigInt(value) : 0n;
   }
 
@@ -782,31 +701,39 @@ export class DataSyncRepository {
         continue;
       }
       const checksum = evidenceChecksum({ minimum: minimum.value, placement });
-      const result = await this.pool.query(
-        `UPDATE "CampaignTarget"
-            SET "minimumBidMinor" = $4,
-                "minimumBidConfirmedAt" = $5,
-                "minimumBidChecksum" = $6,
-                "minimumBidSyncRunId" = $7,
-                "capability" = CASE
-                  WHEN "currentBidMinor" IS NOT NULL THEN 'CARD_WRITE_READY'
-                  ELSE 'OBSERVE_ONLY'
-                END
-          WHERE "campaignId" = $1
-            AND "nmId" = $2
-            AND "targetKind" = 'CARD'
-            AND "placement" = $3::"CampaignPlacement"`,
-        [
+      const writeReady = await this.database.campaignTarget.updateMany({
+        data: {
+          capability: 'CARD_WRITE_READY',
+          minimumBidChecksum: checksum,
+          minimumBidConfirmedAt: fetchedAt,
+          minimumBidMinor: BigInt(minimum.value),
+          minimumBidSyncRunId: syncRunId,
+        },
+        where: {
           campaignId,
-          String(row.nm_id),
+          currentBidMinor: { not: null },
+          nmId: BigInt(row.nm_id),
           placement,
-          String(minimum.value),
-          fetchedAt,
-          checksum,
-          syncRunId,
-        ],
-      );
-      updated += result.rowCount ?? 0;
+          targetKind: 'CARD',
+        },
+      });
+      const observeOnly = await this.database.campaignTarget.updateMany({
+        data: {
+          capability: 'OBSERVE_ONLY',
+          minimumBidChecksum: checksum,
+          minimumBidConfirmedAt: fetchedAt,
+          minimumBidMinor: BigInt(minimum.value),
+          minimumBidSyncRunId: syncRunId,
+        },
+        where: {
+          campaignId,
+          currentBidMinor: null,
+          nmId: BigInt(row.nm_id),
+          placement,
+          targetKind: 'CARD',
+        },
+      });
+      updated += writeReady.count + observeOnly.count;
     }
     return updated;
   }
@@ -827,29 +754,18 @@ export class DataSyncRepository {
       readonly wire: string;
     }[],
   ): Promise<number> {
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
+    await withTransaction(this.database, async (transaction) => {
       for (const query of normQueries) {
-        await client.query(
-          `INSERT INTO "CampaignTarget"
-             ("id", "campaignId", "nmId", "targetKind", "placement",
-              "normQueryWire", "normQueryCanonical", "clusterBidState", "capability")
-           VALUES ($1, $2, $3, 'CLUSTER', 'SEARCH', $4, $5, 'UNKNOWN', 'OBSERVE_ONLY')
-           ON CONFLICT ("campaignId", "nmId", "placement", "normQueryCanonical")
-             WHERE "targetKind" = 'CLUSTER'
-           DO UPDATE SET "normQueryWire" = EXCLUDED."normQueryWire"`,
-          [randomUUID(), campaignId, nmId.toString(), query.wire, query.canonical],
-        );
+        await upsertClusterCampaignTarget(transaction, {
+          campaignId,
+          id: randomUUID(),
+          nmId,
+          normQueryCanonical: query.canonical,
+          normQueryWire: query.wire,
+        });
       }
-      await client.query('COMMIT');
-      return normQueries.length;
-    } catch (error: unknown) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+    });
+    return normQueries.length;
   }
 
   /**
@@ -881,35 +797,37 @@ export class DataSyncRepository {
     readonly profileId: string;
     readonly runId: string;
   }): Promise<number> {
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-      const targets = await client.query<{
-        bidType: 'MANUAL' | 'UNIFIED' | 'UNKNOWN';
-        id: string;
-        nmId: string;
-        normQueryWire: string;
-        paymentType: 'CPC' | 'CPM' | 'UNKNOWN';
-        status: number;
-        wbCampaignId: string;
-      }>(
-        `SELECT t."id", t."nmId", t."normQueryWire",
-                c."wbCampaignId", c."bidType"::text AS "bidType",
-                c."paymentType"::text AS "paymentType", c."status"
-           FROM "CampaignTarget" t
-           JOIN "Campaign" c ON c."id" = t."campaignId"
-          WHERE t."campaignId" = $1
-            AND t."targetKind" = 'CLUSTER'
-            AND t."normQueryWire" IS NOT NULL
-          FOR UPDATE OF t`,
-        [input.campaignId],
-      );
-      for (const target of targets.rows) {
+    return withTransaction(this.database, async (transaction) => {
+      await advisoryTransactionLock(transaction, `cluster-bid-states:${input.campaignId}`);
+      const targets = await transaction.campaignTarget.findMany({
+        select: {
+          campaign: {
+            select: {
+              bidType: true,
+              paymentType: true,
+              status: true,
+              wbCampaignId: true,
+            },
+          },
+          clusterBaselineBidState: true,
+          clusterOverrideOwned: true,
+          id: true,
+          nmId: true,
+          normQueryWire: true,
+        },
+        where: {
+          campaignId: input.campaignId,
+          normQueryWire: { not: null },
+          targetKind: 'CLUSTER',
+        },
+      });
+      for (const target of targets) {
         const wire = target.normQueryWire;
+        if (wire === null) continue;
         const matched = input.bids.find(
           (bid) =>
-            BigInt(bid.advert_id) === BigInt(target.wbCampaignId) &&
-            BigInt(bid.nm_id) === BigInt(target.nmId) &&
+            BigInt(bid.advert_id) === target.campaign.wbCampaignId &&
+            BigInt(bid.nm_id) === target.nmId &&
             bid.norm_query === wire,
         );
         const state = matched === undefined ? 'ABSENT' : 'EXPLICIT';
@@ -922,118 +840,90 @@ export class DataSyncRepository {
         };
         const sourceChecksum = evidenceChecksum(source);
         const configurationChecksum = evidenceChecksum({
-          bidType: target.bidType,
-          paymentType: target.paymentType,
-          status: target.status,
+          bidType: target.campaign.bidType,
+          paymentType: target.campaign.paymentType,
+          status: target.campaign.status,
           targetKind: 'CLUSTER',
           wire,
         });
-        await client.query(
-          `UPDATE "CampaignTarget"
-              SET "currentBidMinor" = $2,
-                  "minimumBidMinor" = $3,
-                  "clusterBidState" = $4::"ClusterBidState",
-                  "clusterBidContractVersion" = $5,
-                  "lastConfirmedAt" = $6,
-                  "currentBidChecksum" = $7,
-                  "currentBidSyncRunId" = $8,
-                  "minimumBidConfirmedAt" = $6,
-                  "minimumBidChecksum" = $9,
-                  "minimumBidSyncRunId" = $8,
-                  "clusterBaselineBidState" = CASE
-                    WHEN "clusterBaselineBidState" IS NULL AND "clusterOverrideOwned" = false
-                      THEN $4::"ClusterBidState"
-                    ELSE "clusterBaselineBidState"
-                  END,
-                  "clusterBaselineBidMinor" = CASE
-                    WHEN "clusterBaselineBidState" IS NULL AND "clusterOverrideOwned" = false
-                      THEN $2
-                    ELSE "clusterBaselineBidMinor"
-                  END,
-                  "clusterBaselineChecksum" = CASE
-                    WHEN "clusterBaselineBidState" IS NULL AND "clusterOverrideOwned" = false
-                      THEN $12
-                    ELSE "clusterBaselineChecksum"
-                  END,
-                  "capability" = CASE
-                    WHEN $10 = 'MANUAL' AND $11 = 'CPM' THEN 'CLUSTER_WRITE_READY'
-                    ELSE 'UNSUPPORTED'
-                  END
-            WHERE "id" = $1`,
-          [
-            target.id,
-            currentBid?.toString() ?? null,
-            input.minimumBidMinor.toString(),
-            state,
-            input.contractVersion,
-            input.fetchedAt,
-            sourceChecksum,
-            input.runId,
-            evidenceChecksum({
+        const initializeBaseline =
+          target.clusterBaselineBidState === null && !target.clusterOverrideOwned;
+        await transaction.campaignTarget.update({
+          data: {
+            capability:
+              target.campaign.bidType === 'MANUAL' && target.campaign.paymentType === 'CPM'
+                ? 'CLUSTER_WRITE_READY'
+                : 'UNSUPPORTED',
+            ...(initializeBaseline
+              ? {
+                  clusterBaselineBidMinor: currentBid,
+                  clusterBaselineBidState: state,
+                  clusterBaselineChecksum: evidenceChecksum({
+                    bidMinor: currentBid,
+                    contractVersion: input.contractVersion,
+                    state,
+                  }),
+                }
+              : {}),
+            clusterBidContractVersion: input.contractVersion,
+            clusterBidState: state,
+            currentBidChecksum: sourceChecksum,
+            currentBidMinor: currentBid,
+            currentBidSyncRunId: input.runId,
+            lastConfirmedAt: input.fetchedAt,
+            minimumBidChecksum: evidenceChecksum({
               minimumBidMinor: input.minimumBidMinor,
               version: input.contractVersion,
             }),
-            target.bidType,
-            target.paymentType,
-            evidenceChecksum({
-              bidMinor: currentBid,
-              contractVersion: input.contractVersion,
-              state,
-            }),
-          ],
-        );
-        await client.query(
-          `INSERT INTO "BidStateObservation"
-             ("id", "targetId", "observedAt", "currentBidMinor", "clusterBidState",
-              "campaignStatus", "bidType", "paymentType", "activePlacementConfig",
-              "configurationChecksum", "sourceMarker", "syncRunId",
-              "externalWriteControlMode", "changeMarkerObserved")
-           VALUES ($1, $2, $3, $4, $5::"ClusterBidState", $6,
-                   $7::"CampaignBidType", $8::"CampaignPaymentType", $9::jsonb,
-                   $10, $11, $12, $13::"ExternalWriteControlMode", false)
-           ON CONFLICT ("targetId", "observedAt", "configurationChecksum") DO NOTHING`,
-          [
-            randomUUID(),
-            target.id,
-            input.fetchedAt,
-            currentBid?.toString() ?? null,
-            state,
-            target.status,
-            target.bidType,
-            target.paymentType,
-            safeJson({ normQueryWire: wire, placement: 'SEARCH' }),
+            minimumBidConfirmedAt: input.fetchedAt,
+            minimumBidMinor: input.minimumBidMinor,
+            minimumBidSyncRunId: input.runId,
+          },
+          where: { id: target.id },
+        });
+        await transaction.bidStateObservation.upsert({
+          create: {
+            activePlacementConfig: { normQueryWire: wire, placement: 'SEARCH' },
+            bidType: target.campaign.bidType,
+            campaignStatus: target.campaign.status,
+            changeMarkerObserved: false,
+            clusterBidState: state,
             configurationChecksum,
-            `cluster-current-bids:${sourceChecksum}`,
-            input.runId,
-            input.externalWriteControlMode,
-          ],
-        );
-        await client.query(
-          `INSERT INTO "SyncSourceSnapshot"
-             ("id", "dataKind", "campaignId", "targetId", "fetchedAt",
-              "endpointProfile", "sourceChecksum", "normalizedData", "valid", "syncRunId")
-           VALUES ($1, 'CURRENT_BID', $2, $3, $4, $5, $6, $7::jsonb, true, $8)
-           ON CONFLICT DO NOTHING`,
-          [
-            randomUUID(),
-            input.campaignId,
-            target.id,
-            input.fetchedAt,
-            input.profileId,
-            sourceChecksum,
-            safeJson(source),
-            input.runId,
-          ],
-        );
+            currentBidMinor: currentBid,
+            externalWriteControlMode: input.externalWriteControlMode,
+            id: randomUUID(),
+            observedAt: input.fetchedAt,
+            paymentType: target.campaign.paymentType,
+            sourceMarker: `cluster-current-bids:${sourceChecksum}`,
+            syncRunId: input.runId,
+            targetId: target.id,
+          },
+          update: {},
+          where: {
+            targetId_observedAt_configurationChecksum: {
+              configurationChecksum,
+              observedAt: input.fetchedAt,
+              targetId: target.id,
+            },
+          },
+        });
+        await upsertSyncSourceSnapshot(transaction, {
+          campaignId: input.campaignId,
+          dataKind: 'CURRENT_BID',
+          endpointProfile: input.profileId,
+          fetchedAt: input.fetchedAt,
+          id: randomUUID(),
+          invalidReason: null,
+          normalizedData: inputJson(source),
+          sourceChecksum,
+          sourceDate: null,
+          syncRunId: input.runId,
+          targetId: target.id,
+          valid: true,
+        });
       }
-      await client.query('COMMIT');
-      return targets.rows.length;
-    } catch (error: unknown) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+      return targets.length;
+    });
   }
 
   /**
@@ -1043,56 +933,21 @@ export class DataSyncRepository {
    * @returns Snapshot UUID, existing or newly inserted.
    */
   public async recordSourceSnapshot(snapshot: SourceSnapshotWrite): Promise<string> {
-    const id = randomUUID();
-    const result = await this.pool.query<{ id: string }>(
-      `INSERT INTO "SyncSourceSnapshot"
-         ("id", "dataKind", "campaignId", "targetId", "sourceDate", "fetchedAt",
-          "endpointProfile", "sourceChecksum", "normalizedData", "valid",
-          "invalidReason", "syncRunId")
-       VALUES ($1, $2::"SyncDataKind", $3, $4, $5::date, $6, $7, $8, $9::jsonb, $10, $11, $12)
-       ON CONFLICT DO NOTHING
-       RETURNING "id"`,
-      [
-        id,
-        snapshot.dataKind,
-        snapshot.campaignId ?? null,
-        snapshot.targetId ?? null,
-        snapshot.sourceDate ?? null,
-        snapshot.fetchedAt,
-        snapshot.endpointProfile,
-        snapshot.sourceChecksum,
-        safeJson(snapshot.normalizedData),
-        snapshot.valid,
-        snapshot.invalidReason ?? null,
-        snapshot.syncRunId,
-      ],
-    );
-    if (result.rows[0]?.id !== undefined) {
-      return result.rows[0].id;
-    }
-    const existing = await this.pool.query<{ id: string }>(
-      `SELECT "id"
-         FROM "SyncSourceSnapshot"
-        WHERE "dataKind" = $1::"SyncDataKind"
-          AND "campaignId" IS NOT DISTINCT FROM $2
-          AND "targetId" IS NOT DISTINCT FROM $3
-          AND "sourceDate" IS NOT DISTINCT FROM $4::date
-          AND "sourceChecksum" = $5
-          AND "syncRunId" = $6`,
-      [
-        snapshot.dataKind,
-        snapshot.campaignId ?? null,
-        snapshot.targetId ?? null,
-        snapshot.sourceDate ?? null,
-        snapshot.sourceChecksum,
-        snapshot.syncRunId,
-      ],
-    );
-    const existingId = existing.rows[0]?.id;
-    if (existingId === undefined) {
-      throw new Error('Source snapshot idempotency lookup failed');
-    }
-    return existingId;
+    return upsertSyncSourceSnapshot(this.database, {
+      campaignId: snapshot.campaignId ?? null,
+      dataKind: snapshot.dataKind,
+      endpointProfile: snapshot.endpointProfile,
+      fetchedAt: snapshot.fetchedAt,
+      id: randomUUID(),
+      invalidReason: snapshot.invalidReason ?? null,
+      normalizedData: inputJson(snapshot.normalizedData),
+      sourceChecksum: snapshot.sourceChecksum,
+      sourceDate:
+        snapshot.sourceDate === undefined ? null : new Date(`${snapshot.sourceDate}T00:00:00.000Z`),
+      syncRunId: snapshot.syncRunId,
+      targetId: snapshot.targetId ?? null,
+      valid: snapshot.valid,
+    });
   }
 
   /**
@@ -1106,20 +961,12 @@ export class DataSyncRepository {
     readonly sourceChecksum: string;
     readonly valid: boolean;
   } | null> {
-    const result = await this.pool.query<{
-      fetchedAt: Date;
-      sourceChecksum: string;
-      valid: boolean;
-    }>(
-      `SELECT "fetchedAt", "sourceChecksum", "valid"
-         FROM "SyncSourceSnapshot"
-        WHERE "campaignId" = $1 AND "dataKind" = 'CAMPAIGN_STATISTICS'
-        ORDER BY "fetchedAt" DESC, "createdAt" DESC
-        LIMIT 1`,
-      [campaignId],
-    );
-    const row = result.rows[0];
-    return row === undefined
+    const row = await this.database.syncSourceSnapshot.findFirst({
+      orderBy: [{ fetchedAt: 'desc' }, { createdAt: 'desc' }],
+      select: { fetchedAt: true, sourceChecksum: true, valid: true },
+      where: { campaignId, dataKind: 'CAMPAIGN_STATISTICS' },
+    });
+    return row === null
       ? null
       : Object.freeze({
           fetchedAt: new Date(row.fetchedAt),
@@ -1139,20 +986,12 @@ export class DataSyncRepository {
     readonly sourceChecksum: string;
     readonly valid: boolean;
   } | null> {
-    const result = await this.pool.query<{
-      fetchedAt: Date;
-      sourceChecksum: string;
-      valid: boolean;
-    }>(
-      `SELECT "fetchedAt", "sourceChecksum", "valid"
-         FROM "SyncSourceSnapshot"
-        WHERE "targetId" = $1 AND "dataKind" = 'SAME_DAY_SPEND'
-        ORDER BY "fetchedAt" DESC, "createdAt" DESC
-        LIMIT 1`,
-      [targetId],
-    );
-    const row = result.rows[0];
-    return row === undefined
+    const row = await this.database.syncSourceSnapshot.findFirst({
+      orderBy: [{ fetchedAt: 'desc' }, { createdAt: 'desc' }],
+      select: { fetchedAt: true, sourceChecksum: true, valid: true },
+      where: { dataKind: 'SAME_DAY_SPEND', targetId },
+    });
+    return row === null
       ? null
       : Object.freeze({
           fetchedAt: new Date(row.fetchedAt),
@@ -1172,20 +1011,12 @@ export class DataSyncRepository {
     readonly sourceChecksum: string;
     readonly valid: boolean;
   } | null> {
-    const result = await this.pool.query<{
-      fetchedAt: Date;
-      sourceChecksum: string;
-      valid: boolean;
-    }>(
-      `SELECT "fetchedAt", "sourceChecksum", "valid"
-         FROM "SyncSourceSnapshot"
-        WHERE "targetId" = $1 AND "dataKind" = 'CLUSTER_STATISTICS'
-        ORDER BY "fetchedAt" DESC, "createdAt" DESC
-        LIMIT 1`,
-      [targetId],
-    );
-    const row = result.rows[0];
-    return row === undefined
+    const row = await this.database.syncSourceSnapshot.findFirst({
+      orderBy: [{ fetchedAt: 'desc' }, { createdAt: 'desc' }],
+      select: { fetchedAt: true, sourceChecksum: true, valid: true },
+      where: { dataKind: 'CLUSTER_STATISTICS', targetId },
+    });
+    return row === null
       ? null
       : Object.freeze({
           fetchedAt: new Date(row.fetchedAt),
@@ -1204,59 +1035,50 @@ export class DataSyncRepository {
     rows: readonly CampaignStatisticLeafWrite[],
   ): Promise<number> {
     if (rows.length === 0) return 0;
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
+    await withTransaction(this.database, async (transaction) => {
       for (const row of rows) {
-        await client.query(
-          `INSERT INTO "CampaignStatDaily"
-             ("id", "campaignId", "wbCampaignId", "nmId", "date", "placement",
-              "normQueryWire", "normQueryCanonical", "appType", "dimensions", "views",
-              "clicks", "atbs", "orders", "orderedUnits", "canceled", "spendMinor",
-              "attributedRevenueMinor", "fetchedAt", "sourceVersion", "sourceChecksum",
-              "syncRunId", "normalizedAggregationKind")
-           VALUES ($1, $2, $3, $4, $5::date, NULL, NULL, NULL, $6,
-                   $7::jsonb, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
-                   $19, 'FULLSTATS_APP_NM_LEAF')
-           ON CONFLICT ("wbCampaignId", "nmId", "date", "sourceVersion", "appType")
-           DO UPDATE SET
-             "fetchedAt" = EXCLUDED."fetchedAt",
-             "syncRunId" = EXCLUDED."syncRunId"`,
-          [
-            randomUUID(),
-            row.campaignId,
-            row.wbCampaignId.toString(),
-            row.nmId.toString(),
-            row.statistic.date,
-            row.appType,
-            safeJson({ appType: row.appType }),
-            row.statistic.views?.toString() ?? null,
-            row.statistic.clicks.toString(),
-            row.statistic.atbs.toString(),
-            row.statistic.orders.toString(),
-            row.statistic.orderedUnits?.toString() ?? null,
-            row.statistic.canceled?.toString() ?? null,
-            row.statistic.spendMinor.toString(),
-            row.statistic.attributedRevenueMinor.toString(),
-            row.fetchedAt,
-            row.sourceVersion,
-            evidenceChecksum({
+        const date = new Date(`${row.statistic.date}T00:00:00.000Z`);
+        await transaction.campaignStatDaily.upsert({
+          create: {
+            appType: row.appType,
+            atbs: row.statistic.atbs,
+            attributedRevenueMinor: row.statistic.attributedRevenueMinor,
+            campaignId: row.campaignId,
+            canceled: row.statistic.canceled ?? null,
+            clicks: row.statistic.clicks,
+            date,
+            dimensions: { appType: row.appType },
+            fetchedAt: row.fetchedAt,
+            id: randomUUID(),
+            nmId: row.nmId,
+            normalizedAggregationKind: 'FULLSTATS_APP_NM_LEAF',
+            orderedUnits: row.statistic.orderedUnits ?? null,
+            orders: row.statistic.orders,
+            sourceChecksum: evidenceChecksum({
               appType: row.appType,
               nmId: row.nmId,
               statistic: row.statistic,
             }),
-            row.syncRunId,
-          ],
-        );
+            sourceVersion: row.sourceVersion,
+            spendMinor: row.statistic.spendMinor,
+            syncRunId: row.syncRunId,
+            views: row.statistic.views ?? null,
+            wbCampaignId: row.wbCampaignId,
+          },
+          update: { fetchedAt: row.fetchedAt, syncRunId: row.syncRunId },
+          where: {
+            wbCampaignId_nmId_date_sourceVersion_appType: {
+              appType: row.appType,
+              date,
+              nmId: row.nmId,
+              sourceVersion: row.sourceVersion,
+              wbCampaignId: row.wbCampaignId,
+            },
+          },
+        });
       }
-      await client.query('COMMIT');
-      return rows.length;
-    } catch (error: unknown) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+    });
+    return rows.length;
   }
 
   /**
@@ -1266,20 +1088,21 @@ export class DataSyncRepository {
    * @returns Local cluster target UUID.
    */
   public async upsertClusterStatisticDay(row: ClusterStatisticDayWrite): Promise<string> {
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-      const target = await client.query<{ id: string }>(
-        `SELECT "id"
-           FROM "CampaignTarget"
-          WHERE "campaignId" = $1
-            AND "nmId" = $2
-            AND "targetKind" = 'CLUSTER'
-            AND "normQueryCanonical" = $3
-          FOR UPDATE`,
-        [row.campaignId, row.nmId.toString(), row.normQueryCanonical],
+    return withTransaction(this.database, async (transaction) => {
+      await advisoryTransactionLock(
+        transaction,
+        `cluster-statistic:${row.campaignId}:${row.nmId.toString()}:${row.normQueryCanonical}`,
       );
-      const targetId = target.rows[0]?.id;
+      const target = await transaction.campaignTarget.findFirst({
+        select: { id: true },
+        where: {
+          campaignId: row.campaignId,
+          nmId: row.nmId,
+          normQueryCanonical: row.normQueryCanonical,
+          targetKind: 'CLUSTER',
+        },
+      });
+      const targetId = target?.id;
       if (targetId === undefined) {
         throw new Error('CLUSTER_STATISTIC_TARGET_NOT_DISCOVERED');
       }
@@ -1289,71 +1112,42 @@ export class DataSyncRepository {
         normQueryWire: row.normQueryWire,
       };
       const sourceChecksum = evidenceChecksum(normalizedData);
-      await client.query(
-        `INSERT INTO "CampaignStatDaily"
-           ("id", "campaignId", "wbCampaignId", "nmId", "date", "placement",
-            "normQueryWire", "normQueryCanonical", "appType", "dimensions", "views",
-            "clicks", "atbs", "orders", "orderedUnits", "canceled", "spendMinor",
-            "attributedRevenueMinor", "fetchedAt", "sourceVersion", "sourceChecksum",
-            "syncRunId", "normalizedAggregationKind")
-         VALUES ($1, $2, $3, $4, $5::date, 'SEARCH', $6, $7, NULL, $8::jsonb, $9,
-                 $10, $11, $12, $13, NULL, $14, $15, $16, $17::text, $17::char(64), $18,
-                 'CLUSTER_DAILY')
-         ON CONFLICT ("wbCampaignId", "nmId", "date", "sourceVersion", "normQueryCanonical")
-           WHERE "normalizedAggregationKind" = 'CLUSTER_DAILY'
-         DO UPDATE SET "fetchedAt" = EXCLUDED."fetchedAt",
-                       "syncRunId" = EXCLUDED."syncRunId"`,
-        [
-          randomUUID(),
-          row.campaignId,
-          row.wbCampaignId.toString(),
-          row.nmId.toString(),
-          row.normalized.date,
-          row.normQueryWire,
-          row.normQueryCanonical,
-          safeJson({
-            normQueryCanonical: row.normQueryCanonical,
-            normQueryWire: row.normQueryWire,
-          }),
-          row.normalized.views?.toString() ?? null,
-          row.normalized.clicks.toString(),
-          row.normalized.atbs.toString(),
-          row.normalized.orders.toString(),
-          row.normalized.orderedUnits?.toString() ?? null,
-          row.normalized.spendMinor.toString(),
-          row.normalized.attributedRevenueMinor.toString(),
-          row.fetchedAt,
-          sourceChecksum,
-          row.runId,
-        ],
-      );
-      await client.query(
-        `INSERT INTO "SyncSourceSnapshot"
-           ("id", "dataKind", "campaignId", "targetId", "sourceDate", "fetchedAt",
-            "endpointProfile", "sourceChecksum", "normalizedData", "valid", "syncRunId")
-         VALUES ($1, 'CLUSTER_STATISTICS', $2, $3, $4::date, $5, $6, $7,
-                 $8::jsonb, true, $9)
-         ON CONFLICT DO NOTHING`,
-        [
-          randomUUID(),
-          row.campaignId,
-          targetId,
-          row.normalized.date,
-          row.fetchedAt,
-          row.profileId,
-          sourceChecksum,
-          safeJson(normalizedData),
-          row.runId,
-        ],
-      );
-      await client.query('COMMIT');
+      const statisticDate = new Date(`${row.normalized.date}T00:00:00.000Z`);
+      await upsertClusterStatisticRecord(transaction, {
+        atbs: row.normalized.atbs,
+        attributedRevenueMinor: row.normalized.attributedRevenueMinor,
+        campaignId: row.campaignId,
+        clicks: row.normalized.clicks,
+        date: statisticDate,
+        fetchedAt: row.fetchedAt,
+        id: randomUUID(),
+        nmId: row.nmId,
+        normQueryCanonical: row.normQueryCanonical,
+        normQueryWire: row.normQueryWire,
+        orderedUnits: row.normalized.orderedUnits ?? null,
+        orders: row.normalized.orders,
+        runId: row.runId,
+        sourceChecksum,
+        spendMinor: row.normalized.spendMinor,
+        views: row.normalized.views ?? null,
+        wbCampaignId: row.wbCampaignId,
+      });
+      await upsertSyncSourceSnapshot(transaction, {
+        campaignId: row.campaignId,
+        dataKind: 'CLUSTER_STATISTICS',
+        endpointProfile: row.profileId,
+        fetchedAt: row.fetchedAt,
+        id: randomUUID(),
+        invalidReason: null,
+        normalizedData: inputJson(normalizedData),
+        sourceChecksum,
+        sourceDate: statisticDate,
+        syncRunId: row.runId,
+        targetId,
+        valid: true,
+      });
       return targetId;
-    } catch (error: unknown) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+    });
   }
 
   /**
@@ -1378,36 +1172,25 @@ export class DataSyncRepository {
       requiredSourceVersions,
       targetId,
     });
-    const id = randomUUID();
-    const result = await this.pool.query<{ id: string }>(
-      `INSERT INTO "TargetDataSnapshot"
-         ("id", "targetId", "syncRunId", "createdAt", "status",
-          "requiredSourceVersions", "completenessFlags", "oldestFetchedAt",
-          "coherentRegimeChecksum", "applyEligible", "increaseEligible", "inputChecksum")
-       VALUES ($1, $2, $3, $4, $5::"SyncSnapshotStatus", $6::jsonb, $7, $8, $9, $10, $11, $12)
-       ON CONFLICT ("inputChecksum") DO UPDATE SET
-         "inputChecksum" = EXCLUDED."inputChecksum"
-       RETURNING "id"`,
-      [
-        id,
-        targetId,
-        syncRunId,
+    const row = await this.database.targetDataSnapshot.upsert({
+      create: {
+        applyEligible: assessment.applyEligible,
+        coherentRegimeChecksum: assessment.regimeChecksum,
+        completenessFlags: [...assessment.flags],
         createdAt,
-        assessment.status,
-        JSON.stringify(requiredSourceVersions),
-        assessment.flags,
-        assessment.oldestFetchedAt,
-        assessment.regimeChecksum,
-        assessment.applyEligible,
-        assessment.increaseEligible,
+        id: randomUUID(),
+        increaseEligible: assessment.increaseEligible,
         inputChecksum,
-      ],
-    );
-    const persistedId = result.rows[0]?.id;
-    if (persistedId === undefined) {
-      throw new Error('Target snapshot persistence failed');
-    }
-    return persistedId;
+        oldestFetchedAt: assessment.oldestFetchedAt,
+        requiredSourceVersions: inputJson(requiredSourceVersions),
+        status: assessment.status,
+        syncRunId,
+        targetId,
+      },
+      update: { inputChecksum },
+      where: { inputChecksum },
+    });
+    return row.id;
   }
 
   /**
@@ -1432,173 +1215,17 @@ export class DataSyncRepository {
     readonly invalid: number;
     readonly superseded: number;
   }> {
-    const result = await this.pool.query<PerformanceCandidateRow>(
-      `WITH latest_content AS (
-         SELECT DISTINCT ON (
-                  "campaignId", "nmId", "date",
-                  COALESCE("normQueryCanonical", ''), "normalizedAggregationKind"
-                )
-                "campaignId", "wbCampaignId", "nmId", "date", "sourceVersion",
-                "normQueryWire", "normQueryCanonical", "normalizedAggregationKind"
-           FROM "CampaignStatDaily"
-          WHERE "campaignId" = $1
-            AND "normalizedAggregationKind" IN ('FULLSTATS_APP_NM_LEAF', 'CLUSTER_DAILY')
-          ORDER BY "campaignId", "nmId", "date",
-                   COALESCE("normQueryCanonical", ''), "normalizedAggregationKind",
-                   "fetchedAt" DESC, "sourceVersion" DESC
-       ),
-       aggregate_day AS (
-         SELECT s."campaignId", s."wbCampaignId", s."nmId", s."date",
-                s."sourceVersion", s."normQueryWire", s."normQueryCanonical",
-                s."normalizedAggregationKind",
-                CASE WHEN bool_and(s."views" IS NOT NULL) THEN SUM(s."views") END AS views,
-                SUM(s."clicks") AS clicks,
-                SUM(s."atbs") AS atbs,
-                SUM(s."orders") AS orders,
-                CASE WHEN bool_and(s."orderedUnits" IS NOT NULL)
-                     THEN SUM(s."orderedUnits") END AS "orderedUnits",
-                SUM(s."spendMinor") AS "spendMinor",
-                SUM(s."attributedRevenueMinor") AS "attributedRevenueMinor"
-           FROM "CampaignStatDaily" s
-           JOIN latest_content latest
-             ON latest."campaignId" = s."campaignId"
-            AND latest."nmId" = s."nmId"
-            AND latest."date" = s."date"
-            AND latest."sourceVersion" = s."sourceVersion"
-            AND latest."normQueryCanonical" IS NOT DISTINCT FROM s."normQueryCanonical"
-            AND latest."normalizedAggregationKind" = s."normalizedAggregationKind"
-          GROUP BY s."campaignId", s."wbCampaignId", s."nmId", s."date",
-                   s."sourceVersion", s."normQueryWire", s."normQueryCanonical",
-                   s."normalizedAggregationKind"
-       )
-       SELECT t."id" AS "targetId", aggregate_day."date"::text AS date,
-              aggregate_day."sourceVersion", aggregate_day.views::text,
-              aggregate_day.clicks::text, aggregate_day.atbs::text,
-              aggregate_day.orders::text, aggregate_day."orderedUnits"::text,
-              aggregate_day."spendMinor"::text,
-              aggregate_day."attributedRevenueMinor"::text,
-              c."bidType"::text AS "bidType",
-              CASE WHEN t."targetKind" = 'CLUSTER' THEN 1 ELSE (
-                SELECT COUNT(*)::integer
-                  FROM "CampaignTarget" siblings
-                 WHERE siblings."campaignId" = t."campaignId"
-                   AND siblings."nmId" = t."nmId"
-                   AND siblings."targetKind" = 'CARD'
-              ) END AS "placementCount",
-              (
-                SELECT MIN(enrollment."observedAt")
-                  FROM "BidStateObservation" enrollment
-                 WHERE enrollment."targetId" = t."id"
-              ) AS "enrolledAt",
-              COALESCE(bid_evidence.items, '[]'::jsonb) AS "bidStates",
-              COALESCE(source_evidence.items, '[]'::jsonb) AS "sourceReads"
-         FROM aggregate_day
-         JOIN "CampaignTarget" t
-           ON t."campaignId" = aggregate_day."campaignId"
-          AND t."nmId" = aggregate_day."nmId"
-          AND (
-            (
-              aggregate_day."normalizedAggregationKind" = 'FULLSTATS_APP_NM_LEAF'
-              AND t."targetKind" = 'CARD'
-            )
-            OR (
-              aggregate_day."normalizedAggregationKind" = 'CLUSTER_DAILY'
-              AND t."targetKind" = 'CLUSTER'
-              AND t."normQueryCanonical" = aggregate_day."normQueryCanonical"
-            )
-          )
-         JOIN "Campaign" c ON c."id" = t."campaignId"
-         LEFT JOIN LATERAL (
-           SELECT jsonb_agg(
-                    jsonb_build_object(
-                      'observedAt', observations."observedAt",
-                      'currentBidMinor', observations."currentBidMinor"::text,
-                      'configurationChecksum', observations."configurationChecksum",
-                      'changeMarkerObserved', observations."changeMarkerObserved",
-                      'campaignStatus', observations."campaignStatus"
-                    )
-                    ORDER BY observations."observedAt"
-                  ) AS items
-             FROM (
-               (SELECT o.*
-                  FROM "BidStateObservation" o
-                 WHERE o."targetId" = t."id"
-                   AND o."observedAt" <=
-                       (aggregate_day."date"::timestamp AT TIME ZONE 'UTC')
-                 ORDER BY o."observedAt" DESC
-                 LIMIT 1)
-               UNION ALL
-               (SELECT o.*
-                  FROM "BidStateObservation" o
-                 WHERE o."targetId" = t."id"
-                   AND o."observedAt" >
-                       (aggregate_day."date"::timestamp AT TIME ZONE 'UTC')
-                   AND o."observedAt" <
-                       (aggregate_day."date"::timestamp AT TIME ZONE 'UTC') + INTERVAL '1 day'
-                 ORDER BY o."observedAt")
-               UNION ALL
-               (SELECT o.*
-                  FROM "BidStateObservation" o
-                 WHERE o."targetId" = t."id"
-                   AND o."observedAt" >=
-                       (aggregate_day."date"::timestamp AT TIME ZONE 'UTC') + INTERVAL '1 day'
-                 ORDER BY o."observedAt"
-                 LIMIT 1)
-             ) observations
-         ) bid_evidence ON true
-         LEFT JOIN LATERAL (
-           SELECT jsonb_agg(
-                    jsonb_build_object(
-                      'checksum', stable."sourceChecksum",
-                      'fetchedAt', stable."fetchedAt"
-                    )
-                    ORDER BY stable."fetchedAt"
-                  ) AS items
-             FROM (
-               SELECT ranked."sourceChecksum", ranked."fetchedAt"
-                 FROM (
-                   SELECT source."sourceChecksum", source."fetchedAt",
-                          row_number() OVER (ORDER BY source."fetchedAt") AS sequence,
-                          MIN(source."fetchedAt") OVER () AS first_read
-                     FROM "SyncSourceSnapshot" source
-                    WHERE source."campaignId" = aggregate_day."campaignId"
-                      AND source."dataKind" = CASE
-                        WHEN aggregate_day."normalizedAggregationKind" = 'CLUSTER_DAILY'
-                          THEN 'CLUSTER_STATISTICS'::"SyncDataKind"
-                        ELSE 'CAMPAIGN_STATISTICS'::"SyncDataKind"
-                      END
-                      AND (
-                        aggregate_day."normalizedAggregationKind" <> 'CLUSTER_DAILY'
-                        OR source."targetId" = t."id"
-                      )
-                      AND source."sourceDate" = aggregate_day."date"
-                      AND source."sourceChecksum" = aggregate_day."sourceVersion"
-                      AND source."valid" = true
-                      AND source."fetchedAt" >=
-                          (aggregate_day."date"::timestamp AT TIME ZONE 'UTC')
-                            + INTERVAL '1 day'
-                            + ($2::integer * INTERVAL '1 day')
-                 ) ranked
-                WHERE ranked.sequence < $3
-                   OR ranked."fetchedAt" >=
-                      ranked.first_read + ($4::integer * INTERVAL '1 minute')
-                ORDER BY ranked."fetchedAt"
-                LIMIT $3
-             ) stable
-         ) source_evidence ON true
-        ORDER BY t."id", aggregate_day."date"`,
-      [
-        campaignId,
-        configuration.conversionLagDays,
-        configuration.dayFinalizationStableReads,
-        configuration.dayFinalizationStableMinutes,
-      ],
-    );
+    const rows = await loadDataSyncPerformanceCandidates(this.database, {
+      campaignId,
+      conversionLagDays: configuration.conversionLagDays,
+      stableMinutes: configuration.dayFinalizationStableMinutes,
+      stableReads: configuration.dayFinalizationStableReads,
+    });
     let draft = 0;
     let finalized = 0;
     let invalid = 0;
     let superseded = 0;
-    for (const row of result.rows) {
+    for (const row of rows) {
       const date = row.date;
       const dayStartedAt = new Date(`${date}T00:00:00.000Z`);
       const dayEndedAt = new Date(dayStartedAt.getTime() + 86_400_000);
@@ -1682,59 +1309,42 @@ export class DataSyncRepository {
     assessment: PerformanceDayAssessment,
     finalizedAt: Date,
   ): Promise<{ readonly id: string; readonly superseded: boolean }> {
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
+    return withTransaction(this.database, async (transaction) => {
+      await advisoryTransactionLock(
+        transaction,
         `performance-day:${targetId}:${candidate.statistic.date}`,
-      ]);
-      const existing = await client.query<{
-        id: string;
-        inputChecksum: string;
-        status: PerformanceDayAssessment['status'] | 'SUPERSEDED';
-      }>(
-        `SELECT "id", "inputChecksum", "status"::text
-           FROM "BidPerformanceDay"
-          WHERE "targetId" = $1
-            AND "wbStatisticDate" = $2::date
-          FOR UPDATE`,
-        [targetId, candidate.statistic.date],
       );
-      const current = existing.rows.find((row) => row.status === 'FINALIZED');
-      const matching = existing.rows.find((row) => row.inputChecksum === assessment.inputChecksum);
+      const statisticDate = new Date(`${candidate.statistic.date}T00:00:00.000Z`);
+      const existing = await transaction.bidPerformanceDay.findMany({
+        select: { id: true, inputChecksum: true, status: true },
+        where: { targetId, wbStatisticDate: statisticDate },
+      });
+      const current = existing.find((row) => row.status === 'FINALIZED');
+      const matching = existing.find((row) => row.inputChecksum === assessment.inputChecksum);
       if (
         current !== undefined &&
         matching?.id === current.id &&
         current.status === assessment.status
       ) {
-        await client.query('COMMIT');
         return Object.freeze({ id: current.id, superseded: false });
       }
       const superseded = current !== undefined && current.id !== matching?.id;
       if (current !== undefined && current.id !== matching?.id) {
-        await client.query(
-          `UPDATE "BidPerformanceDay"
-              SET "status" = 'SUPERSEDED', "supersededAt" = $2
-            WHERE "id" = $1`,
-          [current.id, finalizedAt],
-        );
+        await transaction.bidPerformanceDay.update({
+          data: { status: 'SUPERSEDED', supersededAt: finalizedAt },
+          where: { id: current.id },
+        });
       }
       if (matching !== undefined) {
-        await client.query(
-          `UPDATE "BidPerformanceDay"
-              SET "status" = $2::"PerformanceDayStatus",
-                  "statisticsFinalizedAt" = $3,
-                  "qualityFlags" = $4,
-                  "supersededAt" = NULL
-            WHERE "id" = $1`,
-          [
-            matching.id,
-            assessment.status,
-            assessment.status === 'FINALIZED' ? finalizedAt : null,
-            assessment.qualityFlags,
-          ],
-        );
-        await client.query('COMMIT');
+        await transaction.bidPerformanceDay.update({
+          data: {
+            qualityFlags: [...assessment.qualityFlags],
+            statisticsFinalizedAt: assessment.status === 'FINALIZED' ? finalizedAt : null,
+            status: assessment.status,
+            supersededAt: null,
+          },
+          where: { id: matching.id },
+        });
         return Object.freeze({ id: matching.id, superseded });
       }
       const id = randomUUID();
@@ -1745,58 +1355,49 @@ export class DataSyncRepository {
         (left, right) => right.observedAt.getTime() - left.observedAt.getTime(),
       )[0];
       const maxGap = maximumObservationGap(candidate);
-      await client.query(
-        `INSERT INTO "BidPerformanceDay"
-           ("id", "targetId", "wbStatisticDate", "statisticalDayProfile",
-            "confirmedBidMinor", "placementBidState", "campaignStatus", "paymentType",
-            "bidType", "activePlacementConfig", "viewsDelta", "clicksDelta", "atbsDelta",
-            "ordersDelta", "orderedUnitsDelta", "spendDeltaMinor",
-            "attributedRevenueDelta", "orderedUnitsSource", "coverageStartedAt",
-            "coverageEndedAt", "maxObservedGapMinutes", "externalWriteControl",
-            "changeMarkerCoverage", "sourceSnapshotReferences", "statisticsFinalizedAt",
-            "conversionLagDays", "status", "qualityFlags", "inputChecksum")
-         SELECT $1, $2, $3::date, 'wb-statistical-day-v1', $4, '{}'::jsonb,
-                c."status", c."paymentType", c."bidType", $5::jsonb, $6, $7, $8, $9, $10,
-                $11, $12, 'SHKS', $13, $14, $15, $16::"ExternalWriteControlMode",
-                $17, $18::jsonb, $19, 1, $20::"PerformanceDayStatus", $21, $22
-           FROM "CampaignTarget" t
-           JOIN "Campaign" c ON c."id" = t."campaignId"
-          WHERE t."id" = $2`,
-        [
-          id,
-          targetId,
-          candidate.statistic.date,
-          assessment.confirmedBidMinor?.toString() ?? null,
-          safeJson({
+      const target = await transaction.campaignTarget.findUnique({
+        select: { campaign: { select: { bidType: true, paymentType: true, status: true } } },
+        where: { id: targetId },
+      });
+      if (target === null) throw new Error('PERFORMANCE_DAY_TARGET_NOT_FOUND');
+      await transaction.bidPerformanceDay.create({
+        data: {
+          activePlacementConfig: {
             configurationChecksum: firstObservation?.configurationChecksum ?? null,
-          }),
-          candidate.statistic.views?.toString() ?? null,
-          candidate.statistic.clicks.toString(),
-          candidate.statistic.atbs.toString(),
-          candidate.statistic.orders.toString(),
-          candidate.statistic.orderedUnits?.toString() ?? '0',
-          candidate.statistic.spendMinor.toString(),
-          candidate.statistic.attributedRevenueMinor.toString(),
-          firstObservation?.observedAt ?? candidate.dayStartedAt,
-          lastObservation?.observedAt ?? candidate.dayEndedAt,
-          maxGap,
-          candidate.externalWriteControlMode,
-          candidate.externalWriteControlMode === 'EXCLUSIVE' ? 'EXCLUSIVE' : 'OBSERVED',
-          safeJson(candidate.sourceReads),
-          assessment.status === 'FINALIZED' ? finalizedAt : null,
-          assessment.status,
-          assessment.qualityFlags,
-          assessment.inputChecksum,
-        ],
-      );
-      await client.query('COMMIT');
+          },
+          atbsDelta: candidate.statistic.atbs,
+          attributedRevenueDelta: candidate.statistic.attributedRevenueMinor,
+          bidType: target.campaign.bidType,
+          campaignStatus: target.campaign.status,
+          changeMarkerCoverage:
+            candidate.externalWriteControlMode === 'EXCLUSIVE' ? 'EXCLUSIVE' : 'OBSERVED',
+          clicksDelta: candidate.statistic.clicks,
+          confirmedBidMinor: assessment.confirmedBidMinor,
+          conversionLagDays: 1,
+          coverageEndedAt: lastObservation?.observedAt ?? candidate.dayEndedAt,
+          coverageStartedAt: firstObservation?.observedAt ?? candidate.dayStartedAt,
+          externalWriteControl: candidate.externalWriteControlMode,
+          id,
+          inputChecksum: assessment.inputChecksum,
+          maxObservedGapMinutes: maxGap,
+          orderedUnitsDelta: candidate.statistic.orderedUnits ?? 0n,
+          orderedUnitsSource: 'SHKS',
+          ordersDelta: candidate.statistic.orders,
+          paymentType: target.campaign.paymentType,
+          placementBidState: {},
+          qualityFlags: [...assessment.qualityFlags],
+          sourceSnapshotReferences: inputJson(candidate.sourceReads),
+          spendDeltaMinor: candidate.statistic.spendMinor,
+          statisticalDayProfile: 'wb-statistical-day-v1',
+          statisticsFinalizedAt: assessment.status === 'FINALIZED' ? finalizedAt : null,
+          status: assessment.status,
+          targetId,
+          viewsDelta: candidate.statistic.views,
+          wbStatisticDate: statisticDate,
+        },
+      });
       return Object.freeze({ id, superseded });
-    } catch (error: unknown) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+    });
   }
 
   /**
@@ -1818,31 +1419,27 @@ export class DataSyncRepository {
     totalEstimate: bigint | null,
     passCompleted: boolean,
   ): Promise<void> {
-    await this.pool.query(
-      `INSERT INTO "SyncCheckpoint"
-         ("dataKind", "cursor", "fullPassStartedAt", "fullPassCompletedAt",
-          "lastSuccessAt", "processedCount", "totalEstimate", "updatedAt")
-       VALUES ($1::"SyncDataKind", $2::jsonb, $3, $4, $3, $5, $6, $3)
-       ON CONFLICT ("dataKind") DO UPDATE SET
-         "cursor" = EXCLUDED."cursor",
-         "fullPassCompletedAt" = CASE
-           WHEN $7 THEN EXCLUDED."fullPassCompletedAt"
-           ELSE "SyncCheckpoint"."fullPassCompletedAt"
-         END,
-         "lastSuccessAt" = EXCLUDED."lastSuccessAt",
-         "processedCount" = EXCLUDED."processedCount",
-         "totalEstimate" = EXCLUDED."totalEstimate",
-         "updatedAt" = EXCLUDED."updatedAt"`,
-      [
+    await this.database.syncCheckpoint.upsert({
+      create: {
+        cursor: inputJson(cursor),
         dataKind,
-        safeJson(cursor),
-        now,
-        passCompleted ? now : null,
-        processedCount.toString(),
-        totalEstimate?.toString() ?? null,
-        passCompleted,
-      ],
-    );
+        fullPassCompletedAt: passCompleted ? now : null,
+        fullPassStartedAt: now,
+        lastSuccessAt: now,
+        processedCount,
+        totalEstimate,
+        updatedAt: now,
+      },
+      update: {
+        cursor: inputJson(cursor),
+        ...(passCompleted ? { fullPassCompletedAt: now } : {}),
+        lastSuccessAt: now,
+        processedCount,
+        totalEstimate,
+        updatedAt: now,
+      },
+      where: { dataKind },
+    });
   }
 }
 
@@ -1853,68 +1450,13 @@ interface BindingRow {
   readonly accountCurrency: string;
   readonly accountSettingsChecksum: string;
   readonly accountTimezone: string;
-  readonly bindingVersion: string;
+  readonly bindingVersion: bigint | string;
   readonly sellerSid: string;
   readonly tokenAccessFingerprint: string;
   readonly tokenCategory: string;
   readonly tokenFor: string | null;
   readonly tokenType: AccountBindingCandidate['tokenType'];
   readonly wbEnvironment: AccountBindingCandidate['environment'];
-}
-
-/**
- * PostgreSQL campaign work row before bigint conversion.
- */
-interface CampaignWorkRow {
-  readonly bidType: CampaignWorkItem['bidType'];
-  readonly campaignId: string;
-  readonly detailsChecksum: string | null;
-  readonly detailsFetchedAt: string | Date | null;
-  readonly paymentType: CampaignWorkItem['paymentType'];
-  readonly status: number;
-  readonly targets: {
-    readonly currentBidChecksum: string | null;
-    readonly currentBidConfirmedAt: string | null;
-    readonly minimumBidChecksum: string | null;
-    readonly minimumBidConfirmedAt: string | null;
-    readonly nmId: string;
-    readonly normQueryWire: string | null;
-    readonly placement: 'COMBINED' | 'RECOMMENDATIONS' | 'SEARCH';
-    readonly recommendationFetchedAt: string | null;
-    readonly targetId: string;
-    readonly targetKind: 'CARD' | 'CLUSTER';
-  }[];
-  readonly wbCampaignId: string;
-}
-
-/**
- * PostgreSQL row containing one aggregate target/day and its bounded evidence arrays.
- */
-interface PerformanceCandidateRow {
-  readonly atbs: string;
-  readonly attributedRevenueMinor: string;
-  readonly bidStates: readonly {
-    readonly campaignStatus: number;
-    readonly changeMarkerObserved: boolean;
-    readonly configurationChecksum: string;
-    readonly currentBidMinor: string | null;
-    readonly observedAt: string | Date;
-  }[];
-  readonly bidType: 'MANUAL' | 'UNIFIED' | 'UNKNOWN';
-  readonly clicks: string;
-  readonly date: string;
-  readonly enrolledAt: string | Date | null;
-  readonly orderedUnits: string | null;
-  readonly orders: string;
-  readonly placementCount: number;
-  readonly sourceReads: readonly {
-    readonly checksum: string;
-    readonly fetchedAt: string | Date;
-  }[];
-  readonly sourceVersion: string;
-  readonly spendMinor: string;
-  readonly targetId: string;
-  readonly views: string | null;
 }
 
 /**
@@ -1944,16 +1486,14 @@ function mapExistingBinding(row: BindingRow): ExistingAccountBinding {
  * @param client - Transaction client holding the binding lock.
  * @returns Whether initialization would reinterpret history.
  */
-async function hasBusinessData(client: RawTransactionClient): Promise<boolean> {
-  const result = await client.query<{ present: boolean }>(
-    `SELECT EXISTS (
-       SELECT 1 FROM "Campaign"
-       UNION ALL SELECT 1 FROM "CampaignStatDaily"
-       UNION ALL SELECT 1 FROM "BidDecision"
-       UNION ALL SELECT 1 FROM "AuditEvent"
-     ) AS present`,
-  );
-  return result.rows[0]?.present === true;
+async function hasBusinessData(client: DatabaseTransaction): Promise<boolean> {
+  const [campaigns, statistics, decisions, audits] = await Promise.all([
+    client.campaign.count(),
+    client.campaignStatDaily.count(),
+    client.bidDecision.count(),
+    client.auditEvent.count(),
+  ]);
+  return campaigns + statistics + decisions + audits > 0;
 }
 
 /**
@@ -1975,21 +1515,18 @@ interface AuditWrite {
  * @param event - Non-secret event.
  * @returns Nothing.
  */
-async function appendAudit(client: RawTransactionClient, event: AuditWrite): Promise<void> {
-  await client.query(
-    `INSERT INTO "AuditEvent"
-       ("id", "actor", "action", "entityType", "entityId", "after", "correlationId")
-     VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)`,
-    [
-      randomUUID(),
-      event.actor,
-      event.action,
-      event.entityType,
-      event.entityId,
-      safeJson(event.after),
-      event.correlationId,
-    ],
-  );
+async function appendAudit(client: DatabaseTransaction, event: AuditWrite): Promise<void> {
+  await client.auditEvent.create({
+    data: {
+      action: event.action,
+      actor: event.actor,
+      after: inputJson(event.after),
+      correlationId: event.correlationId,
+      entityId: event.entityId,
+      entityType: event.entityType,
+      id: randomUUID(),
+    },
+  });
 }
 
 /**
@@ -2020,6 +1557,28 @@ function safeJson(value: unknown): string {
   return JSON.stringify(value, (_key, item: unknown) =>
     typeof item === 'bigint' ? item.toString() : item instanceof Date ? item.toISOString() : item,
   );
+}
+
+/**
+ * Converts normalized runtime evidence into a Prisma JSON input.
+ *
+ * @param value - JSON-compatible runtime value.
+ * @returns Prisma JSON input.
+ */
+function inputJson(value: unknown): Prisma.InputJsonValue {
+  return JSON.parse(safeJson(value)) as Prisma.InputJsonValue;
+}
+
+/**
+ * Narrows a stored JSON value to an object.
+ *
+ * @param value - Stored JSON value.
+ * @returns Object value or an empty object.
+ */
+function readJsonObject(value: unknown): Readonly<Record<string, unknown>> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Readonly<Record<string, unknown>>)
+    : {};
 }
 
 /**

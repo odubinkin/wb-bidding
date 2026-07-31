@@ -17,10 +17,24 @@ for (const sourceRoot of sourceRoots) {
       violations.push(`${path}: direct driver pool type`);
     }
     if (
+      /\b(?:createRawDatabaseClient|queryParameterizedRaw|RawDatabaseClient|RawTransactionClient)\b/u.test(
+        source,
+      )
+    ) {
+      violations.push(`${path}: removed generic raw SQL facade`);
+    }
+    if (
       !path.startsWith('packages/database/') &&
       /\.\$(?:queryRaw|executeRaw)(?:Unsafe)?\s*\(/u.test(source)
     ) {
       violations.push(`${path}: direct Prisma raw API outside @wb-bidder/database`);
+    }
+    if (
+      (path.startsWith('apps/') || path.startsWith('packages/')) &&
+      !path.startsWith('packages/database/') &&
+      /[`'"]\s*(?:SELECT|INSERT\s+INTO|UPDATE|DELETE\s+FROM|WITH)\b/u.test(source)
+    ) {
+      violations.push(`${path}: SQL statement outside @wb-bidder/database`);
     }
   }
 }

@@ -16,7 +16,6 @@ import type { AppConfiguration } from '@wb-bidder/config';
 import {
   countTargetsWithoutCurrentEconomics,
   listAppliedMigrationNames,
-  probeDatabase,
   readDatabaseConnectionUtilization,
   type DatabaseClient,
 } from '@wb-bidder/database';
@@ -336,7 +335,7 @@ export class ObservabilityService {
       { detail: 'validated startup schema', name: 'configuration', ok: true },
     ];
     try {
-      await probeDatabase(this.database);
+      await this.database.deploymentControl.findFirst({ select: { id: true } });
       checks.push({ detail: 'query succeeded', name: 'database', ok: true });
     } catch {
       checks.push({ detail: 'query failed', name: 'database', ok: false });

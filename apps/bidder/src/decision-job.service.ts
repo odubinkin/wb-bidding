@@ -14,7 +14,6 @@ import {
 } from '@wb-bidder/contracts';
 import { formatAccountLocalDate, type AppConfiguration } from '@wb-bidder/config';
 import {
-  loadDecisionPerformanceDayRows,
   loadDecisionTargetPage,
   type DatabaseClient,
   type DecisionTargetRow,
@@ -192,23 +191,42 @@ export class DecisionJobService {
     policy: DecisionPolicy,
     decisionAt: Date,
   ): Promise<readonly DecisionPerformanceDay[]> {
-    const rows = await loadDecisionPerformanceDayRows(
-      this.database,
-      targetId,
-      policy.baselineWindowDays + this.configuration.sync.conversionLagDays + 2,
-      formatAccountLocalDate(this.configuration.accountTimezone, decisionAt),
+    const anchorDate = formatAccountLocalDate(this.configuration.accountTimezone, decisionAt);
+    const lowerBound = new Date(`${anchorDate}T00:00:00.000Z`);
+    lowerBound.setUTCDate(
+      lowerBound.getUTCDate() -
+        (policy.baselineWindowDays + this.configuration.sync.conversionLagDays + 2),
     );
+    const rows = await this.database.bidPerformanceDay.findMany({
+      orderBy: [{ wbStatisticDate: 'asc' }, { confirmedBidMinor: 'asc' }],
+      select: {
+        activePlacementConfig: true,
+        clicksDelta: true,
+        confirmedBidMinor: true,
+        inputChecksum: true,
+        orderedUnitsDelta: true,
+        spendDeltaMinor: true,
+        viewsDelta: true,
+        wbStatisticDate: true,
+      },
+      where: {
+        status: 'FINALIZED',
+        targetId,
+        wbStatisticDate: { gte: lowerBound },
+      },
+    });
     return Object.freeze(
       rows.map((row) =>
         Object.freeze({
-          bidMinor: row.confirmedBidMinor,
-          clicks: row.clicks,
-          configurationChecksum: row.configurationChecksum,
-          date: row.date,
+          bidMinor: requireConfirmedBidMinor(row.confirmedBidMinor),
+          clicks: row.clicksDelta,
+          configurationChecksum:
+            readJsonString(row.activePlacementConfig, 'configurationChecksum') ?? row.inputChecksum,
+          date: row.wbStatisticDate.toISOString().slice(0, 10),
           inputChecksum: row.inputChecksum,
-          orderedUnits: row.orderedUnits,
-          spendMinor: row.spendMinor,
-          views: row.views,
+          orderedUnits: row.orderedUnitsDelta,
+          spendMinor: row.spendDeltaMinor,
+          views: row.viewsDelta,
         }),
       ),
     );
@@ -424,6 +442,30 @@ export class DecisionJobService {
       wbMinimumBidMinor: row.minimumBidMinor,
     });
   }
+}
+
+/**
+ * Reads one string property from a Prisma JSON value.
+ *
+ * @param value - Stored JSON value.
+ * @param key - Property name.
+ * @returns String value or null.
+ */
+function readJsonString(value: unknown, key: string): string | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  const entry = (value as Readonly<Record<string, unknown>>)[key];
+  return typeof entry === 'string' ? entry : null;
+}
+
+/**
+ * Enforces the finalized-day confirmed-bid invariant.
+ *
+ * @param value - Persisted confirmed bid.
+ * @returns Non-null confirmed bid.
+ */
+function requireConfirmedBidMinor(value: bigint | null): bigint {
+  if (value === null) throw new Error('FINALIZED_PERFORMANCE_DAY_MISSING_CONFIRMED_BID');
+  return value;
 }
 
 /**

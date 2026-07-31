@@ -2,9 +2,14 @@
 import { createHash, randomUUID } from 'node:crypto';
 import canonicalize from 'canonicalize';
 import {
-  createRawDatabaseClient,
+  advisoryTransactionLock,
+  claimDecisionQueueItems,
+  cleanupTerminalWriteAttempts,
   type DatabaseClient,
-  type RawTransactionClient,
+  type DatabaseTransaction,
+  loadReconciliationWorkPage,
+  Prisma,
+  withTransaction,
 } from '@wb-bidder/database';
 
 import { redactSecrets } from './redaction.js';
@@ -25,10 +30,10 @@ export const DEPLOYMENT_CONTROL_ID = '00000000-0000-0000-0000-000000000002';
  * Transactional PostgreSQL persistence for the write and reconciliation lifecycle.
  */
 export class WritePipelineRepository {
-  private readonly pool;
+  private readonly database: DatabaseClient;
 
   public constructor(database: DatabaseClient) {
-    this.pool = createRawDatabaseClient(database);
+    this.database = database;
   }
 
   public async claim(
@@ -43,75 +48,23 @@ export class WritePipelineRepository {
     if (limit < 1 || limit > 500 || leaseSeconds < 5 || leaseSeconds > 900) {
       throw new Error('INVALID_CLAIM_BOUNDS');
     }
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-      const result = await client.query<ClaimRow>(
-        `WITH candidates AS (
-           SELECT q."id"
-             FROM "DecisionQueueItem" q
-             JOIN "BidDecision" d ON d."id" = q."decisionId"
-             JOIN "CampaignTarget" candidate_target ON candidate_target."id" = d."targetId"
-            WHERE q."status" IN ('QUEUED', 'RETRY_WAIT')
-              AND q."availableAt" <= clock_timestamp()
-              AND (q."leaseUntil" IS NULL OR q."leaseUntil" < clock_timestamp())
-              AND ($4::text IS NULL OR candidate_target."targetKind"::text = $4)
-              AND (
-                $5::text IS NULL
-                OR ($5 = 'DELETE' AND d."action" = 'RESTORE_ABSENT_OVERRIDE')
-                OR ($5 = 'SET' AND d."action" IN ('INCREASE', 'DECREASE'))
-              )
-              AND NOT EXISTS (
-                SELECT 1
-                  FROM "DecisionQueueItem" active_q
-                  JOIN "BidDecision" active_d ON active_d."id" = active_q."decisionId"
-                 WHERE active_d."targetId" = d."targetId"
-                   AND active_q."id" <> q."id"
-                   AND active_q."status" IN ('LEASED', 'SENT', 'VERIFY_WAIT')
-              )
-            ORDER BY q."priority" DESC, q."availableAt", q."id"
-            FOR UPDATE OF q SKIP LOCKED
-            LIMIT $1
-         )
-         UPDATE "DecisionQueueItem" q
-            SET "status" = 'LEASED',
-                "leaseOwner" = $2,
-                "leaseUntil" = clock_timestamp() + make_interval(secs => $3),
-                "version" = q."version" + 1
-           FROM candidates selected, "BidDecision" d, "CampaignTarget" t, "Campaign" campaign
-          WHERE q."id" = selected."id"
-            AND d."id" = q."decisionId"
-            AND t."id" = d."targetId"
-            AND campaign."id" = t."campaignId"
-         RETURNING q."id" AS "queueItemId", q."decisionId", d."targetId",
-                   t."campaignId", t."nmId", t."normQueryWire",
-                   t."placement"::text, t."targetKind"::text,
-                   campaign."wbCampaignId", campaign."bidType"::text AS "campaignBidType",
-                   campaign."paymentType"::text AS "campaignPaymentType",
-                   q."priority", d."action"::text,
-                   d."boundedBidMinor", q."attemptCount", d."policyVersion",
-                   d."metricSnapshotId"`,
-        [limit, workerId, leaseSeconds, selector?.targetKind ?? null, selector?.action ?? null],
-      );
-      await client.query('COMMIT');
-      return Object.freeze(result.rows.map(toClaimed));
-    } catch (error: unknown) {
-      await rollback(client);
-      throw error;
-    } finally {
-      client.release();
-    }
+    const rows = await claimDecisionQueueItems(this.database, {
+      leaseSeconds,
+      limit,
+      workerId,
+      ...(selector?.action === undefined ? {} : { action: selector.action }),
+      ...(selector?.targetKind === undefined ? {} : { targetKind: selector.targetKind }),
+    });
+    return Object.freeze(rows.map(toClaimed));
   }
 
   public async heartbeat(workerId: string, queueItemIds: readonly string[], leaseSeconds: number) {
     if (queueItemIds.length === 0) return 0;
-    const result = await this.pool.query(
-      `UPDATE "DecisionQueueItem"
-          SET "leaseUntil" = NOW() + make_interval(secs => $3)
-        WHERE "id" = ANY($1::uuid[]) AND "status" = 'LEASED' AND "leaseOwner" = $2`,
-      [queueItemIds, workerId, leaseSeconds],
-    );
-    return result.rowCount ?? 0;
+    const result = await this.database.decisionQueueItem.updateMany({
+      data: { leaseUntil: new Date(Date.now() + leaseSeconds * 1_000) },
+      where: { id: { in: [...queueItemIds] }, leaseOwner: workerId, status: 'LEASED' },
+    });
+    return result.count;
   }
 
   public async releaseLease(
@@ -120,13 +73,17 @@ export class WritePipelineRepository {
     classification: string,
     retryAt: Date,
   ): Promise<void> {
-    await this.pool.query(
-      `UPDATE "DecisionQueueItem"
-          SET "status" = 'RETRY_WAIT', "availableAt" = $3, "leaseOwner" = NULL,
-              "leaseUntil" = NULL, "failureClassification" = $4, "version" = "version" + 1
-        WHERE "id" = $1 AND "leaseOwner" = $2 AND "status" = 'LEASED'`,
-      [queueItemId, workerId, retryAt, classification],
-    );
+    await this.database.decisionQueueItem.updateMany({
+      data: {
+        availableAt: retryAt,
+        failureClassification: classification,
+        leaseOwner: null,
+        leaseUntil: null,
+        status: 'RETRY_WAIT',
+        version: { increment: 1n },
+      },
+      where: { id: queueItemId, leaseOwner: workerId, status: 'LEASED' },
+    });
   }
 
   public async failLeased(
@@ -135,15 +92,20 @@ export class WritePipelineRepository {
     code: string,
     classification: string,
   ): Promise<void> {
-    await this.pool.query(
-      `UPDATE "DecisionQueueItem"
-          SET "status" = 'FAILED', "leaseOwner" = NULL, "leaseUntil" = NULL,
-              "lastErrorCode" = $3, "failureClassification" = $4,
-              "manualRetryBlocked" = $4 = ANY(ARRAY['AUTH','CAPABILITY','INVALID','SUPERSEDED']),
-              "version" = "version" + 1
-        WHERE "id" = $1 AND "leaseOwner" = $2 AND "status" = 'LEASED'`,
-      [queueItemId, workerId, code, classification],
-    );
+    await this.database.decisionQueueItem.updateMany({
+      data: {
+        failureClassification: classification,
+        lastErrorCode: code,
+        leaseOwner: null,
+        leaseUntil: null,
+        manualRetryBlocked: ['AUTH', 'CAPABILITY', 'INVALID', 'SUPERSEDED'].includes(
+          classification,
+        ),
+        status: 'FAILED',
+        version: { increment: 1n },
+      },
+      where: { id: queueItemId, leaseOwner: workerId, status: 'LEASED' },
+    });
   }
 
   public async prepare(input: {
@@ -157,98 +119,94 @@ export class WritePipelineRepository {
     if (input.items.length === 0) throw new Error('EMPTY_WRITE_BATCH');
     const correlationId = randomUUID();
     const attemptId = randomUUID();
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-      await assertAutomationAllows(client, input.items);
-      const requestDigest = input.items.map(({ item }) => ({
-        action: item.action,
-        bidMinor: item.bidMinor?.toString() ?? null,
-        decisionId: item.decisionId,
-      }));
-      await client.query(
-        `INSERT INTO "WbWriteAttempt"
-           ("id", "endpointKey", "method", "correlationId", "requestChecksum", "batchSize",
-            "status", "preparedAt", "preWriteReadAt", "preWriteStateChecksum",
-            "preWriteSourceMarker", "requestDigest")
-         VALUES ($1, $2, $3, $4, $5, $6, 'PREPARED', NOW(), $7, $8, $9, $10::jsonb)`,
-        [
-          attemptId,
-          input.endpointKey,
-          input.method,
-          correlationId,
-          checksum(requestDigest),
-          input.items.length,
-          oldestRead(input.items),
-          checksum(input.items.map(({ live }) => stateChecksum(live))),
-          input.items.map(({ live }) => live.sourceMarker).join(','),
-          json(requestDigest),
-        ],
-      );
-      const preparedItems = [];
-      for (const [requestIndex, entry] of input.items.entries()) {
-        const locked = await client.query<{ attemptCount: number }>(
-          `SELECT "attemptCount" FROM "DecisionQueueItem"
-            WHERE "id" = $1 AND "decisionId" = $2 AND "status" = 'LEASED'
-              AND "leaseOwner" = $3 FOR UPDATE`,
-          [entry.item.queueItemId, entry.item.decisionId, input.workerId],
-        );
-        if (locked.rows[0] === undefined) throw new Error('LEASE_LOST');
-        const attemptNumber = locked.rows[0].attemptCount + 1;
-        const attemptItemId = randomUUID();
-        const desired = {
-          bidMinor: entry.item.bidMinor?.toString() ?? null,
-          explicit: entry.item.desiredBidState === 'EXPLICIT',
-        };
-        await client.query(
-          `INSERT INTO "WbWriteAttemptItem"
-             ("id", "attemptId", "decisionId", "requestIndex", "endpointTargetKey",
-              "action", "desiredBidState", "sentBidMinor", "wireBidRaw", "attemptNumber",
-              "status", "reconciliationStatus", "preWriteReadAt", "preWriteStateChecksum",
-              "preWriteSourceMarker", "preWriteState", "desiredStateChecksum")
-           VALUES ($1, $2, $3, $4, $5, $6::"WriteAction", $7::"DesiredBidState",
-                   $8, $9, $10, 'PREPARED', 'NOT_REQUIRED', $11, $12, $13, $14::jsonb, $15)`,
-          [
-            attemptItemId,
-            attemptId,
-            entry.item.decisionId,
-            requestIndex,
-            entry.item.targetId,
-            entry.item.action,
-            entry.item.desiredBidState,
-            entry.item.bidMinor?.toString() ?? null,
-            entry.item.action === 'DELETE'
-              ? (entry.live.bidMinor?.toString() ?? '')
-              : (entry.item.bidMinor?.toString() ?? ''),
-            attemptNumber,
-            entry.live.observedAt,
-            stateChecksum(entry.live),
-            entry.live.sourceMarker,
-            json(entry.live),
-            checksum(desired),
-          ],
-        );
-        preparedItems.push({
-          attemptItemId,
-          attemptNumber,
-          decisionId: entry.item.decisionId,
-          queueItemId: entry.item.queueItemId,
-          requestIndex,
-          targetId: entry.item.targetId,
+    return withTransaction(
+      this.database,
+      async (transaction) => {
+        await assertAutomationAllows(transaction, input.items);
+        const requestDigest = input.items.map(({ item }) => ({
+          action: item.action,
+          bidMinor: item.bidMinor?.toString() ?? null,
+          decisionId: item.decisionId,
+        }));
+        await transaction.wbWriteAttempt.create({
+          data: {
+            batchSize: input.items.length,
+            correlationId,
+            endpointKey: input.endpointKey,
+            id: attemptId,
+            method: input.method,
+            preWriteReadAt: oldestRead(input.items),
+            preWriteSourceMarker: input.items.map(({ live }) => live.sourceMarker).join(','),
+            preWriteStateChecksum: checksum(input.items.map(({ live }) => stateChecksum(live))),
+            preparedAt: new Date(),
+            requestChecksum: checksum(requestDigest),
+            requestDigest: inputJson(requestDigest),
+            status: 'PREPARED',
+          },
         });
-      }
-      await client.query('COMMIT');
-      return Object.freeze({
-        attemptId,
-        correlationId,
-        items: Object.freeze(preparedItems),
-      });
-    } catch (error: unknown) {
-      await rollback(client);
-      throw error;
-    } finally {
-      client.release();
-    }
+        const preparedItems = [];
+        for (const [requestIndex, entry] of input.items.entries()) {
+          const locked = await transaction.decisionQueueItem.updateMany({
+            data: { attemptCount: { increment: 0 } },
+            where: {
+              decisionId: entry.item.decisionId,
+              id: entry.item.queueItemId,
+              leaseOwner: input.workerId,
+              status: 'LEASED',
+            },
+          });
+          if (locked.count !== 1) throw new Error('LEASE_LOST');
+          const queue = await transaction.decisionQueueItem.findUniqueOrThrow({
+            select: { attemptCount: true },
+            where: { id: entry.item.queueItemId },
+          });
+          const attemptNumber = queue.attemptCount + 1;
+          const attemptItemId = randomUUID();
+          const desired = {
+            bidMinor: entry.item.bidMinor?.toString() ?? null,
+            explicit: entry.item.desiredBidState === 'EXPLICIT',
+          };
+          await transaction.wbWriteAttemptItem.create({
+            data: {
+              action: entry.item.action,
+              attemptId,
+              attemptNumber,
+              decisionId: entry.item.decisionId,
+              desiredBidState: entry.item.desiredBidState,
+              desiredStateChecksum: checksum(desired),
+              endpointTargetKey: entry.item.targetId,
+              id: attemptItemId,
+              preWriteReadAt: entry.live.observedAt,
+              preWriteSourceMarker: entry.live.sourceMarker,
+              preWriteState: inputJson(entry.live),
+              preWriteStateChecksum: stateChecksum(entry.live),
+              reconciliationStatus: 'NOT_REQUIRED',
+              requestIndex,
+              sentBidMinor: entry.item.bidMinor,
+              status: 'PREPARED',
+              wireBidRaw:
+                entry.item.action === 'DELETE'
+                  ? (entry.live.bidMinor?.toString() ?? '')
+                  : (entry.item.bidMinor?.toString() ?? ''),
+            },
+          });
+          preparedItems.push({
+            attemptItemId,
+            attemptNumber,
+            decisionId: entry.item.decisionId,
+            queueItemId: entry.item.queueItemId,
+            requestIndex,
+            targetId: entry.item.targetId,
+          });
+        }
+        return Object.freeze({
+          attemptId,
+          correlationId,
+          items: Object.freeze(preparedItems),
+        });
+      },
+      { timeoutMs: 60_000 },
+    );
   }
 
   public async commitDispatch(
@@ -258,97 +216,102 @@ export class WritePipelineRepository {
     reconciliationDeadlineMs: number,
     preWriteStateMaximumAgeMs: number,
   ): Promise<void> {
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-      const itemRows = await client.query<{ campaignId: string; targetId: string }>(
-        `SELECT t."campaignId", d."targetId"
-           FROM "WbWriteAttemptItem" i
-           JOIN "BidDecision" d ON d."id" = i."decisionId"
-           JOIN "CampaignTarget" t ON t."id" = d."targetId"
-          WHERE i."attemptId" = $1 FOR UPDATE OF i`,
-        [prepared.attemptId],
-      );
-      const targetIds = [...new Set(itemRows.rows.map((row) => row.targetId))].sort();
-      for (const targetId of targetIds) {
-        await client.query("SELECT pg_advisory_xact_lock(hashtextextended('decision:' || $1, 0))", [
-          targetId,
-        ]);
-      }
-      const superseded = await client.query<{ superseded: boolean }>(
-        `SELECT EXISTS (
-           SELECT 1
-             FROM "WbWriteAttemptItem" i
-             JOIN "BidDecision" current_decision ON current_decision."id" = i."decisionId"
-             JOIN "BidDecision" newer
-               ON newer."targetId" = current_decision."targetId"
-              AND (
-                newer."createdAt" > current_decision."createdAt"
-                OR (
-                  newer."createdAt" = current_decision."createdAt"
-                  AND newer."id" > current_decision."id"
-                )
-              )
-            WHERE i."attemptId" = $1
-         ) AS "superseded"`,
-        [prepared.attemptId],
-      );
-      if (superseded.rows[0]?.superseded === true) {
-        throw new Error('DECISION_SUPERSEDED');
-      }
-      await assertAutomationAllows(
-        client,
-        itemRows.rows.map((row) => ({
-          item: { campaignId: row.campaignId, targetId: row.targetId },
-        })),
-      );
-      const attempt = await client.query(
-        `UPDATE "WbWriteAttempt"
-            SET "status" = 'DISPATCHING', "dispatchCommittedAt" = NOW()
-          WHERE "id" = $1 AND "status" = 'PREPARED'
-            AND "preWriteReadAt" >=
-                clock_timestamp() - ($2 * INTERVAL '1 millisecond')`,
-        [prepared.attemptId, preWriteStateMaximumAgeMs],
-      );
-      if (attempt.rowCount !== 1) {
-        const current = await client.query<{ status: string; stale: boolean }>(
-          `SELECT "status"::text,
-                  "preWriteReadAt" <
-                    clock_timestamp() - ($2 * INTERVAL '1 millisecond') AS "stale"
-             FROM "WbWriteAttempt" WHERE "id" = $1`,
-          [prepared.attemptId, preWriteStateMaximumAgeMs],
+    await withTransaction(
+      this.database,
+      async (transaction) => {
+        const itemRows = await transaction.wbWriteAttemptItem.findMany({
+          select: {
+            decision: {
+              select: {
+                createdAt: true,
+                id: true,
+                target: { select: { campaignId: true } },
+                targetId: true,
+              },
+            },
+          },
+          where: { attemptId: prepared.attemptId },
+        });
+        const targets = itemRows.map(({ decision }) => ({
+          campaignId: decision.target.campaignId,
+          decisionCreatedAt: decision.createdAt,
+          decisionId: decision.id,
+          targetId: decision.targetId,
+        }));
+        const targetIds = [...new Set(targets.map((row) => row.targetId))].sort();
+        for (const targetId of targetIds) {
+          await advisoryTransactionLock(transaction, `decision:${targetId}`);
+        }
+        for (const item of targets) {
+          const newer = await transaction.bidDecision.findFirst({
+            select: { id: true },
+            where: {
+              targetId: item.targetId,
+              OR: [
+                { createdAt: { gt: item.decisionCreatedAt } },
+                { createdAt: item.decisionCreatedAt, id: { gt: item.decisionId } },
+              ],
+            },
+          });
+          if (newer !== null) throw new Error('DECISION_SUPERSEDED');
+        }
+        await assertAutomationAllows(
+          transaction,
+          targets.map((row) => ({
+            item: { campaignId: row.campaignId, targetId: row.targetId },
+          })),
         );
-        if (current.rows[0]?.stale === true) throw new Error('PREWRITE_STATE_STALE');
-        throw new Error('ATTEMPT_NOT_PREPARED');
-      }
-      await client.query(
-        `UPDATE "WbWriteAttemptItem" SET "status" = 'DISPATCHING',
-                 "reconciliationStatus" = 'PENDING'
-          WHERE "attemptId" = $1 AND "status" = 'PREPARED'`,
-        [prepared.attemptId],
-      );
-      const queueUpdate = await client.query(
-        `UPDATE "DecisionQueueItem" q
-            SET "status" = 'SENT', "sentAt" = NOW(), "attemptCount" = i."attemptNumber",
-                "leaseOwner" = NULL, "leaseUntil" = NULL,
-                "nextVerificationAt" = NOW() + ($3 * INTERVAL '1 millisecond'),
-                "reconciliationDeadlineAt" = NOW() + ($4 * INTERVAL '1 millisecond'),
-                "stableReadChecksum" = NULL, "stableReadCount" = 0,
-                "lastReconciliationReadAt" = NULL,
-                "version" = q."version" + 1
-           FROM "WbWriteAttemptItem" i
-          WHERE i."attemptId" = $1 AND q."decisionId" = i."decisionId"
-            AND q."status" = 'LEASED' AND q."leaseOwner" = $2`,
-        [prepared.attemptId, workerId, visibilityDelayMs, reconciliationDeadlineMs],
-      );
-      if (queueUpdate.rowCount !== prepared.items.length) throw new Error('LEASE_LOST');
-      await client.query('COMMIT');
-    } catch (error: unknown) {
-      await rollback(client);
-      throw error;
-    } finally {
-      client.release();
-    }
+        const now = new Date();
+        const oldestAllowed = new Date(now.getTime() - preWriteStateMaximumAgeMs);
+        const attempt = await transaction.wbWriteAttempt.updateMany({
+          data: { dispatchCommittedAt: now, status: 'DISPATCHING' },
+          where: {
+            id: prepared.attemptId,
+            preWriteReadAt: { gte: oldestAllowed },
+            status: 'PREPARED',
+          },
+        });
+        if (attempt.count !== 1) {
+          const current = await transaction.wbWriteAttempt.findUnique({
+            select: { preWriteReadAt: true },
+            where: { id: prepared.attemptId },
+          });
+          if (current?.preWriteReadAt != null && current.preWriteReadAt < oldestAllowed)
+            throw new Error('PREWRITE_STATE_STALE');
+          throw new Error('ATTEMPT_NOT_PREPARED');
+        }
+        await transaction.wbWriteAttemptItem.updateMany({
+          data: { reconciliationStatus: 'PENDING', status: 'DISPATCHING' },
+          where: { attemptId: prepared.attemptId, status: 'PREPARED' },
+        });
+        let updatedQueueItems = 0;
+        for (const item of prepared.items) {
+          const queueUpdate = await transaction.decisionQueueItem.updateMany({
+            data: {
+              attemptCount: item.attemptNumber,
+              lastReconciliationReadAt: null,
+              leaseOwner: null,
+              leaseUntil: null,
+              nextVerificationAt: new Date(now.getTime() + visibilityDelayMs),
+              reconciliationDeadlineAt: new Date(now.getTime() + reconciliationDeadlineMs),
+              sentAt: now,
+              stableReadChecksum: null,
+              stableReadCount: 0,
+              status: 'SENT',
+              version: { increment: 1n },
+            },
+            where: {
+              decisionId: item.decisionId,
+              leaseOwner: workerId,
+              status: 'LEASED',
+            },
+          });
+          updatedQueueItems += queueUpdate.count;
+        }
+        if (updatedQueueItems !== prepared.items.length) throw new Error('LEASE_LOST');
+      },
+      { timeoutMs: 60_000 },
+    );
   }
 
   public async rejectPreparedNoDispatch(
@@ -356,50 +319,45 @@ export class WritePipelineRepository {
     workerId: string,
     code: string,
   ): Promise<void> {
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-      const attempt = await client.query(
-        `UPDATE "WbWriteAttempt"
-            SET "status" = 'REJECTED', "completedAt" = NOW(),
-                "errorClass" = 'NO_DISPATCH', "errorCode" = $2
-          WHERE "id" = $1 AND "status" = 'PREPARED'`,
-        [prepared.attemptId, code],
-      );
-      if (attempt.rowCount !== 1) throw new Error('ATTEMPT_NOT_PREPARED');
-      await client.query(
-        `UPDATE "WbWriteAttemptItem"
-            SET "status" = 'REJECTED', "errorCode" = $2,
-                "reconciliationStatus" = 'NOT_REQUIRED'
-          WHERE "attemptId" = $1 AND "status" = 'PREPARED'`,
-        [prepared.attemptId, code],
-      );
-      const queue = await client.query(
-        `UPDATE "DecisionQueueItem" q
-            SET "status" = CASE
-                  WHEN $3 = 'DECISION_SUPERSEDED' THEN 'SUPERSEDED'::"DecisionQueueStatus"
-                  ELSE 'RETRY_WAIT'::"DecisionQueueStatus"
-                END,
-                "availableAt" = CASE WHEN $3 = 'DECISION_SUPERSEDED'
-                  THEN q."availableAt" ELSE NOW() END,
-                "leaseOwner" = NULL, "leaseUntil" = NULL,
-                "failureClassification" = CASE WHEN $3 = 'DECISION_SUPERSEDED'
-                  THEN 'SUPERSEDED' ELSE 'SAFE_NO_DISPATCH' END,
-                "manualRetryBlocked" = $3 = 'DECISION_SUPERSEDED',
-                "lastErrorCode" = $3, "version" = q."version" + 1
-           FROM "WbWriteAttemptItem" i
-          WHERE i."attemptId" = $1 AND q."decisionId" = i."decisionId"
-            AND q."status" = 'LEASED' AND q."leaseOwner" = $2`,
-        [prepared.attemptId, workerId, code],
-      );
-      if (queue.rowCount !== prepared.items.length) throw new Error('LEASE_LOST');
-      await client.query('COMMIT');
-    } catch (error: unknown) {
-      await rollback(client);
-      throw error;
-    } finally {
-      client.release();
-    }
+    await withTransaction(this.database, async (transaction) => {
+      const attempt = await transaction.wbWriteAttempt.updateMany({
+        data: {
+          completedAt: new Date(),
+          errorClass: 'NO_DISPATCH',
+          errorCode: code,
+          status: 'REJECTED',
+        },
+        where: { id: prepared.attemptId, status: 'PREPARED' },
+      });
+      if (attempt.count !== 1) throw new Error('ATTEMPT_NOT_PREPARED');
+      await transaction.wbWriteAttemptItem.updateMany({
+        data: { errorCode: code, reconciliationStatus: 'NOT_REQUIRED', status: 'REJECTED' },
+        where: { attemptId: prepared.attemptId, status: 'PREPARED' },
+      });
+      const superseded = code === 'DECISION_SUPERSEDED';
+      let updated = 0;
+      for (const item of prepared.items) {
+        const queue = await transaction.decisionQueueItem.updateMany({
+          data: {
+            ...(superseded ? {} : { availableAt: new Date() }),
+            failureClassification: superseded ? 'SUPERSEDED' : 'SAFE_NO_DISPATCH',
+            lastErrorCode: code,
+            leaseOwner: null,
+            leaseUntil: null,
+            manualRetryBlocked: superseded,
+            status: superseded ? 'SUPERSEDED' : 'RETRY_WAIT',
+            version: { increment: 1n },
+          },
+          where: {
+            decisionId: item.decisionId,
+            leaseOwner: workerId,
+            status: 'LEASED',
+          },
+        });
+        updated += queue.count;
+      }
+      if (updated !== prepared.items.length) throw new Error('LEASE_LOST');
+    });
   }
 
   public async completeDispatch(
@@ -407,193 +365,197 @@ export class WritePipelineRepository {
     result: DispatchResult,
     latencyMs: number,
   ): Promise<void> {
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-      await client.query(
-        `UPDATE "WbWriteAttempt"
-            SET "status" = $2::"WriteAttemptStatus", "completedAt" = NOW(), "latencyMs" = $3,
-                "wbRequestId" = $4, "httpStatus" = $5, "rateLimitHeaders" = $6::jsonb,
-                "responseDigest" = $7::jsonb
-          WHERE "id" = $1 AND "status" = 'DISPATCHING'`,
-        [
-          attemptId,
-          result.items.every((item) => item.accepted) ? 'ACCEPTED' : 'REJECTED',
+    await withTransaction(this.database, async (transaction) => {
+      await transaction.wbWriteAttempt.updateMany({
+        data: {
+          completedAt: new Date(),
+          httpStatus: result.httpStatus,
           latencyMs,
-          result.wbRequestId ?? null,
-          result.httpStatus,
-          json(result.rateLimitHeaders ?? {}),
-          json(redactSecrets(result)),
-        ],
-      );
+          rateLimitHeaders: inputJson(result.rateLimitHeaders ?? {}),
+          responseDigest: inputJson(redactSecrets(result)),
+          status: result.items.every((item) => item.accepted) ? 'ACCEPTED' : 'REJECTED',
+          wbRequestId: result.wbRequestId ?? null,
+        },
+        where: { id: attemptId, status: 'DISPATCHING' },
+      });
       for (const item of result.items) {
         const fragmentHash = checksum(redactSecrets(item.responseFragment ?? null));
-        await client.query(
-          `WITH updated_item AS (
-             UPDATE "WbWriteAttemptItem"
-                SET "status" = $3::"WriteAttemptStatus", "httpStatus" = $4,
-                    "errorCode" = $5, "responseFragmentHash" = $6,
-                    "reconciliationStatus" = $7::"ReconciliationStatus"
-              WHERE "attemptId" = $1 AND "requestIndex" = $2 AND "status" = 'DISPATCHING'
-             RETURNING "decisionId"
-           )
-           UPDATE "DecisionQueueItem" q
-              SET "status" = $8::"DecisionQueueStatus", "lastHttpStatus" = $4,
-                  "lastErrorCode" = $5, "failureClassification" = $9,
-                  "manualRetryBlocked" = $10, "version" = q."version" + 1
-             FROM updated_item i WHERE q."decisionId" = i."decisionId"`,
-          [
-            attemptId,
-            item.requestIndex,
-            item.accepted ? 'ACCEPTED' : 'REJECTED',
-            item.httpStatus ?? result.httpStatus,
-            item.errorCode ?? null,
-            fragmentHash,
-            item.accepted ? 'PENDING' : 'NOT_REQUIRED',
-            item.accepted ? 'VERIFY_WAIT' : 'FAILED',
-            item.accepted ? null : classifyRejected(item.errorCode),
-            item.accepted ? false : !isRetryableRejected(item.errorCode),
-          ],
-        );
+        const stored = await transaction.wbWriteAttemptItem.findFirst({
+          select: { decisionId: true, id: true },
+          where: { attemptId, requestIndex: item.requestIndex, status: 'DISPATCHING' },
+        });
+        if (stored === null) continue;
+        const httpStatus = item.httpStatus ?? result.httpStatus;
+        await transaction.wbWriteAttemptItem.update({
+          data: {
+            errorCode: item.errorCode ?? null,
+            httpStatus,
+            reconciliationStatus: item.accepted ? 'PENDING' : 'NOT_REQUIRED',
+            responseFragmentHash: fragmentHash,
+            status: item.accepted ? 'ACCEPTED' : 'REJECTED',
+          },
+          where: { id: stored.id },
+        });
+        await transaction.decisionQueueItem.updateMany({
+          data: {
+            failureClassification: item.accepted ? null : classifyRejected(item.errorCode),
+            lastErrorCode: item.errorCode ?? null,
+            lastHttpStatus: httpStatus,
+            manualRetryBlocked: item.accepted ? false : !isRetryableRejected(item.errorCode),
+            status: item.accepted ? 'VERIFY_WAIT' : 'FAILED',
+            version: { increment: 1n },
+          },
+          where: { decisionId: stored.decisionId },
+        });
       }
-      await client.query('COMMIT');
-    } catch (error: unknown) {
-      await rollback(client);
-      throw error;
-    } finally {
-      client.release();
-    }
+    });
   }
 
   public async markUnknown(attemptId: string, code: string, detail: unknown): Promise<void> {
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-      await client.query(
-        `UPDATE "WbWriteAttempt"
-            SET "status" = 'UNKNOWN', "completedAt" = NOW(), "errorClass" = 'AMBIGUOUS',
-                "errorCode" = $2, "responseDigest" = $3::jsonb
-          WHERE "id" = $1 AND "status" = 'DISPATCHING'`,
-        [attemptId, code, json(redactSecrets(detail))],
-      );
-      await client.query(
-        `UPDATE "WbWriteAttemptItem" SET "status" = 'UNKNOWN',
-                 "reconciliationStatus" = 'PENDING', "errorCode" = $2
-          WHERE "attemptId" = $1 AND "status" = 'DISPATCHING'`,
-        [attemptId, code],
-      );
-      await client.query(
-        `UPDATE "DecisionQueueItem" q
-            SET "status" = 'VERIFY_WAIT', "failureClassification" = 'UNKNOWN',
-                "manualRetryBlocked" = true, "lastErrorCode" = $2,
-                "version" = q."version" + 1
-           FROM "WbWriteAttemptItem" i
-          WHERE i."attemptId" = $1 AND i."decisionId" = q."decisionId"`,
-        [attemptId, code],
-      );
-      await client.query('COMMIT');
-    } catch (error: unknown) {
-      await rollback(client);
-      throw error;
-    } finally {
-      client.release();
-    }
+    await withTransaction(this.database, async (transaction) => {
+      await transaction.wbWriteAttempt.updateMany({
+        data: {
+          completedAt: new Date(),
+          errorClass: 'AMBIGUOUS',
+          errorCode: code,
+          responseDigest: inputJson(redactSecrets(detail)),
+          status: 'UNKNOWN',
+        },
+        where: { id: attemptId, status: 'DISPATCHING' },
+      });
+      const items = await transaction.wbWriteAttemptItem.findMany({
+        select: { decisionId: true },
+        where: { attemptId },
+      });
+      await transaction.wbWriteAttemptItem.updateMany({
+        data: { errorCode: code, reconciliationStatus: 'PENDING', status: 'UNKNOWN' },
+        where: { attemptId, status: 'DISPATCHING' },
+      });
+      await transaction.decisionQueueItem.updateMany({
+        data: {
+          failureClassification: 'UNKNOWN',
+          lastErrorCode: code,
+          manualRetryBlocked: true,
+          status: 'VERIFY_WAIT',
+          version: { increment: 1n },
+        },
+        where: { decisionId: { in: items.map((item) => item.decisionId) } },
+      });
+    });
   }
 
   public async markPreByteFailure(attemptId: string, detail: unknown): Promise<void> {
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-      await client.query(
-        `UPDATE "WbWriteAttempt"
-            SET "status" = 'REJECTED', "completedAt" = NOW(),
-                "errorClass" = 'TRANSPORT_PRE_BYTE',
-                "errorCode" = 'TRANSPORT_PRE_BYTE_RETRIES_EXHAUSTED',
-                "responseDigest" = $2::jsonb
-          WHERE "id" = $1 AND "status" = 'DISPATCHING'`,
-        [attemptId, json(redactSecrets(detail))],
-      );
-      await client.query(
-        `UPDATE "WbWriteAttemptItem"
-            SET "status" = 'REJECTED', "reconciliationStatus" = 'NOT_REQUIRED',
-                "errorCode" = 'TRANSPORT_PRE_BYTE_RETRIES_EXHAUSTED'
-          WHERE "attemptId" = $1 AND "status" = 'DISPATCHING'`,
-        [attemptId],
-      );
-      await client.query(
-        `UPDATE "DecisionQueueItem" q
-            SET "status" = 'FAILED', "failureClassification" = 'TRANSIENT_REJECTED',
-                "manualRetryBlocked" = false,
-                "lastErrorCode" = 'TRANSPORT_PRE_BYTE_RETRIES_EXHAUSTED',
-                "version" = q."version" + 1
-           FROM "WbWriteAttemptItem" i
-          WHERE i."attemptId" = $1 AND i."decisionId" = q."decisionId"
-            AND q."status" = 'SENT'`,
-        [attemptId],
-      );
-      await client.query('COMMIT');
-    } catch (error: unknown) {
-      await rollback(client);
-      throw error;
-    } finally {
-      client.release();
-    }
+    await withTransaction(this.database, async (transaction) => {
+      const code = 'TRANSPORT_PRE_BYTE_RETRIES_EXHAUSTED';
+      await transaction.wbWriteAttempt.updateMany({
+        data: {
+          completedAt: new Date(),
+          errorClass: 'TRANSPORT_PRE_BYTE',
+          errorCode: code,
+          responseDigest: inputJson(redactSecrets(detail)),
+          status: 'REJECTED',
+        },
+        where: { id: attemptId, status: 'DISPATCHING' },
+      });
+      const items = await transaction.wbWriteAttemptItem.findMany({
+        select: { decisionId: true },
+        where: { attemptId },
+      });
+      await transaction.wbWriteAttemptItem.updateMany({
+        data: { errorCode: code, reconciliationStatus: 'NOT_REQUIRED', status: 'REJECTED' },
+        where: { attemptId, status: 'DISPATCHING' },
+      });
+      await transaction.decisionQueueItem.updateMany({
+        data: {
+          failureClassification: 'TRANSIENT_REJECTED',
+          lastErrorCode: code,
+          manualRetryBlocked: false,
+          status: 'FAILED',
+          version: { increment: 1n },
+        },
+        where: {
+          decisionId: { in: items.map((item) => item.decisionId) },
+          status: 'SENT',
+        },
+      });
+    });
   }
 
   public async recoverCrashWindows(): Promise<{
     readonly prepared: number;
     readonly unknown: number;
   }> {
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-      const prepared = await client.query(
-        `WITH recovered AS (
-           UPDATE "WbWriteAttempt" SET "status" = 'REJECTED', "completedAt" = NOW(),
-                  "errorClass" = 'RECOVERED_NO_DISPATCH', "errorCode" = 'PREPARED_CRASH_RECOVERED'
-            WHERE "status" = 'PREPARED' AND "preparedAt" < NOW() - INTERVAL '5 minutes'
-           RETURNING "id"
-         )
-         UPDATE "WbWriteAttemptItem" i
-            SET "status" = 'REJECTED', "errorCode" = 'PREPARED_CRASH_RECOVERED'
-           FROM recovered r WHERE i."attemptId" = r."id"`,
-      );
-      await client.query(
-        `UPDATE "DecisionQueueItem"
-            SET "status" = 'QUEUED', "leaseOwner" = NULL, "leaseUntil" = NULL,
-                "availableAt" = NOW(), "version" = "version" + 1
-          WHERE "status" = 'LEASED' AND "leaseUntil" < NOW()`,
-      );
-      const unknown = await client.query(
-        `WITH recovered AS (
-           UPDATE "WbWriteAttempt" SET "status" = 'UNKNOWN', "completedAt" = NOW(),
-                  "errorClass" = 'AMBIGUOUS', "errorCode" = 'DISPATCHING_CRASH_RECOVERED'
-            WHERE "status" = 'DISPATCHING'
-              AND "dispatchCommittedAt" < NOW() - INTERVAL '5 minutes'
-           RETURNING "id"
-         )
-         UPDATE "WbWriteAttemptItem" i
-            SET "status" = 'UNKNOWN', "reconciliationStatus" = 'PENDING',
-                "errorCode" = 'DISPATCHING_CRASH_RECOVERED'
-           FROM recovered r WHERE i."attemptId" = r."id"`,
-      );
-      await client.query(
-        `UPDATE "DecisionQueueItem" q
-            SET "status" = 'VERIFY_WAIT', "failureClassification" = 'UNKNOWN',
-                "manualRetryBlocked" = true, "version" = q."version" + 1
-           FROM "WbWriteAttemptItem" i
-           JOIN "WbWriteAttempt" a ON a."id" = i."attemptId"
-          WHERE a."status" = 'UNKNOWN' AND q."decisionId" = i."decisionId"
-            AND q."status" = 'SENT'`,
-      );
-      await client.query('COMMIT');
-      return { prepared: prepared.rowCount ?? 0, unknown: unknown.rowCount ?? 0 };
-    } catch (error: unknown) {
-      await rollback(client);
-      throw error;
-    } finally {
-      client.release();
-    }
+    return withTransaction(this.database, async (transaction) => {
+      const now = new Date();
+      const cutoff = new Date(now.getTime() - 5 * 60 * 1_000);
+      const preparedAttempts = await transaction.wbWriteAttempt.findMany({
+        select: { id: true },
+        where: { preparedAt: { lt: cutoff }, status: 'PREPARED' },
+      });
+      const preparedIds = preparedAttempts.map(({ id }) => id);
+      await transaction.wbWriteAttempt.updateMany({
+        data: {
+          completedAt: now,
+          errorClass: 'RECOVERED_NO_DISPATCH',
+          errorCode: 'PREPARED_CRASH_RECOVERED',
+          status: 'REJECTED',
+        },
+        where: { id: { in: preparedIds }, status: 'PREPARED' },
+      });
+      const prepared = await transaction.wbWriteAttemptItem.updateMany({
+        data: { errorCode: 'PREPARED_CRASH_RECOVERED', status: 'REJECTED' },
+        where: { attemptId: { in: preparedIds } },
+      });
+      await transaction.decisionQueueItem.updateMany({
+        data: {
+          availableAt: now,
+          leaseOwner: null,
+          leaseUntil: null,
+          status: 'QUEUED',
+          version: { increment: 1n },
+        },
+        where: { leaseUntil: { lt: now }, status: 'LEASED' },
+      });
+      const unknownAttempts = await transaction.wbWriteAttempt.findMany({
+        select: { id: true },
+        where: { dispatchCommittedAt: { lt: cutoff }, status: 'DISPATCHING' },
+      });
+      const unknownIds = unknownAttempts.map(({ id }) => id);
+      await transaction.wbWriteAttempt.updateMany({
+        data: {
+          completedAt: now,
+          errorClass: 'AMBIGUOUS',
+          errorCode: 'DISPATCHING_CRASH_RECOVERED',
+          status: 'UNKNOWN',
+        },
+        where: { id: { in: unknownIds }, status: 'DISPATCHING' },
+      });
+      const unknownItems = await transaction.wbWriteAttemptItem.findMany({
+        select: { decisionId: true },
+        where: { attemptId: { in: unknownIds } },
+      });
+      const unknown = await transaction.wbWriteAttemptItem.updateMany({
+        data: {
+          errorCode: 'DISPATCHING_CRASH_RECOVERED',
+          reconciliationStatus: 'PENDING',
+          status: 'UNKNOWN',
+        },
+        where: { attemptId: { in: unknownIds } },
+      });
+      await transaction.decisionQueueItem.updateMany({
+        data: {
+          failureClassification: 'UNKNOWN',
+          manualRetryBlocked: true,
+          status: 'VERIFY_WAIT',
+          version: { increment: 1n },
+        },
+        where: {
+          decisionId: { in: unknownItems.map(({ decisionId }) => decisionId) },
+          status: 'SENT',
+        },
+      });
+      return { prepared: prepared.count, unknown: unknown.count };
+    });
   }
 
   /**
@@ -608,36 +570,9 @@ export class WritePipelineRepository {
     if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
       throw new Error('INVALID_RECONCILIATION_BATCH_SIZE');
     }
-    const result = await this.pool.query<ReconciliationWorkRow>(
-      `SELECT i."id" AS "attemptItemId", i."decisionId", i."sentBidMinor",
-              i."desiredBidState"::text AS "desiredBidState", i."preWriteState",
-              q."id" AS "queueItemId", q."priority", q."attemptCount",
-              d."targetId", d."action"::text, d."boundedBidMinor",
-              d."policyVersion", d."metricSnapshotId",
-              t."campaignId", t."nmId", t."normQueryWire", t."placement"::text,
-              t."targetKind"::text, c."wbCampaignId",
-              c."bidType"::text AS "campaignBidType",
-              c."paymentType"::text AS "campaignPaymentType"
-         FROM "DecisionQueueItem" q
-         JOIN "BidDecision" d ON d."id" = q."decisionId"
-         JOIN "CampaignTarget" t ON t."id" = d."targetId"
-         JOIN "Campaign" c ON c."id" = t."campaignId"
-         JOIN LATERAL (
-           SELECT wi.*
-             FROM "WbWriteAttemptItem" wi
-            WHERE wi."decisionId" = d."id"
-              AND wi."reconciliationStatus" = 'PENDING'
-            ORDER BY wi."attemptNumber" DESC
-            LIMIT 1
-         ) i ON true
-        WHERE q."status" = 'VERIFY_WAIT'
-          AND (q."nextVerificationAt" IS NULL OR q."nextVerificationAt" <= NOW())
-        ORDER BY q."nextVerificationAt" NULLS FIRST, q."id"
-        LIMIT $1`,
-      [limit],
-    );
+    const rows = await loadReconciliationWorkPage(this.database, limit);
     return Object.freeze(
-      result.rows.map((row) => {
+      rows.map((row) => {
         const oldState = parseStoredLiveState(row.preWriteState);
         return Object.freeze({
           attemptItemId: row.attemptItemId,
@@ -660,16 +595,18 @@ export class WritePipelineRepository {
    * @returns Number of released queue rows.
    */
   public async releaseWorkerLeases(workerId: string): Promise<number> {
-    const result = await this.pool.query(
-      `UPDATE "DecisionQueueItem"
-          SET "status" = 'RETRY_WAIT', "availableAt" = NOW(),
-              "leaseOwner" = NULL, "leaseUntil" = NULL,
-              "failureClassification" = 'GRACEFUL_SHUTDOWN',
-              "version" = "version" + 1
-        WHERE "status" = 'LEASED' AND "leaseOwner" = $1`,
-      [workerId],
-    );
-    return result.rowCount ?? 0;
+    const result = await this.database.decisionQueueItem.updateMany({
+      data: {
+        availableAt: new Date(),
+        failureClassification: 'GRACEFUL_SHUTDOWN',
+        leaseOwner: null,
+        leaseUntil: null,
+        status: 'RETRY_WAIT',
+        version: { increment: 1n },
+      },
+      where: { leaseOwner: workerId, status: 'LEASED' },
+    });
+    return result.count;
   }
 
   /**
@@ -692,52 +629,7 @@ export class WritePipelineRepository {
     ) {
       throw new Error('INVALID_RETENTION_BOUNDS');
     }
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-      const selected = await client.query<{ id: string }>(
-        `SELECT a."id"
-           FROM "WbWriteAttempt" a
-          WHERE a."status" IN ('ACCEPTED', 'REJECTED')
-            AND a."completedAt" <
-                NOW() - ($1 * INTERVAL '1 day')
-            AND NOT EXISTS (
-              SELECT 1 FROM "WbWriteAttemptItem" i
-               WHERE i."attemptId" = a."id"
-                 AND i."reconciliationStatus" = 'PENDING'
-            )
-          ORDER BY a."completedAt", a."id"
-          FOR UPDATE SKIP LOCKED
-          LIMIT $2`,
-        [retentionDays, limit],
-      );
-      const ids = selected.rows.map((row) => row.id);
-      if (ids.length === 0) {
-        await client.query('COMMIT');
-        return 0;
-      }
-      await client.query(
-        `DELETE FROM "ReconciliationRead" r
-          USING "WbWriteAttemptItem" i
-          WHERE r."attemptItemId" = i."id"
-            AND i."attemptId" = ANY($1::uuid[])`,
-        [ids],
-      );
-      await client.query(`DELETE FROM "WbWriteAttemptItem" WHERE "attemptId" = ANY($1::uuid[])`, [
-        ids,
-      ]);
-      const deleted = await client.query(
-        `DELETE FROM "WbWriteAttempt" WHERE "id" = ANY($1::uuid[])`,
-        [ids],
-      );
-      await client.query('COMMIT');
-      return deleted.rowCount ?? 0;
-    } catch (error: unknown) {
-      await rollback(client);
-      throw error;
-    } finally {
-      client.release();
-    }
+    return cleanupTerminalWriteAttempts(this.database, retentionDays, limit);
   }
 
   public async recordReconciliation(input: {
@@ -750,58 +642,62 @@ export class WritePipelineRepository {
     readonly requiredStableReadCount: number;
     readonly maximumWriteAttempts: number;
   }): Promise<'APPLIED' | 'WAIT' | 'RETRY_WAIT' | 'FAILED'> {
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-      const queueResult = await client.query<ReconciliationQueueRow>(
-        `SELECT q."stableReadChecksum", q."stableReadCount", q."lastReconciliationReadAt",
-                q."reconciliationDeadlineAt", q."nextVerificationAt", q."status"::text,
-                (
-                  SELECT COUNT(*)::integer
-                    FROM "WbWriteAttemptItem" wi
-                    JOIN "WbWriteAttempt" wa ON wa."id" = wi."attemptId"
-                   WHERE wi."decisionId" = q."decisionId"
-                     AND wa."errorClass" IS DISTINCT FROM 'TRANSPORT_PRE_BYTE'
-                     AND wa."errorClass" IS DISTINCT FROM 'NO_DISPATCH'
-                ) AS "actualDispatchCount"
-           FROM "DecisionQueueItem" q WHERE q."decisionId" = $1 FOR UPDATE`,
-        [input.decisionId],
-      );
-      const queue = queueResult.rows[0];
-      if (queue?.status !== 'VERIFY_WAIT') {
-        throw new Error('RECONCILIATION_NOT_PENDING');
-      }
-      if (queue.nextVerificationAt !== null && input.observedAt < queue.nextVerificationAt) {
-        throw new Error('RECONCILIATION_VISIBILITY_DELAY_ACTIVE');
-      }
-      await client.query(
-        `INSERT INTO "ReconciliationRead"
-           ("id", "attemptItemId", "targetId", "readAt", "stateChecksum", "sourceMarker",
-            "state", "classification", "fresh", "prevalidationPassed")
-         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10)`,
-        [
-          randomUUID(),
-          input.attemptItemId,
-          input.targetId,
-          input.observedAt,
-          input.observation.stateChecksum,
-          input.observation.sourceMarker,
-          json(input.observation.state),
-          input.observation.classification,
-          input.observation.fresh,
-          input.observation.prevalidationPassed,
-        ],
-      );
-      const outcome = reconciliationOutcome(queue, input);
-      await applyReconciliationOutcome(client, input, queue, outcome);
-      await client.query('COMMIT');
-      return outcome;
-    } catch (error: unknown) {
-      await rollback(client);
-      throw error;
-    } finally {
-      client.release();
-    }
+    return withTransaction(
+      this.database,
+      async (transaction) => {
+        await transaction.decisionQueueItem.updateMany({
+          data: { stableReadCount: { increment: 0 } },
+          where: { decisionId: input.decisionId },
+        });
+        const storedQueue = await transaction.decisionQueueItem.findUnique({
+          select: {
+            lastReconciliationReadAt: true,
+            nextVerificationAt: true,
+            reconciliationDeadlineAt: true,
+            stableReadChecksum: true,
+            stableReadCount: true,
+            status: true,
+          },
+          where: { decisionId: input.decisionId },
+        });
+        const actualDispatchCount = await transaction.wbWriteAttemptItem.count({
+          where: {
+            decisionId: input.decisionId,
+            attempt: {
+              OR: [
+                { errorClass: null },
+                { errorClass: { notIn: ['TRANSPORT_PRE_BYTE', 'NO_DISPATCH'] } },
+              ],
+            },
+          },
+        });
+        const queue = storedQueue === null ? null : { ...storedQueue, actualDispatchCount };
+        if (queue?.status !== 'VERIFY_WAIT') {
+          throw new Error('RECONCILIATION_NOT_PENDING');
+        }
+        if (queue.nextVerificationAt !== null && input.observedAt < queue.nextVerificationAt) {
+          throw new Error('RECONCILIATION_VISIBILITY_DELAY_ACTIVE');
+        }
+        await transaction.reconciliationRead.create({
+          data: {
+            attemptItemId: input.attemptItemId,
+            classification: input.observation.classification,
+            fresh: input.observation.fresh,
+            id: randomUUID(),
+            prevalidationPassed: input.observation.prevalidationPassed,
+            readAt: input.observedAt,
+            sourceMarker: input.observation.sourceMarker,
+            state: inputJson(input.observation.state),
+            stateChecksum: input.observation.stateChecksum,
+            targetId: input.targetId,
+          },
+        });
+        const outcome = reconciliationOutcome(queue, input);
+        await applyReconciliationOutcome(transaction, input, queue, outcome);
+        return outcome;
+      },
+      { timeoutMs: 60_000 },
+    );
   }
 
   public async retryFailure(input: {
@@ -813,142 +709,149 @@ export class WritePipelineRepository {
     readonly idempotencyScope?: string;
     readonly reason: string;
   }): Promise<bigint> {
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-      const idempotencyChecksum = checksum({
-        decisionId: input.decisionId,
-        expectedVersion: input.expectedVersion,
-        reason: input.reason,
-      });
-      const replay = await replayIdempotency(
-        client,
-        input.idempotencyScope,
-        input.idempotencyKey,
-        idempotencyChecksum,
-      );
-      if (replay !== null) {
-        await client.query('COMMIT');
-        return BigInt(replay.version);
-      }
-      const result = await client.query<RetryRow>(
-        `SELECT "status"::text, "failureClassification", "manualRetryBlocked", "version"
-           FROM "DecisionQueueItem" WHERE "decisionId" = $1 FOR UPDATE`,
-        [input.decisionId],
-      );
-      const row = result.rows[0];
-      if (row === undefined) throw new Error('QUEUE_ITEM_NOT_FOUND');
-      if (BigInt(row.version) !== input.expectedVersion) throw new Error('VERSION_MISMATCH');
-      if (
-        row.status !== 'FAILED' ||
-        row.manualRetryBlocked ||
-        !isRetryableClassification(row.failureClassification)
-      ) {
-        throw new Error('RETRY_NOT_SAFE');
-      }
-      const newVersion = BigInt(row.version) + 1n;
-      await client.query(
-        `UPDATE "DecisionQueueItem"
-            SET "status" = 'RETRY_WAIT', "availableAt" = NOW(),
-                "lastErrorClass" = NULL, "lastErrorCode" = NULL,
-                "failureClassification" = NULL, "manualRetryBlocked" = false,
-                "stableReadChecksum" = NULL, "stableReadCount" = 0,
-                "version" = $2
-          WHERE "decisionId" = $1`,
-        [input.decisionId, newVersion.toString()],
-      );
-      await appendAudit(client, {
-        action: 'QUEUE_FAILURE_RETRY_SCHEDULED',
-        actor: input.actor,
-        after: {
+    return withTransaction(
+      this.database,
+      async (transaction) => {
+        const idempotencyChecksum = checksum({
           decisionId: input.decisionId,
-          idempotencyKey: input.idempotencyKey ?? null,
+          expectedVersion: input.expectedVersion,
           reason: input.reason,
-          version: newVersion.toString(),
-        },
-        correlationId: input.correlationId,
-        entityId: input.decisionId,
-        entityType: 'DecisionQueueItem',
-      });
-      await storeIdempotency(
-        client,
-        input.idempotencyScope,
-        input.idempotencyKey,
-        idempotencyChecksum,
-        { decisionId: input.decisionId, status: 'RETRY_WAIT', version: newVersion.toString() },
-      );
-      await client.query('COMMIT');
-      return newVersion;
-    } catch (error: unknown) {
-      await rollback(client);
-      throw error;
-    } finally {
-      client.release();
-    }
+        });
+        const replay = await replayIdempotency(
+          transaction,
+          input.idempotencyScope,
+          input.idempotencyKey,
+          idempotencyChecksum,
+        );
+        if (replay !== null) {
+          return BigInt(replay.version);
+        }
+        const row = await transaction.decisionQueueItem.findUnique({
+          select: {
+            failureClassification: true,
+            manualRetryBlocked: true,
+            status: true,
+            version: true,
+          },
+          where: { decisionId: input.decisionId },
+        });
+        if (row === null) throw new Error('QUEUE_ITEM_NOT_FOUND');
+        if (row.version !== input.expectedVersion) throw new Error('VERSION_MISMATCH');
+        if (
+          row.status !== 'FAILED' ||
+          row.manualRetryBlocked ||
+          !isRetryableClassification(row.failureClassification)
+        ) {
+          throw new Error('RETRY_NOT_SAFE');
+        }
+        const newVersion = row.version + 1n;
+        const updated = await transaction.decisionQueueItem.updateMany({
+          data: {
+            availableAt: new Date(),
+            failureClassification: null,
+            lastErrorClass: null,
+            lastErrorCode: null,
+            manualRetryBlocked: false,
+            stableReadChecksum: null,
+            stableReadCount: 0,
+            status: 'RETRY_WAIT',
+            version: newVersion,
+          },
+          where: {
+            decisionId: input.decisionId,
+            failureClassification: row.failureClassification,
+            manualRetryBlocked: false,
+            status: 'FAILED',
+            version: row.version,
+          },
+        });
+        if (updated.count !== 1) throw new Error('VERSION_MISMATCH');
+        await appendAudit(transaction, {
+          action: 'QUEUE_FAILURE_RETRY_SCHEDULED',
+          actor: input.actor,
+          after: {
+            decisionId: input.decisionId,
+            idempotencyKey: input.idempotencyKey ?? null,
+            reason: input.reason,
+            version: newVersion.toString(),
+          },
+          correlationId: input.correlationId,
+          entityId: input.decisionId,
+          entityType: 'DecisionQueueItem',
+        });
+        await storeIdempotency(
+          transaction,
+          input.idempotencyScope,
+          input.idempotencyKey,
+          idempotencyChecksum,
+          { decisionId: input.decisionId, status: 'RETRY_WAIT', version: newVersion.toString() },
+        );
+        return newVersion;
+      },
+      { timeoutMs: 60_000 },
+    );
   }
 
   public async setGlobalKill(input: ControlMutation): Promise<bigint> {
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-      const idempotencyChecksum = checksum({
-        enabled: input.enabled,
-        expectedVersion: input.expectedVersion,
-        reason: input.reason,
-      });
-      const replay = await replayIdempotency(
-        client,
-        input.idempotencyScope,
-        input.idempotencyKey,
-        idempotencyChecksum,
-      );
-      if (replay !== null) {
-        await client.query('COMMIT');
-        return BigInt(replay.version);
-      }
-      const current = await client.query<{ globalKill: boolean; version: string }>(
-        `SELECT "globalKill", "version" FROM "DeploymentControl" WHERE "id" = $1 FOR UPDATE`,
-        [DEPLOYMENT_CONTROL_ID],
-      );
-      const row = current.rows[0];
-      if (row === undefined) throw new Error('CONTROL_NOT_INITIALIZED');
-      if (BigInt(row.version) !== input.expectedVersion) throw new Error('VERSION_MISMATCH');
-      const version = BigInt(row.version) + 1n;
-      await client.query(
-        `UPDATE "DeploymentControl"
-            SET "globalKill" = $2, "reason" = $3, "version" = $4,
-                "updatedAt" = NOW(), "updatedBy" = $5 WHERE "id" = $1`,
-        [DEPLOYMENT_CONTROL_ID, input.enabled, input.reason, version.toString(), input.actor],
-      );
-      await appendAudit(client, {
-        action: input.enabled ? 'GLOBAL_KILL_ENABLED' : 'GLOBAL_KILL_DISABLED',
-        actor: input.actor,
-        before: { globalKill: row.globalKill, version: row.version },
-        after: {
-          globalKill: input.enabled,
-          idempotencyKey: input.idempotencyKey ?? null,
+    return withTransaction(
+      this.database,
+      async (transaction) => {
+        const idempotencyChecksum = checksum({
+          enabled: input.enabled,
+          expectedVersion: input.expectedVersion,
           reason: input.reason,
-          version: version.toString(),
-        },
-        correlationId: input.correlationId,
-        entityId: DEPLOYMENT_CONTROL_ID,
-        entityType: 'DeploymentControl',
-      });
-      await storeIdempotency(
-        client,
-        input.idempotencyScope,
-        input.idempotencyKey,
-        idempotencyChecksum,
-        { enabled: input.enabled, version: version.toString() },
-      );
-      await client.query('COMMIT');
-      return version;
-    } catch (error: unknown) {
-      await rollback(client);
-      throw error;
-    } finally {
-      client.release();
-    }
+        });
+        const replay = await replayIdempotency(
+          transaction,
+          input.idempotencyScope,
+          input.idempotencyKey,
+          idempotencyChecksum,
+        );
+        if (replay !== null) {
+          return BigInt(replay.version);
+        }
+        const row = await transaction.deploymentControl.findUnique({
+          select: { globalKill: true, version: true },
+          where: { id: DEPLOYMENT_CONTROL_ID },
+        });
+        if (row === null) throw new Error('CONTROL_NOT_INITIALIZED');
+        if (row.version !== input.expectedVersion) throw new Error('VERSION_MISMATCH');
+        const version = row.version + 1n;
+        const updated = await transaction.deploymentControl.updateMany({
+          data: {
+            globalKill: input.enabled,
+            reason: input.reason,
+            updatedBy: input.actor,
+            version,
+          },
+          where: { id: DEPLOYMENT_CONTROL_ID, version: row.version },
+        });
+        if (updated.count !== 1) throw new Error('VERSION_MISMATCH');
+        await appendAudit(transaction, {
+          action: input.enabled ? 'GLOBAL_KILL_ENABLED' : 'GLOBAL_KILL_DISABLED',
+          actor: input.actor,
+          before: { globalKill: row.globalKill, version: row.version },
+          after: {
+            globalKill: input.enabled,
+            idempotencyKey: input.idempotencyKey ?? null,
+            reason: input.reason,
+            version: version.toString(),
+          },
+          correlationId: input.correlationId,
+          entityId: DEPLOYMENT_CONTROL_ID,
+          entityType: 'DeploymentControl',
+        });
+        await storeIdempotency(
+          transaction,
+          input.idempotencyScope,
+          input.idempotencyKey,
+          idempotencyChecksum,
+          { enabled: input.enabled, version: version.toString() },
+        );
+        return version;
+      },
+      { timeoutMs: 60_000 },
+    );
   }
 }
 
@@ -982,16 +885,6 @@ interface ClaimRow {
   readonly metricSnapshotId: string;
 }
 
-/**
- * Database row used by the reconciliation page mapper.
- */
-interface ReconciliationWorkRow extends ClaimRow {
-  readonly attemptItemId: string;
-  readonly desiredBidState: 'ABSENT' | 'EXPLICIT';
-  readonly preWriteState: unknown;
-  readonly sentBidMinor: string | null;
-}
-
 interface ReconciliationQueueRow {
   readonly actualDispatchCount: number;
   readonly stableReadChecksum: string | null;
@@ -1000,13 +893,6 @@ interface ReconciliationQueueRow {
   readonly reconciliationDeadlineAt: Date | null;
   readonly nextVerificationAt: Date | null;
   readonly status: string;
-}
-
-interface RetryRow {
-  readonly status: string;
-  readonly failureClassification: string | null;
-  readonly manualRetryBlocked: boolean;
-  readonly version: string;
 }
 
 function toClaimed(row: ClaimRow): ClaimedQueueItem {
@@ -1079,25 +965,26 @@ function parseStoredLiveState(value: unknown): LiveBidState {
 }
 
 async function assertAutomationAllows(
-  client: RawTransactionClient,
+  client: DatabaseTransaction,
   entries: readonly { readonly item: { readonly campaignId: string; readonly targetId: string } }[],
 ): Promise<void> {
-  const control = await client.query<{ globalKill: boolean }>(
-    `SELECT "globalKill" FROM "DeploymentControl" WHERE "id" = $1 FOR SHARE`,
-    [DEPLOYMENT_CONTROL_ID],
-  );
-  if (control.rows[0]?.globalKill !== false) throw new Error('GLOBAL_KILL_ACTIVE');
+  const control = await client.deploymentControl.findUnique({
+    select: { globalKill: true },
+    where: { id: DEPLOYMENT_CONTROL_ID },
+  });
+  if (control?.globalKill !== false) throw new Error('GLOBAL_KILL_ACTIVE');
   for (const { item } of entries) {
-    const mode = await client.query<{ campaignMode: string | null; targetMode: string | null }>(
-      `SELECT ca."mode"::text AS "campaignMode", ta."mode"::text AS "targetMode"
-         FROM "Campaign" c
-         LEFT JOIN "CampaignAutomation" ca ON ca."campaignId" = c."id"
-         LEFT JOIN "TargetAutomation" ta ON ta."targetId" = $2
-        WHERE c."id" = $1`,
-      [item.campaignId, item.targetId],
-    );
-    const row = mode.rows[0];
-    if (row?.campaignMode !== 'APPLY' || (row.targetMode !== null && row.targetMode !== 'APPLY')) {
+    const [campaign, target] = await Promise.all([
+      client.campaign.findUnique({
+        select: { automation: { select: { mode: true } } },
+        where: { id: item.campaignId },
+      }),
+      client.targetAutomation.findUnique({
+        select: { mode: true },
+        where: { targetId: item.targetId },
+      }),
+    ]);
+    if (campaign?.automation?.mode !== 'APPLY' || (target !== null && target.mode !== 'APPLY')) {
       throw new Error('AUTOMATION_NOT_APPLY');
     }
   }
@@ -1141,7 +1028,7 @@ function reconciliationOutcome(
 }
 
 async function applyReconciliationOutcome(
-  client: RawTransactionClient,
+  client: DatabaseTransaction,
   input: {
     readonly attemptItemId: string;
     readonly decisionId: string;
@@ -1162,72 +1049,50 @@ async function applyReconciliationOutcome(
     !thirdState;
   const stableReadCount =
     queue.stableReadChecksum === input.observation.stateChecksum ? queue.stableReadCount + 1 : 1;
-  await client.query(
-    `UPDATE "DecisionQueueItem"
-        SET "status" = $2::"DecisionQueueStatus",
-            "stableReadChecksum" = $3, "stableReadCount" = $4,
-            "lastReconciliationReadAt" = $5,
-            "verifiedAt" = CASE WHEN $2 = 'APPLIED' THEN $5 ELSE "verifiedAt" END,
-            "availableAt" = CASE WHEN $2 = 'RETRY_WAIT' THEN $5 ELSE "availableAt" END,
-            "failureClassification" = CASE
-              WHEN $6 THEN 'EXTERNAL_STATE_CONFLICT'
-              WHEN $7 THEN 'RECONCILIATION_INCONCLUSIVE'
-              WHEN $8 THEN 'WRITE_ATTEMPTS_EXHAUSTED'
-              ELSE "failureClassification" END,
-            "lastErrorCode" = CASE
-              WHEN $6 THEN 'EXTERNAL_STATE_CONFLICT'
-              WHEN $7 THEN 'RECONCILIATION_INCONCLUSIVE'
-              WHEN $8 THEN 'WRITE_ATTEMPTS_EXHAUSTED'
-              ELSE "lastErrorCode" END,
-            "manualRetryBlocked" = CASE WHEN $2 IN ('APPLIED','RETRY_WAIT') THEN false
-                                        WHEN $2 = 'FAILED' THEN true
-                                        ELSE "manualRetryBlocked" END,
-            "version" = "version" + 1
-      WHERE "decisionId" = $1`,
-    [
-      input.decisionId,
-      outcome === 'WAIT' ? 'VERIFY_WAIT' : outcome,
-      input.observation.stateChecksum,
+  const failure = thirdState
+    ? 'EXTERNAL_STATE_CONFLICT'
+    : deadlineExceeded
+      ? 'RECONCILIATION_INCONCLUSIVE'
+      : attemptsExhausted
+        ? 'WRITE_ATTEMPTS_EXHAUSTED'
+        : null;
+  await client.decisionQueueItem.updateMany({
+    data: {
+      ...(outcome === 'RETRY_WAIT' ? { availableAt: input.observedAt } : {}),
+      ...(failure === null ? {} : { failureClassification: failure, lastErrorCode: failure }),
+      lastReconciliationReadAt: input.observedAt,
+      ...(outcome === 'WAIT' ? {} : { manualRetryBlocked: outcome === 'FAILED' }),
+      stableReadChecksum: input.observation.stateChecksum,
       stableReadCount,
-      input.observedAt,
-      thirdState,
-      deadlineExceeded,
-      attemptsExhausted,
-    ],
-  );
-  await client.query(
-    `UPDATE "WbWriteAttemptItem"
-        SET "reconciliationStatus" = $2::"ReconciliationStatus",
-            "reconciledAt" = CASE WHEN $2 IN ('CONFIRMED','MISMATCH')
-                                  THEN $3::timestamptz ELSE NULL END
-      WHERE "id" = $1`,
-    [
-      input.attemptItemId,
-      outcome === 'APPLIED' ? 'CONFIRMED' : outcome === 'FAILED' ? 'MISMATCH' : 'PENDING',
-      input.observedAt,
-    ],
-  );
+      status: outcome === 'WAIT' ? 'VERIFY_WAIT' : outcome,
+      ...(outcome === 'APPLIED' ? { verifiedAt: input.observedAt } : {}),
+      version: { increment: 1n },
+    },
+    where: { decisionId: input.decisionId },
+  });
+  const reconciliationStatus =
+    outcome === 'APPLIED' ? 'CONFIRMED' : outcome === 'FAILED' ? 'MISMATCH' : 'PENDING';
+  await client.wbWriteAttemptItem.update({
+    data: {
+      reconciledAt: reconciliationStatus === 'PENDING' ? null : input.observedAt,
+      reconciliationStatus,
+    },
+    where: { id: input.attemptItemId },
+  });
   if (outcome === 'APPLIED') {
-    await client.query(
-      `UPDATE "CampaignTarget" t
-          SET "currentBidMinor" = $3,
-              "clusterBidState" = CASE WHEN $4 THEN 'EXPLICIT'::"ClusterBidState"
-                                       ELSE 'ABSENT'::"ClusterBidState" END,
-              "clusterOverrideOwned" = $4,
-              "lastConfirmedAt" = $5
-         FROM "BidDecision" d
-        WHERE t."id" = $1
-          AND d."id" = $2
-          AND d."targetId" = t."id"
-          AND t."targetKind" = 'CLUSTER'`,
-      [
-        input.targetId,
-        input.decisionId,
-        input.observation.state.bidMinor?.toString() ?? null,
-        input.observation.state.explicit,
-        input.observedAt,
-      ],
-    );
+    await client.campaignTarget.updateMany({
+      data: {
+        clusterBidState: input.observation.state.explicit ? 'EXPLICIT' : 'ABSENT',
+        clusterOverrideOwned: input.observation.state.explicit,
+        currentBidMinor: input.observation.state.bidMinor,
+        lastConfirmedAt: input.observedAt,
+      },
+      where: {
+        decisions: { some: { id: input.decisionId } },
+        id: input.targetId,
+        targetKind: 'CLUSTER',
+      },
+    });
   }
 }
 
@@ -1260,6 +1125,10 @@ function json(value: unknown): string {
   return JSON.stringify(normalize(value));
 }
 
+function inputJson(value: unknown): Prisma.InputJsonValue {
+  return JSON.parse(json(value)) as Prisma.InputJsonValue;
+}
+
 function normalize(value: unknown): unknown {
   if (typeof value === 'bigint') return value.toString();
   if (value instanceof Date) return value.toISOString();
@@ -1271,7 +1140,7 @@ function normalize(value: unknown): unknown {
 }
 
 async function appendAudit(
-  client: RawTransactionClient,
+  client: DatabaseTransaction,
   event: {
     readonly action: string;
     readonly actor: string;
@@ -1282,68 +1151,55 @@ async function appendAudit(
     readonly entityType: string;
   },
 ): Promise<void> {
-  await client.query(
-    `INSERT INTO "AuditEvent"
-       ("id", "actor", "action", "entityType", "entityId", "before", "after", "correlationId")
-     VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8)`,
-    [
-      randomUUID(),
-      event.actor,
-      event.action,
-      event.entityType,
-      event.entityId,
-      event.before === undefined ? null : json(redactSecrets(event.before)),
-      event.after === undefined ? null : json(redactSecrets(event.after)),
-      event.correlationId,
-    ],
-  );
+  await client.auditEvent.create({
+    data: {
+      action: event.action,
+      actor: event.actor,
+      after: event.after === undefined ? Prisma.DbNull : inputJson(redactSecrets(event.after)),
+      before: event.before === undefined ? Prisma.DbNull : inputJson(redactSecrets(event.before)),
+      correlationId: event.correlationId,
+      entityId: event.entityId,
+      entityType: event.entityType,
+      id: randomUUID(),
+    },
+  });
 }
 
 async function replayIdempotency(
-  client: RawTransactionClient,
+  client: DatabaseTransaction,
   scope: string | undefined,
   key: string | undefined,
   requestChecksum: string,
 ): Promise<{ readonly version: string } | null> {
   if (scope === undefined || key === undefined) return null;
-  await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
-    `admin-idempotency:${scope}:${key}`,
-  ]);
-  const result = await client.query<{
-    requestChecksum: string;
-    responseBody: { version: string };
-  }>(
-    `SELECT "requestChecksum", "responseBody" FROM "IdempotencyRecord"
-      WHERE "scope" = $1 AND "idempotencyKey" = $2 FOR UPDATE`,
-    [scope, key],
-  );
-  const row = result.rows[0];
-  if (row === undefined) return null;
+  await advisoryTransactionLock(client, `admin-idempotency:${scope}:${key}`);
+  const row = await client.idempotencyRecord.findUnique({
+    select: { requestChecksum: true, responseBody: true },
+    where: { scope_idempotencyKey: { idempotencyKey: key, scope } },
+  });
+  if (row === null) return null;
   if (row.requestChecksum !== requestChecksum) throw new Error('IDEMPOTENCY_KEY_REUSED');
-  return row.responseBody;
+  return row.responseBody as { readonly version: string };
 }
 
 async function storeIdempotency(
-  client: RawTransactionClient,
+  client: DatabaseTransaction,
   scope: string | undefined,
   key: string | undefined,
   requestChecksum: string,
   responseBody: unknown,
 ): Promise<void> {
   if (scope === undefined || key === undefined) return;
-  await client.query(
-    `INSERT INTO "IdempotencyRecord"
-       ("id", "scope", "idempotencyKey", "requestChecksum", "responseStatus",
-        "responseHeaders", "responseBody", "expiresAt")
-     VALUES ($1, $2, $3, $4, 200, '{}'::jsonb, $5::jsonb, NOW() + INTERVAL '400 days')`,
-    [randomUUID(), scope, key, requestChecksum, json(responseBody)],
-  );
-}
-
-async function rollback(client: RawTransactionClient): Promise<void> {
-  try {
-    await client.query('ROLLBACK');
-  } catch {
-    // The original database error remains authoritative.
-  }
+  await client.idempotencyRecord.create({
+    data: {
+      expiresAt: new Date(Date.now() + 400 * 24 * 60 * 60 * 1_000),
+      id: randomUUID(),
+      idempotencyKey: key,
+      requestChecksum,
+      responseBody: inputJson(responseBody),
+      responseHeaders: {},
+      responseStatus: 200,
+      scope,
+    },
+  });
 }

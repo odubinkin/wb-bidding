@@ -1,6 +1,6 @@
 import { Prisma } from './generated/prisma/client.js';
 import type { DatabaseClient } from './client.js';
-import { queryRaw } from './raw.js';
+import { queryRaw } from './sql.js';
 
 /** One target row used to reconstruct a deterministic decision input. */
 export interface DecisionTargetRow {
@@ -36,18 +36,6 @@ export interface DecisionTargetRow {
   readonly targetId: string;
   readonly targetKind: 'CARD' | 'CLUSTER';
   readonly wbCampaignId: bigint;
-}
-
-/** Raw finalized-day row used by the deterministic decision input mapper. */
-export interface DecisionPerformanceDayRow {
-  readonly clicks: bigint;
-  readonly confirmedBidMinor: bigint;
-  readonly configurationChecksum: string;
-  readonly date: string;
-  readonly inputChecksum: string;
-  readonly orderedUnits: bigint | null;
-  readonly spendMinor: bigint;
-  readonly views: bigint | null;
 }
 
 /** Inputs for one bounded decision-target page. */
@@ -229,45 +217,6 @@ export async function loadDecisionTargetPage(
          ${targetFilter}
        ORDER BY target."id"
        LIMIT ${input.pageSize}
-    `,
-  );
-}
-
-/**
- * Loads finalized performance days inside one decision baseline horizon.
- *
- * The JSON checksum fallback and date interval arithmetic are isolated here
- * because they are PostgreSQL read-model operations.
- *
- * @param database - Shared Prisma Client.
- * @param targetId - Target UUID.
- * @param windowDays - Inclusive historical horizon.
- * @param anchorDate - Account-local decision date.
- * @returns Chronological finalized day rows.
- */
-export async function loadDecisionPerformanceDayRows(
-  database: DatabaseClient,
-  targetId: string,
-  windowDays: number,
-  anchorDate: string,
-): Promise<readonly DecisionPerformanceDayRow[]> {
-  return queryRaw<DecisionPerformanceDayRow>(
-    database,
-    Prisma.sql`
-      SELECT "wbStatisticDate"::text AS date, "confirmedBidMinor",
-             "clicksDelta" AS clicks, "orderedUnitsDelta" AS "orderedUnits",
-             "spendDeltaMinor" AS "spendMinor", "viewsDelta" AS views,
-             "inputChecksum",
-             COALESCE(
-               "activePlacementConfig"->>'configurationChecksum',
-               "inputChecksum"
-             ) AS "configurationChecksum"
-        FROM "BidPerformanceDay"
-       WHERE "targetId" = ${targetId}::uuid
-         AND "status" = 'FINALIZED'
-         AND "wbStatisticDate" >=
-             ${anchorDate}::date - (${windowDays} * INTERVAL '1 day')
-       ORDER BY "wbStatisticDate", "confirmedBidMinor"
     `,
   );
 }
