@@ -13,6 +13,7 @@ import type {
   SyncDataKind,
   TargetSnapshotAssessment,
 } from './types.js';
+import { isCampaignStatisticsEligibleStatus } from '@wb-bidder/contracts';
 import type { CampaignDetailsResponse, MinimumBidsResponse } from '@wb-bidder/wb-api';
 
 const BINDING_ID = '00000000-0000-0000-0000-000000000001';
@@ -139,6 +140,8 @@ export interface CampaignWorkItem {
   }[];
   /** Payment type. */
   readonly paymentType: 'CPC' | 'CPM' | 'UNKNOWN';
+  /** Current WB campaign lifecycle status. */
+  readonly status: number;
   /** WB campaign identifier. */
   readonly wbCampaignId: bigint;
 }
@@ -402,6 +405,7 @@ export class DataSyncRepository {
       await client.query('BEGIN');
       for (const campaign of details.adverts) {
         const detailsChecksum = evidenceChecksum(campaign);
+        const supported = isCampaignStatisticsEligibleStatus(campaign.status);
         const campaignResult = await client.query<{ id: string }>(
           `INSERT INTO "Campaign"
              ("id", "wbCampaignId", "type", "status", "bidType", "paymentType", "name",
@@ -429,8 +433,12 @@ export class DataSyncRepository {
             campaign.settings.payment_type.toUpperCase(),
             campaign.settings.name,
             fetchedAt,
-            campaign.status !== 4,
-            campaign.status === 4 ? 'CAMPAIGN_NOT_RUNNING' : null,
+            supported,
+            supported
+              ? null
+              : campaign.status === 4
+                ? 'CAMPAIGN_NOT_RUNNING'
+                : 'UNSUPPORTED_CAMPAIGN',
             detailsChecksum,
             syncRunId,
           ],
@@ -588,7 +596,8 @@ export class DataSyncRepository {
     const targetIds =
       scope.targetIds === undefined || scope.targetIds.length === 0 ? null : [...scope.targetIds];
     const result = await this.pool.query<CampaignWorkRow>(
-      `SELECT c."id" AS "campaignId", c."wbCampaignId", c."bidType", c."paymentType",
+      `SELECT c."id" AS "campaignId", c."wbCampaignId", c."status",
+              c."bidType", c."paymentType",
               c."detailsChecksum", c."detailsFetchedAt",
               COALESCE(
                 jsonb_agg(
@@ -643,6 +652,7 @@ export class DataSyncRepository {
           detailsChecksum: row.detailsChecksum,
           detailsFetchedAt: row.detailsFetchedAt === null ? null : new Date(row.detailsFetchedAt),
           paymentType: row.paymentType,
+          status: row.status,
           targets: Object.freeze(
             row.targets.map((target) =>
               Object.freeze({
@@ -1844,6 +1854,7 @@ interface CampaignWorkRow {
   readonly detailsChecksum: string | null;
   readonly detailsFetchedAt: string | Date | null;
   readonly paymentType: CampaignWorkItem['paymentType'];
+  readonly status: number;
   readonly targets: {
     readonly currentBidChecksum: string | null;
     readonly currentBidConfirmedAt: string | null;

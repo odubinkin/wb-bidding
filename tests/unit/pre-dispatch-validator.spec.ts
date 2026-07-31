@@ -98,4 +98,63 @@ describe('cluster restore pre-dispatch proof', () => {
       valid: false,
     });
   });
+
+  it.each([
+    [4, 'CAMPAIGN_NOT_RUNNING'],
+    [7, 'CAMPAIGN_STATUS_NOT_APPLY_ELIGIBLE'],
+    [8, 'CAMPAIGN_STATUS_NOT_APPLY_ELIGIBLE'],
+    [-1, 'CAMPAIGN_STATUS_NOT_APPLY_ELIGIBLE'],
+    [9, null],
+    [11, null],
+    [999, 'CAMPAIGN_STATUS_NOT_APPLY_ELIGIBLE'],
+  ])('applies the fail-closed status matrix for campaign status %i', async (status, code) => {
+    const row = {
+      campaignAutomation: 'APPLY',
+      campaignStatus: status,
+      capability: 'CLUSTER_WRITE_READY',
+      clusterBaselineBidState: 'ABSENT',
+      clusterBidState: 'EXPLICIT',
+      clusterOverrideOwned: true,
+      currentBidMinor: '900',
+      currentEconomicsVersion: '1',
+      decisionAction: 'RESTORE_ABSENT_OVERRIDE',
+      decisionCreatedAt: now,
+      decisionEconomicsVersion: '1',
+      executionMode: 'APPLY',
+      globalKill: false,
+      minimumBidMinor: '500',
+      policyConfiguration: { policyMaxBidMinor: '5000' },
+      policyStillActive: true,
+      policyVersion: '1',
+      snapshotApplyEligible: true,
+      targetAutomation: null,
+      targetKind: 'CLUSTER',
+    };
+    const configuration = loadConfiguration({
+      ACCOUNT_CURRENCY: 'RUB',
+      ACCOUNT_TIMEZONE: 'Europe/Moscow',
+      ADMIN_API_SERVICE_TOKEN: 'runtime-test-admin-token-with-32-chars',
+      DATABASE_URL: 'postgresql://test:test@localhost:5432/test',
+      WB_API_MOCK_BASE_URL: 'http://127.0.0.1:3001',
+      WB_API_MODE: 'mock',
+      WB_API_TOKEN: 'mock-test-token',
+      WB_API_WRITE_ENABLED: 'true',
+      WB_ENDPOINT_PROFILE_VERSION: 'wb-promotion-2026-07-28-v1',
+      WB_EXPECTED_TOKEN_TYPE: 'TEST',
+    });
+    const runtime = new RuntimeSafetyState();
+    runtime.confirmAccountBinding();
+    runtime.setCapacityAllowsWrites(true);
+    runtime.setIntegrationAuthorized(true);
+    const validator = new DatabasePreDispatchValidator(
+      { query: vi.fn().mockResolvedValue({ rows: [row] }) } as unknown as Pool,
+      configuration,
+      runtime,
+      { now: () => now } as never,
+    );
+
+    await expect(validator.validate(restore, live)).resolves.toEqual(
+      code === null ? { valid: true } : { code, valid: false },
+    );
+  });
 });

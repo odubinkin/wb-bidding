@@ -1,4 +1,8 @@
-import { CURRENT_ENDPOINT_PROFILE, type EndpointProfile } from '@wb-bidder/contracts';
+import {
+  CURRENT_ENDPOINT_PROFILE,
+  isCampaignApplyEligibleStatus,
+  type EndpointProfile,
+} from '@wb-bidder/contracts';
 import type { WbApiClient } from '@wb-bidder/wb-api';
 
 import { evidenceChecksum } from './checksum.js';
@@ -112,6 +116,9 @@ export class WbDataSyncWorker {
         await this.repository.upsertDiscoveredCampaigns(discovered, fetchedAt);
         const cursor = await this.repository.loadNumericCheckpoint('CAMPAIGN_DETAILS');
         const orderedIds = discovered
+          .filter(
+            (campaign) => campaign.status === 4 || isCampaignApplyEligibleStatus(campaign.status),
+          )
           .map((campaign) => BigInt(campaign.wbCampaignId))
           .sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
         let selected = orderedIds.filter((id) => id > cursor).slice(0, this.configuration.pageSize);
@@ -215,6 +222,7 @@ export class WbDataSyncWorker {
         let targets = 0;
         let invalidSources = 0;
         for (const campaign of page) {
+          if (!isCampaignApplyEligibleStatus(campaign.status)) continue;
           assertNotAborted(signal);
           targets += await this.synchronizeMinimumBids(campaign, runId);
         }
@@ -225,9 +233,17 @@ export class WbDataSyncWorker {
         }
         for (const campaign of page) {
           assertNotAborted(signal);
-          invalidSources += await this.synchronizeOptionalSources(campaign, runId);
+          invalidSources += await this.synchronizeOptionalSources(
+            campaign,
+            runId,
+            isCampaignApplyEligibleStatus(campaign.status)
+              ? selectedDataKinds()
+              : statisticsOnlyKinds(selectedDataKinds()),
+          );
           await this.finalizePerformanceEvidence(campaign);
-          await this.finalizeTargetSnapshots(campaign, runId);
+          if (isCampaignApplyEligibleStatus(campaign.status)) {
+            await this.finalizeTargetSnapshots(campaign, runId);
+          }
         }
         const nextCursor = page.at(-1)?.wbCampaignId ?? 0n;
         for (const dataKind of [
@@ -300,6 +316,7 @@ export class WbDataSyncWorker {
         }
         if (selectedKinds.has('MINIMUM_BID')) {
           for (const campaign of page) {
+            if (!isCampaignApplyEligibleStatus(campaign.status)) continue;
             assertNotAborted(signal);
             targets += await this.synchronizeMinimumBids(campaign, runId);
           }
@@ -312,11 +329,19 @@ export class WbDataSyncWorker {
         }
         for (const campaign of page) {
           assertNotAborted(signal);
-          invalidSources += await this.synchronizeOptionalSources(campaign, runId, selectedKinds);
+          invalidSources += await this.synchronizeOptionalSources(
+            campaign,
+            runId,
+            isCampaignApplyEligibleStatus(campaign.status)
+              ? selectedKinds
+              : statisticsOnlyKinds(selectedKinds),
+          );
           if (selectedKinds.has('CAMPAIGN_STATISTICS')) {
             await this.finalizePerformanceEvidence(campaign);
           }
-          await this.finalizeTargetSnapshots(campaign, runId);
+          if (isCampaignApplyEligibleStatus(campaign.status)) {
+            await this.finalizeTargetSnapshots(campaign, runId);
+          }
         }
         return Object.freeze({ campaigns: page.length, invalidSources, targets });
       },
@@ -923,6 +948,16 @@ function selectedDataKinds(values: readonly SyncDataKind[] = []): ReadonlySet<Sy
     throw new Error('INVALID_MANUAL_JOB_DATA_KIND');
   }
   return new Set(selected);
+}
+
+/**
+ * Retains only slow statistical work for a completed campaign.
+ *
+ * @param selected - Requested data kinds.
+ * @returns Statistical optional-source kinds allowed for status 7.
+ */
+function statisticsOnlyKinds(selected: ReadonlySet<SyncDataKind>): ReadonlySet<SyncDataKind> {
+  return new Set<SyncDataKind>(selected.has('CLUSTER_STATISTICS') ? ['CLUSTER_STATISTICS'] : []);
 }
 
 /**

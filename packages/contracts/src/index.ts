@@ -9,4 +9,8 @@ export {
   type RateLimitProfile,
   type WireContractProfile,
 } from './wb-endpoint-profile.js';
+export {
+  isCampaignApplyEligibleStatus,
+  isCampaignStatisticsEligibleStatus,
+} from './campaign-status.js';
 export { MoneyValidationError, parseMinorUnits, type MinorUnits } from './money.js';

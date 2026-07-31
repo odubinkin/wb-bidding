@@ -222,6 +222,23 @@ describeWithDatabase('production runtime PostgreSQL lifecycle', () => {
 
     expect(rows).toHaveLength(1);
     expect(rows[0]?.dailyAnchorBidMinor).toBe('120');
+
+    for (const [status, expectedCount] of [
+      [4, 0],
+      [7, 0],
+      [8, 0],
+      [9, 1],
+      [11, 1],
+      [999, 0],
+    ] as const) {
+      await pool.query(`UPDATE "Campaign" SET "status" = $2 WHERE "id" = $1`, [campaignId, status]);
+      const statusRows = await pageLoader.loadTargetPage(
+        '00000000-0000-0000-0000-000000000000',
+        { targetIds: [targetId] },
+        new Date('2026-07-29T07:00:00.000Z'),
+      );
+      expect(statusRows).toHaveLength(expectedCount);
+    }
   });
 });
 

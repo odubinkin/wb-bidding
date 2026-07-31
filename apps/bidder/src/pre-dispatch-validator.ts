@@ -5,7 +5,7 @@ import { APP_CONFIGURATION } from './application-config.js';
 import { DATABASE_POOL } from './database.js';
 import { RuntimeSafetyState } from './runtime-state.js';
 import { RuntimeClockService } from './runtime-clock.service.js';
-import { CURRENT_ENDPOINT_PROFILE } from '@wb-bidder/contracts';
+import { CURRENT_ENDPOINT_PROFILE, isCampaignApplyEligibleStatus } from '@wb-bidder/contracts';
 import type { AppConfiguration } from '@wb-bidder/config';
 import type {
   ClaimedQueueItem,
@@ -168,7 +168,11 @@ export class DatabasePreDispatchValidator implements PreDispatchValidator {
       return invalid('PRODUCT_ECONOMICS_CHANGED');
     }
     if (row.snapshotApplyEligible !== true) return invalid('SNAPSHOT_NOT_APPLY_ELIGIBLE');
-    if (row.campaignStatus === 4) return invalid('CAMPAIGN_NOT_RUNNING');
+    if (!isCampaignApplyEligibleStatus(row.campaignStatus)) {
+      return invalid(
+        row.campaignStatus === 4 ? 'CAMPAIGN_NOT_RUNNING' : 'CAMPAIGN_STATUS_NOT_APPLY_ELIGIBLE',
+      );
+    }
     const cardWrite = row.capability === 'CARD_WRITE_READY' && row.targetKind === 'CARD';
     const clusterWrite =
       this.configuration.wb.mode === 'mock' &&

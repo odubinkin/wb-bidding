@@ -355,6 +355,69 @@ describeWithDatabase('data synchronization persistence', () => {
     expect(versions.rows[1]?.orderedUnitsDelta).toBe('3');
   });
 
+  it('supports only statistics-eligible campaign statuses and fails closed otherwise', async () => {
+    const runId = randomUUID();
+    const observedAt = new Date('2026-07-30T12:00:00.000Z');
+    const baseId = 950_000 + (Date.now() % 10_000) * 10;
+    const statuses = [-1, 4, 7, 8, 9, 11] as const;
+    await repository.upsertCampaignDetails(
+      {
+        adverts: statuses.map((status, index) => ({
+          bid_type: 'manual' as const,
+          id: baseId + index,
+          nm_settings: [
+            {
+              bids_kopecks: { recommendations: 900, search: 1200 },
+              nm_id: baseId + 100 + index,
+              subject: { id: 52, name: 'status matrix' },
+            },
+          ],
+          settings: {
+            name: `Status ${String(status)}`,
+            payment_type: 'cpm' as const,
+            placements: { recommendations: false, search: true },
+          },
+          status,
+          timestamps: {
+            created: '2026-07-20T00:00:00.000Z',
+            deleted: '2100-01-01T00:00:00.000Z',
+            started: '2026-07-20T00:00:00.000Z',
+            updated: observedAt.toISOString(),
+          },
+        })),
+      },
+      observedAt,
+      runId,
+      'EXCLUSIVE',
+    );
+
+    const campaigns = await pool.query<{
+      status: number;
+      supported: boolean;
+      unsupportedReason: string | null;
+    }>(
+      `SELECT "status", "supported", "unsupportedReason"
+         FROM "Campaign"
+        WHERE "wbCampaignId" BETWEEN $1 AND $2
+        ORDER BY "wbCampaignId"`,
+      [baseId, baseId + statuses.length - 1],
+    );
+    expect(campaigns.rows).toEqual([
+      { status: -1, supported: false, unsupportedReason: 'UNSUPPORTED_CAMPAIGN' },
+      { status: 4, supported: false, unsupportedReason: 'CAMPAIGN_NOT_RUNNING' },
+      { status: 7, supported: true, unsupportedReason: null },
+      { status: 8, supported: false, unsupportedReason: 'UNSUPPORTED_CAMPAIGN' },
+      { status: 9, supported: true, unsupportedReason: null },
+      { status: 11, supported: true, unsupportedReason: null },
+    ]);
+    const work = await repository.loadCampaignWorkPage(BigInt(baseId - 1), statuses.length);
+    expect(
+      work
+        .filter((campaign) => campaign.wbCampaignId <= BigInt(baseId + statuses.length - 1))
+        .map((campaign) => campaign.status),
+    ).toEqual([7, 9, 11]);
+  });
+
   it('applies the exact Stage 2 migration SQL over a populated pre-Stage-2 database', async () => {
     if (databaseUrl === undefined) {
       throw new Error('DATABASE_URL is required by this integration project');

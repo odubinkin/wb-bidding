@@ -8,7 +8,11 @@ import { ObservabilityService } from './observability.service.js';
 import { DECISION_REPOSITORY } from './runtime.providers.js';
 import { RuntimeClockService } from './runtime-clock.service.js';
 import { RuntimeSafetyState } from './runtime-state.js';
-import { CURRENT_ENDPOINT_PROFILE, MOCK_ENDPOINT_PROFILE } from '@wb-bidder/contracts';
+import {
+  CURRENT_ENDPOINT_PROFILE,
+  MOCK_ENDPOINT_PROFILE,
+  isCampaignApplyEligibleStatus,
+} from '@wb-bidder/contracts';
 import { formatAccountLocalDate, type AppConfiguration } from '@wb-bidder/config';
 import {
   DecisionRepository,
@@ -302,8 +306,9 @@ export class DecisionJobService {
                   (date_trunc('day', $4::timestamptz AT TIME ZONE $5) AT TIME ZONE $5)
             ORDER BY q."verifiedAt", prior."createdAt"
             LIMIT 1
-         ) daily_anchor ON true
+        ) daily_anchor ON true
         WHERE c."supported" = true
+          AND c."status" IN (9, 11)
           AND t."id" > $1::uuid
           AND ($2::uuid[] IS NULL OR t."campaignId" = ANY($2::uuid[]))
           AND ($3::uuid[] IS NULL OR t."id" = ANY($3::uuid[]))
@@ -555,7 +560,7 @@ export class DecisionJobService {
           this.configuration.writePipeline.verificationInitialDelayMs / 1_000,
         ),
       }),
-      campaignRunning: row.campaignStatus !== 4,
+      campaignRunning: isCampaignApplyEligibleStatus(row.campaignStatus),
       capability: normalizeCapability(row.capability),
       currentBidMinor: currentBid,
       currentTrafficRegimeChecksum: row.coherentRegimeChecksum ?? 'missing-regime',
