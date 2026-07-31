@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -739,6 +739,118 @@ describeWithDatabase('write pipeline PostgreSQL invariants', () => {
       [scope, idempotencyKey, actor],
     );
     expect(evidence.rows[0]).toEqual({ idempotencyCount: '1', jobCount: '1' });
+  });
+
+  it('deduplicates concurrent manual jobs by type and canonical scope', async () => {
+    const service = new AdminService(pool, {
+      now: () => new Date(),
+    } as RuntimeClockService);
+    const actor = `ADMIN:job-deduplication-${randomUUID()}`;
+    const campaignIds = [randomUUID(), randomUUID()];
+    const targetIds = [randomUUID(), randomUUID()];
+    const scope = 'POST:/api/v1/jobs/resync';
+    const base = {
+      actor,
+      dto: {
+        campaignIds,
+        changeReason: 'concurrent bounded resync',
+        dataKinds: ['CURRENT_BID', 'CAMPAIGN_DETAILS'],
+        targetIds,
+      },
+      expectedVersion: 0n,
+      scope,
+      type: 'RESYNC' as const,
+    };
+    const [first, second] = (await Promise.all([
+      service.createJob({
+        ...base,
+        correlationId: randomUUID(),
+        idempotencyKey: `job-deduplication-a-${randomUUID()}`,
+      }),
+      service.createJob({
+        ...base,
+        correlationId: randomUUID(),
+        dto: {
+          ...base.dto,
+          campaignIds: [...campaignIds].reverse(),
+          dataKinds: [...base.dto.dataKinds].reverse(),
+          targetIds: [...targetIds].reverse(),
+        },
+        idempotencyKey: `job-deduplication-b-${randomUUID()}`,
+      }),
+    ])) as { jobId: string; status: string }[];
+    expect(second).toEqual(first);
+    const jobId = first?.jobId;
+    expect(jobId).toBeDefined();
+    await pool.query(`UPDATE "ManualJob" SET "status" = 'RUNNING' WHERE "id" = $1`, [jobId]);
+    await expect(
+      service.createJob({
+        ...base,
+        correlationId: randomUUID(),
+        idempotencyKey: `job-deduplication-running-${randomUUID()}`,
+      }),
+    ).resolves.toEqual({ jobId, status: 'RUNNING' });
+    const evidence = await pool.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS "count"
+         FROM "ManualJob" WHERE "requestedBy" = $1`,
+      [actor],
+    );
+    expect(evidence.rows[0]?.count).toBe('1');
+  });
+
+  it('does not serialize different canonical manual-job scopes', async () => {
+    const service = new AdminService(pool, {
+      now: () => new Date(),
+    } as RuntimeClockService);
+    const type = 'RESYNC' as const;
+    const scope = 'POST:/api/v1/jobs/resync';
+    const blockedDto = {
+      campaignIds: [randomUUID(), randomUUID()],
+      changeReason: 'scope held by another transaction',
+    };
+    const canonicalScope = {
+      campaignIds: [...blockedDto.campaignIds].sort(),
+      dataKinds: [],
+      targetIds: [],
+    };
+    const scopeChecksum = createHash('sha256').update(JSON.stringify(canonicalScope)).digest('hex');
+    const holder = await pool.connect();
+    await holder.query('BEGIN');
+    await holder.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
+      `manual-job:${type}:${scopeChecksum}`,
+    ]);
+    const blocked = service.createJob({
+      actor: 'ADMIN:job-scope-lock-test',
+      correlationId: randomUUID(),
+      dto: blockedDto,
+      expectedVersion: 0n,
+      idempotencyKey: `job-scope-blocked-${randomUUID()}`,
+      scope,
+      type,
+    });
+    try {
+      await expect(
+        withTimeout(
+          service.createJob({
+            actor: 'ADMIN:job-scope-lock-test',
+            correlationId: randomUUID(),
+            dto: {
+              campaignIds: [randomUUID()],
+              changeReason: 'independent semantic scope',
+            },
+            expectedVersion: 0n,
+            idempotencyKey: `job-scope-independent-${randomUUID()}`,
+            scope,
+            type,
+          }),
+          2_000,
+        ),
+      ).resolves.toMatchObject({ status: 'QUEUED' });
+    } finally {
+      await holder.query('ROLLBACK');
+      holder.release();
+    }
+    await expect(blocked).resolves.toMatchObject({ status: 'QUEUED' });
   });
 
   it('does not serialize independent Admin idempotency keys', async () => {

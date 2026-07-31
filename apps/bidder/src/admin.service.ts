@@ -418,20 +418,26 @@ export class AdminService {
           'At least one bounded scope is required.',
         );
       }
-      const active = await client.query<{ id: string }>(
-        `SELECT "id" FROM "ManualJob"
+      const scope = jobScope(input.dto);
+      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
+        `manual-job:${input.type}:${checksum(scope)}`,
+      ]);
+      const active = await client.query<{ id: string; status: 'QUEUED' | 'RUNNING' }>(
+        `SELECT "id", "status"::text FROM "ManualJob"
           WHERE "type" = $1 AND "status" IN ('QUEUED','RUNNING')
             AND "scope" = $2::jsonb LIMIT 1 FOR UPDATE`,
-        [input.type, json(jobScope(input.dto))],
+        [input.type, json(scope)],
       );
       audit.before = active.rows[0] ?? null;
-      if (active.rows[0] !== undefined) return { jobId: active.rows[0].id, status: 'QUEUED' };
+      if (active.rows[0] !== undefined) {
+        return { jobId: active.rows[0].id, status: active.rows[0].status };
+      }
       const jobId = randomUUID();
       await client.query(
         `INSERT INTO "ManualJob"
            ("id", "type", "status", "scope", "requestedBy", "correlationId")
          VALUES ($1, $2, 'QUEUED', $3::jsonb, $4, $5)`,
-        [jobId, input.type, json(jobScope(input.dto)), input.actor, input.correlationId],
+        [jobId, input.type, json(scope), input.actor, input.correlationId],
       );
       return { jobId, status: 'QUEUED' };
     });
