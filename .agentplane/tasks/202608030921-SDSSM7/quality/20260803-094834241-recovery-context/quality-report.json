@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "task_id": "202608030921-SDSSM7",
+  "evaluator_id": "recovery-context",
+  "evaluator_profile": "EVALUATOR",
+  "generated_at": "2026-08-03T09:48:34.241Z",
+  "verdict": "pass",
+  "summary": "The refactor satisfies the approved modularity, naming, compatibility, and verification contract.",
+  "evaluated_sha": "56a09c3ba215dba2116912842f1129b5b6ad1ee8",
+  "blueprint_digest": "48a0ba4be7345d643b20e781c055510deb0cd7e79bd2cb012efa1557809439ec",
+  "findings": [
+    "All replacement TypeScript modules are at most 500 lines (maximum 483), old source entry files are removed, consumers and tests use direct module paths, and format/lint/typecheck/build/unit/contract/runbook/full-quality checks pass."
+  ],
+  "evidence_refs": [
+    ".agentplane/tasks/202608030921-SDSSM7/README.md",
+    "pnpm run quality"
+  ],
+  "missing_tests": [
+    "PostgreSQL integration suites were not run locally because DATABASE_URL is not configured; existing suites remain available for CI."
+  ],
+  "hidden_assumptions": [
+    "The public package and Nest DI entry classes remain stable production boundaries while implementation capabilities are distributed across feature modules."
+  ],
+  "residual_risks": [
+    "Database-backed integration behavior relies on unchanged tests being executed in a DATABASE_URL-enabled CI environment."
+  ]
+}
