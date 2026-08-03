@@ -1,10 +1,11 @@
 ---
 id: "202608030710-A01Y6B"
 title: "Validate TypeScript deprecation configuration"
-status: "DOING"
+result_summary: "verified-202608030710-A01Y6B"
+status: "DONE"
 priority: "med"
 owner: "CODER"
-revision: 16
+revision: 18
 origin:
   system: "manual"
 depends_on: []
@@ -18,7 +19,7 @@ plan_approval:
   note: null
 verification:
   state: "ok"
-  updated_at: "2026-08-03T07:12:49.656Z"
+  updated_at: "2026-08-03T07:13:21.947Z"
   updated_by: "CODER"
   note: "verified-202608030710-A01Y6B"
   attempts: 0
@@ -43,11 +44,16 @@ quality_review:
     - "node .agentplane/policy/check-routing.mjs"
   findings:
     - "Removing baseUrl while making each paths target explicitly relative preserves workspace alias resolution; build, lint, and root typecheck completed successfully with no deprecation diagnostics."
-commit: null
+commit:
+  hash: "37b05956c8976fff7a3911c15a8bab44085c8f0d"
+  message: "🚧 A01Y6B task: record evaluator pass"
 comments:
   -
     author: "CODER"
     body: "Start: Review the approved tsconfig.base.json change and execute build, lint, and typecheck validation before committing."
+  -
+    author: "CODER"
+    body: "Verified: verified-202608030710-A01Y6B. Guided shortcut recorded verification and is closing the direct task with traceable commit metadata."
 events:
   -
     type: "status"
@@ -74,8 +80,21 @@ events:
     author: "CODER"
     state: "ok"
     note: "verified-202608030710-A01Y6B"
+  -
+    type: "verify"
+    at: "2026-08-03T07:13:21.947Z"
+    author: "CODER"
+    state: "ok"
+    note: "verified-202608030710-A01Y6B"
+  -
+    type: "status"
+    at: "2026-08-03T07:13:22.131Z"
+    author: "CODER"
+    from: "DOING"
+    to: "DONE"
+    note: "Verified: verified-202608030710-A01Y6B. Guided shortcut recorded verification and is closing the direct task with traceable commit metadata."
 doc_version: 3
-doc_updated_at: "2026-08-03T07:12:49.712Z"
+doc_updated_at: "2026-08-03T07:13:22.132Z"
 doc_updated_by: "CODER"
 description: "Review the user change in tsconfig.base.json, verify project build and lint, and commit only if all checks pass."
 sections:
@@ -189,9 +208,43 @@ sections:
     - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
     - risks: none
 
+    ### 2026-08-03T07:13:21.947Z — VERIFY — ok
+
+    By: CODER
+
+    Note: verified-202608030710-A01Y6B
+    Attempts: 0
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-08-03T07:12:49.712Z, excerpt_hash=sha256:6529d3a0f1532e7fe54c88242971e55fa7dea1d5a6d9db314d463f40f8a0eebf
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202608030710-A01Y6B/blueprint/resolved-snapshot.json
+    - old_digest: dc359db9fbda3e2f2b6a5f7b86a6f195eae8acca0efb28836a8b236eaeae0b65
+    - current_digest: dc359db9fbda3e2f2b6a5f7b86a6f195eae8acca0efb28836a8b236eaeae0b65
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202608030710-A01Y6B
+
+    DecisionContextRef:
+    - operator_action: run_exact_argv
+    - can_execute_now: true
+    - safe_command: agentplane task complete 202608030710-A01Y6B --result verified-202608030710-A01Y6B --commit 37b05956c8976fff7a3911c15a8bab44085c8f0d
+    - diagnostic_command: none
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: true
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: none
+
     <!-- END VERIFICATION RESULTS -->
   Rollback Plan: "If verification fails, do not commit tsconfig.base.json; report the failing command and propose a scoped remediation plan. Task metadata remains as the audit record."
   Findings: "No task-scope defects found. The tsconfig change preserves alias resolution and removes the deprecated baseUrl setting. AgentPlane doctor reported one pre-existing historical archive warning unrelated to this change; it does not affect build, lint, typecheck, or task scope."
+extensions:
+  implementation_commit:
+    hash: "d8503701cead2e1d4bf667e8939546fce3cb402b"
+    message: "🚧 A01Y6B task: remove deprecated TypeScript baseUrl"
 id_source: "generated"
 ---
 ## Summary
@@ -310,6 +363,36 @@ DecisionContextRef:
 - operator_action: run_exact_argv
 - can_execute_now: true
 - safe_command: agentplane task complete 202608030710-A01Y6B --result verified-202608030710-A01Y6B --commit d8503701cead2e1d4bf667e8939546fce3cb402b
+- diagnostic_command: none
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: true
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: none
+
+### 2026-08-03T07:13:21.947Z — VERIFY — ok
+
+By: CODER
+
+Note: verified-202608030710-A01Y6B
+Attempts: 0
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-08-03T07:12:49.712Z, excerpt_hash=sha256:6529d3a0f1532e7fe54c88242971e55fa7dea1d5a6d9db314d463f40f8a0eebf
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202608030710-A01Y6B/blueprint/resolved-snapshot.json
+- old_digest: dc359db9fbda3e2f2b6a5f7b86a6f195eae8acca0efb28836a8b236eaeae0b65
+- current_digest: dc359db9fbda3e2f2b6a5f7b86a6f195eae8acca0efb28836a8b236eaeae0b65
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202608030710-A01Y6B
+
+DecisionContextRef:
+- operator_action: run_exact_argv
+- can_execute_now: true
+- safe_command: agentplane task complete 202608030710-A01Y6B --result verified-202608030710-A01Y6B --commit 37b05956c8976fff7a3911c15a8bab44085c8f0d
 - diagnostic_command: none
 - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
 - freshness: route=computed_local remote=remote_skipped
