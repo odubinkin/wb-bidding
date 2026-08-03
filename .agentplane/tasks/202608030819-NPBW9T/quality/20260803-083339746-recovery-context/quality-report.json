@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "task_id": "202608030819-NPBW9T",
+  "evaluator_id": "recovery-context",
+  "evaluator_profile": "EVALUATOR",
+  "generated_at": "2026-08-03T08:33:39.746Z",
+  "verdict": "pass",
+  "summary": "P0 indexes match audited predicates, are represented or documented in Prisma, and pass clean-migration and PostgreSQL plan checks.",
+  "evaluated_sha": "028b356cc7c4de58082d20663c6d4de3a0763b83",
+  "blueprint_digest": "41d373787042e55f47b487d1cd93f7a501e89d80433123705701b3cf6130b19c",
+  "findings": [
+    "Seven additive P0 indexes cover the approved queue, reconciliation, latest-content, recommendation, and evidence query shapes without dropping legacy indexes."
+  ],
+  "evidence_refs": [
+    ".agentplane/tasks/202608030819-NPBW9T/README.md",
+    "commit 028b356cc7c4",
+    "prisma/migrations/202608030900_p0_query_indexes/migration.sql",
+    "prisma/schema.prisma",
+    "tests/load/database-indexes.load.spec.ts: 9 passed",
+    "load and integration suites: 24 passed"
+  ],
+  "missing_tests": [],
+  "hidden_assumptions": [],
+  "residual_risks": [
+    "Real production selectivity and write amplification still require post-deployment pg_stat monitoring before any legacy index is removed."
+  ]
+}

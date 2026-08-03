@@ -4,7 +4,7 @@ title: "Implement P0 database query indexes"
 status: "DOING"
 priority: "high"
 owner: "CODER"
-revision: 14
+revision: 16
 origin:
   system: "manual"
 depends_on: []
@@ -28,10 +28,30 @@ plan_approval:
   note: null
 verification:
   state: "ok"
-  updated_at: "2026-08-03T08:32:56.138Z"
+  updated_at: "2026-08-03T08:33:52.991Z"
   updated_by: "CODER"
-  note: "P0 migration, Prisma declarations/comments, and representative index plans verified on PostgreSQL 18."
+  note: "verified-202608030819-NPBW9T"
   attempts: 0
+quality_review:
+  state: "pass"
+  updated_at: "2026-08-03T08:33:39.746Z"
+  updated_by: "EVALUATOR"
+  note: "P0 indexes match audited predicates, are represented or documented in Prisma, and pass clean-migration and PostgreSQL plan checks."
+  evaluated_sha: "028b356cc7c4de58082d20663c6d4de3a0763b83"
+  blueprint_digest: "41d373787042e55f47b487d1cd93f7a501e89d80433123705701b3cf6130b19c"
+  evidence_refs:
+    - ".agentplane/tasks/202608030819-NPBW9T/README.md"
+    - ".agentplane/tasks/202608030819-NPBW9T/quality/20260803-083339746-recovery-context/quality-report.json"
+    - ".agentplane/tasks/202608030819-NPBW9T/quality/20260803-083339746-recovery-context/evaluator-prompt.md"
+    - ".agentplane/tasks/202608030819-NPBW9T/quality/20260803-083339746-recovery-context/evaluator-opinion.md"
+    - ".agentplane/tasks/202608030819-NPBW9T/blueprint/resolved-snapshot.json"
+    - "commit 028b356cc7c4"
+    - "prisma/migrations/202608030900_p0_query_indexes/migration.sql"
+    - "prisma/schema.prisma"
+    - "tests/load/database-indexes.load.spec.ts: 9 passed"
+    - "load and integration suites: 24 passed"
+  findings:
+    - "Seven additive P0 indexes cover the approved queue, reconciliation, latest-content, recommendation, and evidence query shapes without dropping legacy indexes."
 commit: null
 comments:
   -
@@ -51,8 +71,14 @@ events:
     author: "CODER"
     state: "ok"
     note: "P0 migration, Prisma declarations/comments, and representative index plans verified on PostgreSQL 18."
+  -
+    type: "verify"
+    at: "2026-08-03T08:33:52.991Z"
+    author: "CODER"
+    state: "ok"
+    note: "verified-202608030819-NPBW9T"
 doc_version: 3
-doc_updated_at: "2026-08-03T08:32:56.217Z"
+doc_updated_at: "2026-08-03T08:33:53.080Z"
 doc_updated_by: "CODER"
 description: "Add and verify high-priority PostgreSQL indexes for decision queue claiming, due reconciliation, CampaignStatDaily latest-content aggregation, and SyncSourceSnapshot evidence/recommendation lookups."
 sections:
@@ -98,6 +124,36 @@ sections:
     - operator_action: run_exact_argv
     - can_execute_now: true
     - safe_command: agentplane task verify-show 202608030819-NPBW9T
+    - diagnostic_command: none
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: true
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: none
+
+    ### 2026-08-03T08:33:52.991Z — VERIFY — ok
+
+    By: CODER
+
+    Note: verified-202608030819-NPBW9T
+    Attempts: 0
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-08-03T08:32:56.217Z, excerpt_hash=sha256:6c38a70fca539ab13d49e346bd96632d7f84109f949678748c10f335031930ff
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202608030819-NPBW9T/blueprint/resolved-snapshot.json
+    - old_digest: 41d373787042e55f47b487d1cd93f7a501e89d80433123705701b3cf6130b19c
+    - current_digest: 41d373787042e55f47b487d1cd93f7a501e89d80433123705701b3cf6130b19c
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202608030819-NPBW9T
+
+    DecisionContextRef:
+    - operator_action: run_exact_argv
+    - can_execute_now: true
+    - safe_command: agentplane task complete 202608030819-NPBW9T --result verified-202608030819-NPBW9T --commit 028b356cc7c4de58082d20663c6d4de3a0763b83
     - diagnostic_command: none
     - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
     - freshness: route=computed_local remote=remote_skipped
@@ -164,6 +220,36 @@ DecisionContextRef:
 - operator_action: run_exact_argv
 - can_execute_now: true
 - safe_command: agentplane task verify-show 202608030819-NPBW9T
+- diagnostic_command: none
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: true
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: none
+
+### 2026-08-03T08:33:52.991Z — VERIFY — ok
+
+By: CODER
+
+Note: verified-202608030819-NPBW9T
+Attempts: 0
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-08-03T08:32:56.217Z, excerpt_hash=sha256:6c38a70fca539ab13d49e346bd96632d7f84109f949678748c10f335031930ff
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202608030819-NPBW9T/blueprint/resolved-snapshot.json
+- old_digest: 41d373787042e55f47b487d1cd93f7a501e89d80433123705701b3cf6130b19c
+- current_digest: 41d373787042e55f47b487d1cd93f7a501e89d80433123705701b3cf6130b19c
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202608030819-NPBW9T
+
+DecisionContextRef:
+- operator_action: run_exact_argv
+- can_execute_now: true
+- safe_command: agentplane task complete 202608030819-NPBW9T --result verified-202608030819-NPBW9T --commit 028b356cc7c4de58082d20663c6d4de3a0763b83
 - diagnostic_command: none
 - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
 - freshness: route=computed_local remote=remote_skipped
