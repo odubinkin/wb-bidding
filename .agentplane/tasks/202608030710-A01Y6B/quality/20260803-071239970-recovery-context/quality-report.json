@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "task_id": "202608030710-A01Y6B",
+  "evaluator_id": "recovery-context",
+  "evaluator_profile": "EVALUATOR",
+  "generated_at": "2026-08-03T07:12:39.970Z",
+  "verdict": "pass",
+  "summary": "The tsconfig deprecation cleanup is correct and all declared validation checks passed.",
+  "evaluated_sha": "d8503701cead2e1d4bf667e8939546fce3cb402b",
+  "blueprint_digest": "dc359db9fbda3e2f2b6a5f7b86a6f195eae8acca0efb28836a8b236eaeae0b65",
+  "findings": [
+    "Removing baseUrl while making each paths target explicitly relative preserves workspace alias resolution; build, lint, and root typecheck completed successfully with no deprecation diagnostics."
+  ],
+  "evidence_refs": [
+    ".agentplane/tasks/202608030710-A01Y6B/README.md",
+    "git diff --check",
+    "pnpm build",
+    "pnpm lint",
+    "pnpm typecheck",
+    "ap doctor",
+    "node .agentplane/policy/check-routing.mjs"
+  ],
+  "missing_tests": [],
+  "hidden_assumptions": [],
+  "residual_risks": [
+    "No task-scope residual risk identified; the doctor historical-archive warning predates and is unrelated to this change."
+  ]
+}
