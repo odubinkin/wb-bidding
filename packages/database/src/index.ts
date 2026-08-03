@@ -13,7 +13,6 @@ export {
   type ClaimedEconomicsImportRecord,
 } from './economics-queries.js';
 export { claimManualJobRecord, type ClaimedManualJobRecord } from './manual-job-queries.js';
-export { listAppliedMigrationNames } from './migration-queries.js';
 export { readDatabaseConnectionUtilization } from './observability-queries.js';
 export {
   loadAuditEventPage,

@@ -15,20 +15,10 @@ import { DATABASE_CLIENT } from './database.js';
 import type { AppConfiguration } from '@wb-bidder/config';
 import {
   countTargetsWithoutCurrentEconomics,
-  listAppliedMigrationNames,
   readDatabaseConnectionUtilization,
   type DatabaseClient,
 } from '@wb-bidder/database';
 
-const REQUIRED_MIGRATIONS = Object.freeze([
-  '202607281330_initial',
-  '202607281410_stage1_rate_limiter',
-  '202607281500_stage2_sync_evidence',
-  '202607281600_stage3_decision_engine',
-  '202607281700_stage4_write_pipeline',
-  '202607291000_stage5_production_runtime',
-  '202607291200_stage5_cluster_contract',
-]);
 const INTEGRATION_STATE_TTL_MS = 120_000;
 
 /**
@@ -36,7 +26,7 @@ const INTEGRATION_STATE_TTL_MS = 120_000;
  */
 export interface ReadinessCheck {
   /** Stable check name. */
-  readonly name: 'account_binding' | 'configuration' | 'database' | 'integration' | 'migrations';
+  readonly name: 'account_binding' | 'configuration' | 'database' | 'integration';
   /** Redacted machine-readable detail. */
   readonly detail: string;
   /** Whether the invariant currently permits readiness. */
@@ -326,7 +316,7 @@ export class ObservabilityService {
   }
 
   /**
-   * Checks database, migrations, binding, configuration, and cached integration freshness.
+   * Checks database, binding, configuration, and cached integration freshness.
    *
    * @returns Readiness snapshot; WB is never contacted.
    */
@@ -342,12 +332,6 @@ export class ObservabilityService {
       return Object.freeze({ checks: Object.freeze(checks), ready: false });
     }
 
-    const migrations = await this.readMigrationState();
-    checks.push({
-      detail: migrations.detail,
-      name: 'migrations',
-      ok: migrations.ok,
-    });
     const bindingPresent = (await this.database.deploymentAccountBinding.count()) > 0;
     checks.push({
       detail: bindingPresent ? 'singleton present' : 'singleton missing',
@@ -413,23 +397,6 @@ export class ObservabilityService {
    */
   private histogram<T extends string>(configuration: HistogramConfiguration<T>): Histogram<T> {
     return new Histogram({ ...configuration, registers: [this.registry] });
-  }
-
-  /**
-   * Reads the exact checked-in migration set from Prisma's migration table.
-   *
-   * @returns Redacted migration status.
-   */
-  private async readMigrationState(): Promise<{ readonly detail: string; readonly ok: boolean }> {
-    try {
-      const applied = new Set(await listAppliedMigrationNames(this.database));
-      const missing = REQUIRED_MIGRATIONS.filter((migration) => !applied.has(migration));
-      return missing.length === 0
-        ? { detail: 'all required migrations applied', ok: true }
-        : { detail: `missing ${String(missing.length)} required migration(s)`, ok: false };
-    } catch {
-      return { detail: 'Prisma migration state unavailable', ok: false };
-    }
   }
 
   /**

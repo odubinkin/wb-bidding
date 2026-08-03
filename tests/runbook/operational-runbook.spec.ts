@@ -31,19 +31,8 @@ describe('operational runbook drills', () => {
   });
 
   it('uses only cached integration authorization during readiness', async () => {
-    const requiredMigrations = [
-      '202607281330_initial',
-      '202607281410_stage1_rate_limiter',
-      '202607281500_stage2_sync_evidence',
-      '202607281600_stage3_decision_engine',
-      '202607281700_stage4_write_pipeline',
-      '202607291000_stage5_production_runtime',
-      '202607291200_stage5_cluster_contract',
-    ];
     const findFirst = vi.fn().mockResolvedValue({ id: 'deployment-control' });
-    const queryRaw = vi
-      .fn()
-      .mockResolvedValue(requiredMigrations.map((migration_name) => ({ migration_name })));
+    const queryRaw = vi.fn();
     const service = new ObservabilityService(
       {
         $queryRaw: queryRaw,
@@ -58,7 +47,13 @@ describe('operational runbook drills', () => {
 
     expect(snapshot.ready).toBe(true);
     expect(findFirst).toHaveBeenCalledTimes(1);
-    expect(queryRaw).toHaveBeenCalledTimes(1);
+    expect(snapshot.checks.map((check) => check.name)).toEqual([
+      'configuration',
+      'database',
+      'account_binding',
+      'integration',
+    ]);
+    expect(queryRaw).not.toHaveBeenCalled();
   });
 
   it('keeps the shutdown write gate closed and validates non-overlapping schedules', () => {

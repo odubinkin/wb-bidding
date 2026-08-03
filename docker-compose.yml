@@ -21,7 +21,7 @@ services:
       context: .
       dockerfile: Dockerfile
       target: build
-    command: ['pnpm', 'run', 'prisma:migrate:deploy']
+    command: ['pnpm', 'run', 'prisma:migrate:verify']
     environment:
       DATABASE_URL: postgresql://wb_bidder:${POSTGRES_PASSWORD:-local-development-only}@postgres:5432/wb_bidder
     depends_on:

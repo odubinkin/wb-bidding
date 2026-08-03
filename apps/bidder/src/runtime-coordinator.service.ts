@@ -18,23 +18,13 @@ import {
 } from '@wb-bidder/data-sync';
 import { DecisionRepository, initialObserveOnlyPolicy } from '@wb-bidder/decision-engine';
 import type { AppConfiguration } from '@wb-bidder/config';
-import { listAppliedMigrationNames, type DatabaseClient } from '@wb-bidder/database';
+import type { DatabaseClient } from '@wb-bidder/database';
 import {
   CURRENT_ENDPOINT_PROFILE,
   type EndpointKey,
   type RateLimitProfile,
 } from '@wb-bidder/contracts';
 import { WbApiClient, type ValidatedTokenProfile } from '@wb-bidder/wb-api';
-
-const REQUIRED_MIGRATIONS = Object.freeze([
-  '202607281330_initial',
-  '202607281410_stage1_rate_limiter',
-  '202607281500_stage2_sync_evidence',
-  '202607281600_stage3_decision_engine',
-  '202607281700_stage4_write_pipeline',
-  '202607291000_stage5_production_runtime',
-  '202607291200_stage5_cluster_contract',
-]);
 
 /**
  * Performs fail-closed production initialization before any scheduler callback is registered.
@@ -71,7 +61,7 @@ export class RuntimeCoordinatorService implements OnApplicationBootstrap {
   ) {}
 
   /**
-   * Validates migrations, identity/binding, initial policy, recovery, and capacity in order.
+   * Validates identity/binding, initial policy, recovery, and capacity in order.
    *
    * Scheduler-disabled mode is an explicit maintenance mode: HTTP/Admin may start, but readiness
    * and all write gates remain closed.
@@ -85,7 +75,6 @@ export class RuntimeCoordinatorService implements OnApplicationBootstrap {
       return;
     }
     await this.clock.refresh();
-    await this.assertMigrationsApplied();
     const candidate = await this.confirmRemoteIdentity();
     await this.dataRepository.ensureAccountBinding(candidate, randomUUID());
     this.runtimeState.confirmAccountBinding();
@@ -210,19 +199,6 @@ export class RuntimeCoordinatorService implements OnApplicationBootstrap {
     }
     if (!minimum.applyCapacityProven) {
       this.observability.syncSlaViolations.inc({ data_kind: 'MINIMUM_BID' });
-    }
-  }
-
-  /**
-   * Requires every migration embedded in this artifact to be marked successful.
-   *
-   * @returns Nothing.
-   * @throws {Error} When migration state is incomplete.
-   */
-  private async assertMigrationsApplied(): Promise<void> {
-    const applied = new Set(await listAppliedMigrationNames(this.database));
-    if (REQUIRED_MIGRATIONS.some((migration) => !applied.has(migration))) {
-      throw new Error('DATABASE_MIGRATIONS_INCOMPLETE');
     }
   }
 }

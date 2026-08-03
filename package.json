@@ -37,6 +37,7 @@
     "prisma:generate": "DATABASE_URL=postgresql://validation:validation@localhost:5432/validation prisma generate",
     "prisma:validate": "DATABASE_URL=postgresql://validation:validation@localhost:5432/validation prisma validate",
     "prisma:migrate:deploy": "prisma migrate deploy",
+    "prisma:migrate:verify": "prisma migrate deploy && prisma migrate status",
     "profile:checksum": "node scripts/verify-endpoint-profile.mjs",
     "verify:deprecated-endpoints": "node scripts/verify-deprecated-endpoints.mjs",
     "verify:database-architecture": "node scripts/verify-database-architecture.mjs",
