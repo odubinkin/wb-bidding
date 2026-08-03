@@ -1,10 +1,11 @@
 ---
 id: "202608030801-AZPS5E"
 title: "Remove runtime migration-table checks"
-status: "DOING"
+result_summary: "verified-202608030801-AZPS5E"
+status: "DONE"
 priority: "med"
 owner: "CODER"
-revision: 16
+revision: 18
 origin:
   system: "manual"
 depends_on: []
@@ -18,9 +19,9 @@ plan_approval:
   note: null
 verification:
   state: "ok"
-  updated_at: "2026-08-03T08:06:27.725Z"
+  updated_at: "2026-08-03T08:07:03.906Z"
   updated_by: "CODER"
-  note: "All declared checks passed, including the migration command and 35 integration tests on isolated PostgreSQL 18."
+  note: "verified-202608030801-AZPS5E"
   attempts: 0
 quality_review:
   state: "pass"
@@ -38,11 +39,16 @@ quality_review:
     - "commit 17917b4; pnpm run prisma:migrate:verify; pnpm run test:integration; pnpm run test:unit; pnpm run test:runbook; pnpm run typecheck; pnpm run verify:database-architecture"
   findings:
     - "No remaining bidder/database references to listAppliedMigrationNames or _prisma_migrations; focused readiness assertion forbids raw query use; migration verify and all 35 integration tests passed on PostgreSQL 18."
-commit: null
+commit:
+  hash: "fdcf916cfacd9613117a8c004e0d68211c89ccc0"
+  message: "🔍 AZPS5E quality: record evaluator pass"
 comments:
   -
     author: "CODER"
     body: "Start: continue direct-mode task in current checkout."
+  -
+    author: "CODER"
+    body: "Verified: verified-202608030801-AZPS5E. Guided shortcut recorded verification and is closing the direct task with traceable commit metadata."
 events:
   -
     type: "status"
@@ -57,8 +63,21 @@ events:
     author: "CODER"
     state: "ok"
     note: "All declared checks passed, including the migration command and 35 integration tests on isolated PostgreSQL 18."
+  -
+    type: "verify"
+    at: "2026-08-03T08:07:03.906Z"
+    author: "CODER"
+    state: "ok"
+    note: "verified-202608030801-AZPS5E"
+  -
+    type: "status"
+    at: "2026-08-03T08:07:04.094Z"
+    author: "CODER"
+    from: "DOING"
+    to: "DONE"
+    note: "Verified: verified-202608030801-AZPS5E. Guided shortcut recorded verification and is closing the direct task with traceable commit metadata."
 doc_version: 3
-doc_updated_at: "2026-08-03T08:06:27.804Z"
+doc_updated_at: "2026-08-03T08:07:04.095Z"
 doc_updated_by: "CODER"
 description: "Remove application reads of Prisma migration history and verify migrations in the migration service after deploy."
 sections:
@@ -144,9 +163,43 @@ sections:
     - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
     - risks: none
 
+    ### 2026-08-03T08:07:03.906Z — VERIFY — ok
+
+    By: CODER
+
+    Note: verified-202608030801-AZPS5E
+    Attempts: 0
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-08-03T08:06:27.804Z, excerpt_hash=sha256:d3bca07fddb88fc1f0203d6c538f3adca8902186f707545b75a4140b3ff09682
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202608030801-AZPS5E/blueprint/resolved-snapshot.json
+    - old_digest: a37ba756dbfd564193ef408fa084b3785fef8913b86e6451078af5c71271dfed
+    - current_digest: a37ba756dbfd564193ef408fa084b3785fef8913b86e6451078af5c71271dfed
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202608030801-AZPS5E
+
+    DecisionContextRef:
+    - operator_action: run_exact_argv
+    - can_execute_now: true
+    - safe_command: agentplane task complete 202608030801-AZPS5E --result verified-202608030801-AZPS5E --commit fdcf916cfacd9613117a8c004e0d68211c89ccc0
+    - diagnostic_command: none
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: true
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: none
+
     <!-- END VERIFICATION RESULTS -->
   Rollback Plan: "Revert the task commits to restore runtime migration-history checks and the previous Compose migration command."
   Findings: "Planning note: Markdown command markers were interpreted by the shell while authoring Verify Steps, causing read-only checks to run early. No implementation files were mutated; the Verify Steps contract was rewritten as literal text."
+extensions:
+  implementation_commit:
+    hash: "17917b4b8a336fc735e961d1cc3a169c3599d1ce"
+    message: "♻️ AZPS5E task: remove runtime migration checks"
 id_source: "generated"
 ---
 ## Summary
@@ -235,6 +288,36 @@ DecisionContextRef:
 - operator_action: run_exact_argv
 - can_execute_now: true
 - safe_command: agentplane task verify-show 202608030801-AZPS5E
+- diagnostic_command: none
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: true
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: none
+
+### 2026-08-03T08:07:03.906Z — VERIFY — ok
+
+By: CODER
+
+Note: verified-202608030801-AZPS5E
+Attempts: 0
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-08-03T08:06:27.804Z, excerpt_hash=sha256:d3bca07fddb88fc1f0203d6c538f3adca8902186f707545b75a4140b3ff09682
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202608030801-AZPS5E/blueprint/resolved-snapshot.json
+- old_digest: a37ba756dbfd564193ef408fa084b3785fef8913b86e6451078af5c71271dfed
+- current_digest: a37ba756dbfd564193ef408fa084b3785fef8913b86e6451078af5c71271dfed
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202608030801-AZPS5E
+
+DecisionContextRef:
+- operator_action: run_exact_argv
+- can_execute_now: true
+- safe_command: agentplane task complete 202608030801-AZPS5E --result verified-202608030801-AZPS5E --commit fdcf916cfacd9613117a8c004e0d68211c89ccc0
 - diagnostic_command: none
 - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
 - freshness: route=computed_local remote=remote_skipped
