@@ -4,7 +4,7 @@ title: "Implement P1 lifecycle and pagination indexes"
 status: "DOING"
 priority: "high"
 owner: "CODER"
-revision: 14
+revision: 15
 origin:
   system: "manual"
 depends_on:
@@ -34,6 +34,24 @@ verification:
   updated_by: "CODER"
   note: "Verified P1: dependency NPBW9T is DONE; Prisma schema validates; clean-database index suite passes 19/19 and confirms 2 Prisma declarations plus 6 named SQL-only comments and EXPLAIN usage; migrate deploy applies both index migrations; load/integration/contract suite passes 31/31 including 10,000 campaigns and 100,000 targets; architecture, lint, typecheck, diff check, and scoped status pass."
   attempts: 0
+quality_review:
+  state: "pass"
+  updated_at: "2026-08-03T08:39:51.908Z"
+  updated_by: "EVALUATOR"
+  note: "P1 index migration is additive, schema-aligned, and fully verified."
+  evaluated_sha: "2a585df7a57419e582ebcb985d20c6719a2fb5f3"
+  blueprint_digest: "953fcee88b17988deff0ccd0edf4a16ff83827239e0082ede3bef7e9720d0bf1"
+  evidence_refs:
+    - ".agentplane/tasks/202608030819-KAS2Z3/README.md"
+    - ".agentplane/tasks/202608030819-KAS2Z3/quality/20260803-083951908-recovery-context/quality-report.json"
+    - ".agentplane/tasks/202608030819-KAS2Z3/quality/20260803-083951908-recovery-context/evaluator-prompt.md"
+    - ".agentplane/tasks/202608030819-KAS2Z3/quality/20260803-083951908-recovery-context/evaluator-opinion.md"
+    - ".agentplane/tasks/202608030819-KAS2Z3/blueprint/resolved-snapshot.json"
+    - "prisma/migrations/202608031000_p1_lifecycle_indexes/migration.sql"
+    - "tests/load/database-indexes.load.spec.ts"
+    - "prisma/schema.prisma"
+  findings:
+    - "All eight P1 indexes match audited predicates; two are declared with mapped Prisma @@index entries and six PostgreSQL-only partial/INCLUDE indexes are named in adjacent schema comments."
 commit: null
 comments:
   -

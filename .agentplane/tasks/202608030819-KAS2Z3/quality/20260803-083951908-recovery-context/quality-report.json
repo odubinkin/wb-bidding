@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "task_id": "202608030819-KAS2Z3",
+  "evaluator_id": "recovery-context",
+  "evaluator_profile": "EVALUATOR",
+  "generated_at": "2026-08-03T08:39:51.908Z",
+  "verdict": "pass",
+  "summary": "P1 index migration is additive, schema-aligned, and fully verified.",
+  "evaluated_sha": "2a585df7a57419e582ebcb985d20c6719a2fb5f3",
+  "blueprint_digest": "953fcee88b17988deff0ccd0edf4a16ff83827239e0082ede3bef7e9720d0bf1",
+  "findings": [
+    "All eight P1 indexes match audited predicates; two are declared with mapped Prisma @@index entries and six PostgreSQL-only partial/INCLUDE indexes are named in adjacent schema comments."
+  ],
+  "evidence_refs": [
+    ".agentplane/tasks/202608030819-KAS2Z3/README.md",
+    "prisma/migrations/202608031000_p1_lifecycle_indexes/migration.sql",
+    "tests/load/database-indexes.load.spec.ts",
+    "prisma/schema.prisma"
+  ],
+  "missing_tests": [],
+  "hidden_assumptions": [],
+  "residual_risks": [
+    "Production planner usage should be monitored with pg_stat_user_indexes before considering any legacy-index removal."
+  ]
+}
