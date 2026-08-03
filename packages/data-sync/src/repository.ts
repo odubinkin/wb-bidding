@@ -3,13 +3,13 @@ import {
   advisoryTransactionLock,
   loadDataSyncCampaignWorkPage,
   loadDataSyncPerformanceCandidates,
-  type Prisma,
+  Prisma,
   upsertCardCampaignTarget,
   upsertClusterCampaignTarget,
   upsertClusterStatisticRecord,
-  upsertSyncSourceSnapshot,
   withTransaction,
   type DatabaseClient,
+  type DatabaseExecutor,
   type DatabaseTransaction,
 } from '@wb-bidder/database';
 
@@ -1478,6 +1478,80 @@ function mapExistingBinding(row: BindingRow): ExistingAccountBinding {
     tokenFor: row.tokenFor === null ? null : 'SELF',
     tokenType: row.tokenType,
   });
+}
+
+/**
+ * Inserts or resolves one immutable source observation idempotently.
+ *
+ * @param database - Shared Prisma client or active transaction.
+ * @param input - Immutable source observation.
+ * @param input.campaignId - Related campaign, when applicable.
+ * @param input.dataKind - Source evidence kind.
+ * @param input.endpointProfile - WB endpoint contract profile.
+ * @param input.fetchedAt - Observation time.
+ * @param input.id - Candidate observation UUID.
+ * @param input.invalidReason - Validation failure detail.
+ * @param input.normalizedData - Normalized source payload.
+ * @param input.sourceChecksum - Stable source content checksum.
+ * @param input.sourceDate - Source business date, when applicable.
+ * @param input.syncRunId - Owning synchronization run.
+ * @param input.targetId - Related target, when applicable.
+ * @param input.valid - Whether the observation passed validation.
+ * @returns Existing or newly inserted observation UUID.
+ */
+async function upsertSyncSourceSnapshot(
+  database: DatabaseExecutor,
+  input: {
+    readonly campaignId: string | null;
+    readonly dataKind: SyncDataKind;
+    readonly endpointProfile: string;
+    readonly fetchedAt: Date;
+    readonly id: string;
+    readonly invalidReason: string | null;
+    readonly normalizedData: unknown;
+    readonly sourceChecksum: string;
+    readonly sourceDate: Date | null;
+    readonly syncRunId: string;
+    readonly targetId: string | null;
+    readonly valid: boolean;
+  },
+): Promise<string> {
+  const inserted = await database.syncSourceSnapshot.createManyAndReturn({
+    data: {
+      campaignId: input.campaignId,
+      dataKind: input.dataKind,
+      endpointProfile: input.endpointProfile,
+      fetchedAt: input.fetchedAt,
+      id: input.id,
+      invalidReason: input.invalidReason,
+      normalizedData:
+        input.normalizedData === null
+          ? Prisma.JsonNull
+          : (input.normalizedData as Prisma.InputJsonValue),
+      sourceChecksum: input.sourceChecksum,
+      sourceDate: input.sourceDate,
+      syncRunId: input.syncRunId,
+      targetId: input.targetId,
+      valid: input.valid,
+    },
+    select: { id: true },
+    skipDuplicates: true,
+  });
+  if (inserted[0]?.id !== undefined) return inserted[0].id;
+  const existing = await database.syncSourceSnapshot.findFirst({
+    select: { id: true },
+    where: {
+      campaignId: input.campaignId,
+      dataKind: input.dataKind,
+      sourceChecksum: input.sourceChecksum,
+      sourceDate: input.sourceDate,
+      syncRunId: input.syncRunId,
+      targetId: input.targetId,
+    },
+  });
+  const id = existing?.id;
+  if (id === undefined) throw new Error('SOURCE_SNAPSHOT_IDEMPOTENCY_LOOKUP_FAILED');
+  return id;
 }
 
 /**

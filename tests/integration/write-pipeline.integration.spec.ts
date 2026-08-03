@@ -927,6 +927,91 @@ describeWithDatabase('write pipeline PostgreSQL invariants', () => {
     expect(claimed.sort()).toEqual(expected.sort());
   });
 
+  it('loads the latest pending reconciliation attempt through Prisma relations', async () => {
+    const fixture = await createFixture(pool, 'reconciliation-page');
+    await createAttemptItem(pool, fixture.decisionId, {
+      attemptNumber: 1,
+      reconciliationStatus: 'PENDING',
+      status: 'UNKNOWN',
+    });
+    const latest = await createAttemptItem(pool, fixture.decisionId, {
+      attemptNumber: 2,
+      reconciliationStatus: 'PENDING',
+      status: 'UNKNOWN',
+    });
+    await pool.decisionQueueItem.update({
+      data: { nextVerificationAt: new Date('2000-01-01T00:00:00.000Z'), status: 'VERIFY_WAIT' },
+      where: { decisionId: fixture.decisionId },
+    });
+
+    const batch = await repository.loadReconciliationBatch(1);
+
+    expect(batch).toHaveLength(1);
+    expect(batch[0]).toMatchObject({
+      attemptItemId: latest.itemId,
+      decisionId: fixture.decisionId,
+      desired: { bidMinor: 1200n, explicit: true },
+    });
+  });
+
+  it('cleans terminal attempt details with Prisma while preserving protected attempts', async () => {
+    const deletableFixture = await createFixture(pool, 'cleanup-deletable');
+    const pendingFixture = await createFixture(pool, 'cleanup-pending');
+    const recentFixture = await createFixture(pool, 'cleanup-recent');
+    const oldDate = new Date('2000-01-01T00:00:00.000Z');
+    const deletable = await createAttemptItem(pool, deletableFixture.decisionId, {
+      attemptNumber: 1,
+      completedAt: oldDate,
+      reconciliationStatus: 'CONFIRMED',
+      status: 'ACCEPTED',
+    });
+    const pending = await createAttemptItem(pool, pendingFixture.decisionId, {
+      attemptNumber: 1,
+      completedAt: oldDate,
+      reconciliationStatus: 'PENDING',
+      status: 'ACCEPTED',
+    });
+    const recent = await createAttemptItem(pool, recentFixture.decisionId, {
+      attemptNumber: 1,
+      completedAt: new Date(),
+      reconciliationStatus: 'CONFIRMED',
+      status: 'ACCEPTED',
+    });
+    const reconciliationReadId = randomUUID();
+    await pool.reconciliationRead.create({
+      data: {
+        attemptItemId: deletable.itemId,
+        classification: 'DESIRED_STATE',
+        fresh: true,
+        id: reconciliationReadId,
+        prevalidationPassed: true,
+        readAt: oldDate,
+        sourceMarker: 'cleanup:source',
+        state: { bidMinor: '1200', explicit: true },
+        stateChecksum: checksumFor('cleanup-state'),
+        targetId: deletableFixture.targetId,
+      },
+    });
+
+    await expect(repository.cleanupTerminalAttempts(1_000, 100)).resolves.toBe(1);
+
+    await expect(
+      pool.wbWriteAttempt.findUnique({ where: { id: deletable.attemptId } }),
+    ).resolves.toBeNull();
+    await expect(
+      pool.wbWriteAttemptItem.findUnique({ where: { id: deletable.itemId } }),
+    ).resolves.toBeNull();
+    await expect(
+      pool.reconciliationRead.findUnique({ where: { id: reconciliationReadId } }),
+    ).resolves.toBeNull();
+    await expect(
+      pool.wbWriteAttempt.findUnique({ where: { id: pending.attemptId } }),
+    ).resolves.not.toBeNull();
+    await expect(
+      pool.wbWriteAttempt.findUnique({ where: { id: recent.attemptId } }),
+    ).resolves.not.toBeNull();
+  });
+
   it('applies the Stage 4 migration over a clean Stage 3 database', async () => {
     const control = await pool.query<{ globalKill: boolean; version: string }>(
       `SELECT "globalKill", "version" FROM "DeploymentControl"`,
@@ -1006,6 +1091,57 @@ async function createFixture(pool: TestDatabaseClient, suffix: string) {
     [randomUUID(), decisionId],
   );
   return { campaignId, decisionId, targetId };
+}
+
+async function createAttemptItem(
+  pool: TestDatabaseClient,
+  decisionId: string,
+  input: {
+    readonly attemptNumber: number;
+    readonly completedAt?: Date;
+    readonly reconciliationStatus: 'CONFIRMED' | 'PENDING';
+    readonly status: 'ACCEPTED' | 'UNKNOWN';
+  },
+): Promise<{ readonly attemptId: string; readonly itemId: string }> {
+  const attemptId = randomUUID();
+  const itemId = randomUUID();
+  await pool.wbWriteAttempt.create({
+    data: {
+      batchSize: 1,
+      ...(input.completedAt === undefined ? {} : { completedAt: input.completedAt }),
+      correlationId: randomUUID(),
+      endpointKey: 'cardBidsWrite',
+      id: attemptId,
+      method: 'PATCH',
+      preparedAt: input.completedAt ?? new Date(),
+      requestChecksum: checksumFor(`attempt-${attemptId}`),
+      requestDigest: {},
+      status: input.status,
+    },
+  });
+  await pool.wbWriteAttemptItem.create({
+    data: {
+      action: 'SET',
+      attemptId,
+      attemptNumber: input.attemptNumber,
+      decisionId,
+      desiredBidState: 'EXPLICIT',
+      endpointTargetKey: `target-${decisionId}`,
+      id: itemId,
+      preWriteState: {
+        bidMinor: '1000',
+        explicit: true,
+        observedAt: '2000-01-01T00:00:00.000Z',
+        sourceMarker: 'fixture:old',
+      },
+      reconciliationStatus: input.reconciliationStatus,
+      requestIndex: 0,
+      sentBidMinor: 1200n,
+      status: input.status,
+      wireBidRaw: '1200',
+    },
+  });
+  return { attemptId, itemId };
 }
 
 function liveState(bidMinor: bigint, sourceMarker: string, observedAt = new Date()): LiveBidState {

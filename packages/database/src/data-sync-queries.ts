@@ -1,6 +1,6 @@
 /* eslint-disable jsdoc/require-param, jsdoc/require-returns */
 import { Prisma } from './generated/prisma/client.js';
-import type { DatabaseClient, DatabaseExecutor, DatabaseTransaction } from './client.js';
+import type { DatabaseClient, DatabaseTransaction } from './client.js';
 import { queryRaw } from './sql.js';
 
 /** Upserts one card target through its PostgreSQL partial unique index. */
@@ -431,72 +431,4 @@ export async function loadDataSyncPerformanceCandidates(
        ORDER BY target."id", aggregate_day."date"
     `,
   );
-}
-
-/**
- * Inserts or resolves one immutable source observation through its expression unique index.
- */
-export async function upsertSyncSourceSnapshot(
-  database: DatabaseExecutor,
-  input: {
-    readonly campaignId: string | null;
-    readonly dataKind:
-      | 'BID_RECOMMENDATION'
-      | 'BUDGET_DIAGNOSTIC'
-      | 'CAMPAIGN_DETAILS'
-      | 'CAMPAIGN_DISCOVERY'
-      | 'CAMPAIGN_STATISTICS'
-      | 'CLUSTER_LIST'
-      | 'CLUSTER_STATISTICS'
-      | 'CURRENT_BID'
-      | 'MINIMUM_BID'
-      | 'SAME_DAY_SPEND';
-    readonly endpointProfile: string;
-    readonly fetchedAt: Date;
-    readonly id: string;
-    readonly invalidReason: string | null;
-    readonly normalizedData: unknown;
-    readonly sourceChecksum: string;
-    readonly sourceDate: Date | null;
-    readonly syncRunId: string;
-    readonly targetId: string | null;
-    readonly valid: boolean;
-  },
-): Promise<string> {
-  const inserted = await queryRaw<{ id: string }>(
-    database,
-    Prisma.sql`
-      INSERT INTO "SyncSourceSnapshot"
-        ("id", "dataKind", "campaignId", "targetId", "sourceDate", "fetchedAt",
-         "endpointProfile", "sourceChecksum", "normalizedData", "valid",
-         "invalidReason", "syncRunId")
-      VALUES (
-        ${input.id}, ${input.dataKind}::"SyncDataKind", ${input.campaignId},
-        ${input.targetId}, ${input.sourceDate}::date, ${input.fetchedAt},
-        ${input.endpointProfile}, ${input.sourceChecksum},
-        ${JSON.stringify(input.normalizedData)}::jsonb, ${input.valid},
-        ${input.invalidReason}, ${input.syncRunId}
-      )
-      ON CONFLICT DO NOTHING
-      RETURNING "id"
-    `,
-  );
-  if (inserted[0]?.id !== undefined) return inserted[0].id;
-  const existing = await queryRaw<{ id: string }>(
-    database,
-    Prisma.sql`
-      SELECT "id"
-        FROM "SyncSourceSnapshot"
-       WHERE "dataKind" = ${input.dataKind}::"SyncDataKind"
-         AND "campaignId" IS NOT DISTINCT FROM ${input.campaignId}::uuid
-         AND "targetId" IS NOT DISTINCT FROM ${input.targetId}::uuid
-         AND "sourceDate" IS NOT DISTINCT FROM ${input.sourceDate}::date
-         AND "sourceChecksum" = ${input.sourceChecksum}
-         AND "syncRunId" = ${input.syncRunId}
-       LIMIT 1
-    `,
-  );
-  const id = existing[0]?.id;
-  if (id === undefined) throw new Error('SOURCE_SNAPSHOT_IDEMPOTENCY_LOOKUP_FAILED');
-  return id;
 }

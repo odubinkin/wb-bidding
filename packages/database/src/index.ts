@@ -26,7 +26,6 @@ export {
   upsertCardCampaignTarget,
   upsertClusterCampaignTarget,
   upsertClusterStatisticRecord,
-  upsertSyncSourceSnapshot,
   type DataSyncCampaignWorkRow,
   type DataSyncPerformanceCandidateRow,
 } from './data-sync-queries.js';
@@ -38,9 +37,7 @@ export {
 export {
   claimDecisionQueueItems,
   cleanupTerminalWriteAttempts,
-  loadReconciliationWorkPage,
   type WriteClaimRow,
-  type WriteReconciliationRow,
 } from './write-pipeline-queries.js';
 export { Prisma } from './generated/prisma/client.js';
 export * from './generated/prisma/enums.js';

@@ -7,7 +7,6 @@ import {
   cleanupTerminalWriteAttempts,
   type DatabaseClient,
   type DatabaseTransaction,
-  loadReconciliationWorkPage,
   Prisma,
   withTransaction,
 } from '@wb-bidder/database';
@@ -893,6 +892,95 @@ interface ReconciliationQueueRow {
   readonly reconciliationDeadlineAt: Date | null;
   readonly nextVerificationAt: Date | null;
   readonly status: string;
+}
+
+/**
+ * Loads the latest pending attempt item for each due reconciliation queue row.
+ *
+ * @param database - Shared Prisma client.
+ * @param limit - Maximum due queue rows.
+ * @returns Flattened reconciliation work rows.
+ */
+async function loadReconciliationWorkPage(database: DatabaseClient, limit: number) {
+  const dueAt = new Date();
+  const rows = await database.decisionQueueItem.findMany({
+    orderBy: [{ nextVerificationAt: { nulls: 'first', sort: 'asc' } }, { id: 'asc' }],
+    select: {
+      attemptCount: true,
+      decision: {
+        select: {
+          action: true,
+          boundedBidMinor: true,
+          metricSnapshotId: true,
+          policyVersion: true,
+          target: {
+            select: {
+              campaign: {
+                select: { bidType: true, paymentType: true, wbCampaignId: true },
+              },
+              campaignId: true,
+              nmId: true,
+              normQueryWire: true,
+              placement: true,
+              targetKind: true,
+            },
+          },
+          targetId: true,
+          writeAttemptItems: {
+            orderBy: { attemptNumber: 'desc' },
+            select: {
+              decisionId: true,
+              desiredBidState: true,
+              id: true,
+              preWriteState: true,
+              sentBidMinor: true,
+            },
+            take: 1,
+            where: { reconciliationStatus: 'PENDING' },
+          },
+        },
+      },
+      id: true,
+      priority: true,
+    },
+    take: limit,
+    where: {
+      decision: {
+        writeAttemptItems: { some: { reconciliationStatus: 'PENDING' } },
+      },
+      OR: [{ nextVerificationAt: null }, { nextVerificationAt: { lte: dueAt } }],
+      status: 'VERIFY_WAIT',
+    },
+  });
+  return rows.map((queue) => {
+    const decision = queue.decision;
+    const target = decision.target;
+    const item = decision.writeAttemptItems[0];
+    if (item === undefined) throw new Error('PENDING_RECONCILIATION_ITEM_NOT_FOUND');
+    return {
+      action: decision.action,
+      attemptCount: queue.attemptCount,
+      attemptItemId: item.id,
+      boundedBidMinor: decision.boundedBidMinor?.toString() ?? null,
+      campaignBidType: target.campaign.bidType,
+      campaignId: target.campaignId,
+      campaignPaymentType: target.campaign.paymentType,
+      decisionId: item.decisionId,
+      desiredBidState: item.desiredBidState,
+      metricSnapshotId: decision.metricSnapshotId,
+      nmId: target.nmId.toString(),
+      normQueryWire: target.normQueryWire,
+      placement: target.placement,
+      policyVersion: decision.policyVersion.toString(),
+      preWriteState: item.preWriteState,
+      priority: queue.priority,
+      queueItemId: queue.id,
+      sentBidMinor: item.sentBidMinor?.toString() ?? null,
+      targetId: decision.targetId,
+      targetKind: target.targetKind,
+      wbCampaignId: target.campaign.wbCampaignId.toString(),
+    };
+  });
 }
 
 function toClaimed(row: ClaimRow): ClaimedQueueItem {
