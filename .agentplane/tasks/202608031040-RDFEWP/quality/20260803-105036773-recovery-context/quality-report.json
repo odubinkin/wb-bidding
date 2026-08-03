@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "task_id": "202608031040-RDFEWP",
+  "evaluator_id": "recovery-context",
+  "evaluator_profile": "EVALUATOR",
+  "generated_at": "2026-08-03T10:50:36.773Z",
+  "verdict": "pass",
+  "summary": "Repository script hardening and documentation satisfy the approved scope.",
+  "evaluated_sha": "a92aa1018c95bc4db361e92569788f7778b3cbd6",
+  "blueprint_digest": "dec22f996ec0a884227ff7d1db7cb03930cac8b42aa806d80b795deca87a50af",
+  "findings": [
+    "All declared local checks passed; stateful Docker and WB sandbox smoke remain delegated to their existing CI/release environments."
+  ],
+  "evidence_refs": [
+    ".agentplane/tasks/202608031040-RDFEWP/README.md",
+    "pnpm run quality"
+  ],
+  "missing_tests": [],
+  "hidden_assumptions": [],
+  "residual_risks": []
+}
