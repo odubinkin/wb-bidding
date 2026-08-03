@@ -1,11 +1,13 @@
 /* eslint-disable @typescript-eslint/no-unnecessary-condition, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/no-unsafe-member-access */
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
+import { Test } from '@nestjs/testing';
 import type { Server } from 'node:http';
 import request from 'supertest';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { AppModule } from '../../apps/bidder/src/app.module.js';
+import { AdminService } from '../../apps/bidder/src/admin.service.js';
 import { buildBidderOpenApi } from '../../apps/bidder/src/openapi.js';
 import { configureBidderHttp } from '../../apps/bidder/src/main.js';
 
@@ -157,6 +159,128 @@ describe('Admin API authentication and error contract', () => {
         expect.objectContaining({ name: 'createdTo' }),
         expect.objectContaining({ name: 'cursor' }),
       ]),
+    );
+  });
+});
+
+describe('Admin API successful HTTP delegation', () => {
+  let application: NestExpressApplication;
+  let server: Server;
+  const serviceToken = 'contract-admin-token-with-32-characters';
+  const id = '00000000-0000-4000-8000-000000000101';
+  const page = { items: [], nextCursor: null };
+  const service = {
+    getAutomation: vi.fn().mockResolvedValue({ globalKill: false, version: '1' }),
+    getEconomics: vi.fn().mockResolvedValue({
+      body: {
+        effectiveFrom: '2026-08-05T00:00:00.000Z',
+        expectedContributionBeforeAdsMinor: '137500',
+        nmId: '123456789',
+        version: '7',
+      },
+      etag: '"product-economics-7"',
+    }),
+    getJob: vi.fn().mockResolvedValue({ id, status: 'SUCCEEDED', type: 'RESYNC' }),
+    listAssignments: vi.fn().mockResolvedValue(page),
+    listAudit: vi.fn().mockResolvedValue(page),
+    listDecisions: vi.fn().mockResolvedValue(page),
+    listFailures: vi.fn().mockResolvedValue(page),
+    listPolicies: vi.fn().mockResolvedValue(page),
+    setGlobalKill: vi.fn().mockResolvedValue({ enabled: true, version: '2' }),
+  };
+
+  beforeAll(async () => {
+    Object.assign(process.env, {
+      ACCOUNT_CURRENCY: 'RUB',
+      ACCOUNT_TIMEZONE: 'Europe/Moscow',
+      ADMIN_API_SERVICE_TOKEN: serviceToken,
+      DATABASE_URL: 'postgresql://unused:unused@127.0.0.1:59999/unused',
+      LOG_LEVEL: 'silent',
+      METRICS_ENABLED: 'false',
+      PORT: '3000',
+      SCHEDULER_ENABLED: 'false',
+      WB_API_MODE: 'mock',
+      WB_API_MOCK_BASE_URL: 'http://127.0.0.1:3001',
+      WB_API_TOKEN: 'mock-test-token',
+      WB_API_WRITE_ENABLED: 'false',
+      WB_ENDPOINT_PROFILE_VERSION: 'wb-promotion-2026-07-28-v1',
+      WB_EXPECTED_TOKEN_TYPE: 'TEST',
+    });
+    const module = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(AdminService)
+      .useValue(service)
+      .compile();
+    application = module.createNestApplication<NestExpressApplication>({ bodyParser: false });
+    configureBidderHttp(application);
+    await application.listen(0, '127.0.0.1');
+    server = application.getHttpServer() as unknown as Server;
+  });
+
+  afterAll(async () => {
+    await application.close();
+  });
+
+  it('returns a successful economics representation with its concurrency ETag', async () => {
+    const response = await request(server)
+      .get('/api/v1/product-economics/123456789?at=2026-08-05T00:00:00.000Z')
+      .set('Authorization', `Bearer ${serviceToken}`)
+      .expect(200);
+
+    expect(response.headers.etag).toBe('"product-economics-7"');
+    expect(response.body).toMatchObject({ nmId: '123456789', version: '7' });
+    expect(service.getEconomics).toHaveBeenCalledWith(
+      123456789n,
+      new Date('2026-08-05T00:00:00.000Z'),
+    );
+  });
+
+  it.each([
+    ['/api/v1/policies', service.listPolicies],
+    ['/api/v1/policy-assignments', service.listAssignments],
+    ['/api/v1/decisions', service.listDecisions],
+    ['/api/v1/queue/failures', service.listFailures],
+    ['/api/v1/audit-events', service.listAudit],
+  ])('serves the authenticated cursor read %s', async (path, handler) => {
+    const response = await request(server)
+      .get(path)
+      .set('Authorization', `Bearer ${serviceToken}`)
+      .expect(200);
+
+    expect(response.body).toEqual(page);
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it('serves automation and job reads through their typed route parameters', async () => {
+    await request(server)
+      .get('/api/v1/automation')
+      .set('Authorization', `Bearer ${serviceToken}`)
+      .expect(200, { globalKill: false, version: '1' });
+    await request(server)
+      .get(`/api/v1/jobs/${id}`)
+      .set('Authorization', `Bearer ${serviceToken}`)
+      .expect(200, { id, status: 'SUCCEEDED', type: 'RESYNC' });
+    expect(service.getJob).toHaveBeenCalledWith(id);
+  });
+
+  it('passes principal, version, idempotency, reason, and correlation to global kill', async () => {
+    const correlationId = '00000000-0000-4000-8000-000000000102';
+    const response = await request(server)
+      .post('/api/v1/automation/global-kill')
+      .set('Authorization', `Bearer ${serviceToken}`)
+      .set('Idempotency-Key', 'kill-once')
+      .set('If-Match', '"global-kill-1"')
+      .set('X-Correlation-Id', correlationId)
+      .send({ changeReason: 'incident containment', enabled: true })
+      .expect(201);
+
+    expect(response.headers.etag).toBe('"global-kill-2"');
+    expect(service.setGlobalKill).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actor: 'service-account:admin',
+        correlationId,
+        expectedVersion: 1n,
+        idempotencyKey: 'kill-once',
+      }),
     );
   });
 });

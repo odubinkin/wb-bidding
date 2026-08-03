@@ -40,6 +40,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm run quality
+      - run: pnpm run test:property
+      - run: pnpm run test:mutation
       - run: pnpm prisma migrate deploy
       - run: pnpm run test:integration
       - run: pnpm run test:e2e

@@ -289,6 +289,74 @@ describeWithDatabase('production runtime PostgreSQL lifecycle', () => {
       [queuedId]: ['RUNNING', 'queue-worker'],
     });
   });
+
+  it('upgrades populated Stage 4 targets through both Stage 5 migrations without widening cluster ownership', async () => {
+    const upgradeName = `wb_stage5_${randomUUID().replaceAll('-', '').slice(0, 20)}`;
+    const upgradeUrl = new URL(isolatedUrl);
+    upgradeUrl.pathname = `/${upgradeName}`;
+    await admin.query(`CREATE DATABASE "${upgradeName}"`);
+    const upgrade = createTestDatabaseClient({ connectionString: upgradeUrl.toString() });
+    try {
+      for (const migration of MIGRATIONS.slice(0, 5)) {
+        await upgrade.query(
+          await readFile(
+            new URL(`../../prisma/migrations/${migration}/migration.sql`, import.meta.url),
+            'utf8',
+          ),
+        );
+      }
+      const campaignId = randomUUID();
+      const targetId = randomUUID();
+      await upgrade.query(
+        `INSERT INTO "Campaign"
+           ("id", "wbCampaignId", "type", "status", "bidType", "paymentType", "name",
+            "supported", "lastSyncedAt")
+         VALUES ($1, 990001, 9, 9, 'MANUAL', 'CPM', 'stage5-upgrade', true, NOW())`,
+        [campaignId],
+      );
+      await upgrade.query(
+        `INSERT INTO "CampaignTarget"
+           ("id", "campaignId", "nmId", "targetKind", "placement", "currentBidMinor",
+            "minimumBidMinor", "capability")
+         VALUES ($1, $2, 990002, 'CARD', 'SEARCH', 100, 50, 'CARD_WRITE_READY')`,
+        [targetId, campaignId],
+      );
+
+      for (const migration of MIGRATIONS.slice(5)) {
+        await upgrade.query(
+          await readFile(
+            new URL(`../../prisma/migrations/${migration}/migration.sql`, import.meta.url),
+            'utf8',
+          ),
+        );
+      }
+
+      const preserved = await upgrade.query<{
+        clusterBaselineBidState: string | null;
+        clusterOverrideOwned: boolean;
+        id: string;
+      }>(
+        `SELECT "id", "clusterBaselineBidState"::text, "clusterOverrideOwned"
+           FROM "CampaignTarget" WHERE "id" = $1`,
+        [targetId],
+      );
+      expect(preserved.rows).toEqual([
+        {
+          clusterBaselineBidState: null,
+          clusterOverrideOwned: false,
+          id: targetId,
+        },
+      ]);
+      await expect(
+        upgrade.query(`UPDATE "CampaignTarget" SET "clusterOverrideOwned" = true WHERE "id" = $1`, [
+          targetId,
+        ]),
+      ).rejects.toThrow();
+    } finally {
+      await upgrade.end();
+      await admin.query(`DROP DATABASE IF EXISTS "${upgradeName}" WITH (FORCE)`);
+    }
+  });
 });
 
 /**

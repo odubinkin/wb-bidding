@@ -52,14 +52,17 @@ CI использует новый PostgreSQL service на каждый run; л�
 | Runbook                  | DB outage, 429/breaker, stuck/UNKNOWN, recovery, kill switch, shutdown          |
 | Sandbox                  | внешний Test-token/manifest; безопасный smoke и обратимый canary                |
 
-Coverage для критического доменного набора: не менее 95% lines/statements/functions и 90%
-branches. Generated code, bootstrap wiring и декларативные migrations исключены, поскольку их
-поведение проверяется build/integration/smoke. Snapshot-only проверки бизнес-логики не
-используются.
+Unit coverage измеряет расширенную критичную поверхность: config, contracts, decision engine,
+чистую часть data sync, WB client/resilience, write executor/state machine и runtime-оркестрацию.
+Порог применяется per-file, поэтому высокий результат одного модуля не скрывает соседний файл;
+для config и decision engine действуют отдельные усиленные пороги. Репозитории БД, migrations и
+полная композиция не подменяются unit coverage: их обязательное evidence дают integration/E2E
+suites. Generated code и bootstrap entrypoints исключены. Snapshot-only проверки бизнес-логики
+не используются.
 
 ## CI
 
-PR workflow выполняет locked install, quality, PostgreSQL migrations и suites, build/smoke,
+PR workflow выполняет locked install, quality, property/mutation checks, PostgreSQL migrations и suites, build/smoke,
 Compose validation, runtime smoke mock-only/full-mock, secret/dependency/container scans и
 Markdown check. Production Compose readiness требует реальный Personal token и доступ к
 официальному WB API, поэтому выполняется как release-environment smoke; CI статически проверяет
