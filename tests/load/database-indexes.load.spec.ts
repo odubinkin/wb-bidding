@@ -15,7 +15,10 @@ const BASE_MIGRATIONS = Object.freeze([
   '202607291000_stage5_production_runtime',
   '202607291200_stage5_cluster_contract',
 ]);
-const INDEX_MIGRATIONS = Object.freeze(['202608030900_p0_query_indexes']);
+const INDEX_MIGRATIONS = Object.freeze([
+  '202608030900_p0_query_indexes',
+  '202608031000_p1_lifecycle_indexes',
+]);
 const P0_INDEXES = Object.freeze([
   'DecisionQueueItem_claim_ready_idx',
   'DecisionQueueItem_verify_due_idx',
@@ -35,6 +38,28 @@ const P0_SQL_ONLY_INDEXES = Object.freeze([
   'DecisionQueueItem_verify_due_idx',
   'CampaignStatDaily_latest_content_idx',
   'SyncSourceSnapshot_recommendation_lookup_idx',
+]);
+const P1_INDEXES = Object.freeze([
+  'BidExperiment_non_terminal_created_idx',
+  'BidDecision_createdAt_id_idx',
+  'AuditEvent_createdAt_id_idx',
+  'WbWriteAttempt_terminal_cleanup_idx',
+  'WbWriteAttempt_dispatching_recovery_idx',
+  'BiddingPolicy_target_temporal_idx',
+  'BiddingPolicy_campaign_temporal_idx',
+  'BiddingPolicy_deployment_temporal_idx',
+]);
+const P1_PRISMA_INDEXES = Object.freeze([
+  'BidDecision_createdAt_id_idx',
+  'AuditEvent_createdAt_id_idx',
+]);
+const P1_SQL_ONLY_INDEXES = Object.freeze([
+  'BidExperiment_non_terminal_created_idx',
+  'WbWriteAttempt_terminal_cleanup_idx',
+  'WbWriteAttempt_dispatching_recovery_idx',
+  'BiddingPolicy_target_temporal_idx',
+  'BiddingPolicy_campaign_temporal_idx',
+  'BiddingPolicy_deployment_temporal_idx',
 ]);
 
 describeWithDatabase('PostgreSQL query index coverage', () => {
@@ -97,6 +122,28 @@ describeWithDatabase('PostgreSQL query index coverage', () => {
       expect(schema).toContain(`map: "${index}"`);
     }
     for (const index of P0_SQL_ONLY_INDEXES) {
+      expect(schema).toContain(`SQL-only index ${index}`);
+    }
+  });
+
+  it('creates every P1 index on a clean migrated database', async () => {
+    const result = await pool.query<{ indexname: string }>(
+      `SELECT indexname
+         FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND indexname = ANY($1::text[])
+        ORDER BY indexname`,
+      [[...P1_INDEXES]],
+    );
+    expect(result.rows.map(({ indexname }) => indexname)).toEqual([...P1_INDEXES].sort());
+  });
+
+  it('declares or documents every P1 index in the Prisma schema', async () => {
+    const schema = await readFile(new URL('../../prisma/schema.prisma', import.meta.url), 'utf8');
+    for (const index of P1_PRISMA_INDEXES) {
+      expect(schema).toContain(`map: "${index}"`);
+    }
+    for (const index of P1_SQL_ONLY_INDEXES) {
       expect(schema).toContain(`SQL-only index ${index}`);
     }
   });
@@ -181,6 +228,92 @@ describeWithDatabase('PostgreSQL query index coverage', () => {
                ORDER BY "fetchedAt"`,
     },
   ])('supports the representative predicate with $index', async ({ index, query }) => {
+    const plan = await explain(query);
+    expect(plan).toContain(index);
+  });
+
+  it.each([
+    {
+      index: 'BidExperiment_non_terminal_created_idx',
+      query: `SELECT "id"
+                FROM "BidExperiment"
+               WHERE "status" IN
+                     ('PLANNED', 'ACTIVE', 'COLLECTING', 'EVALUATING', 'REVERTING')
+               ORDER BY "createdAt", "id"
+               LIMIT 100`,
+    },
+    {
+      index: 'BidDecision_createdAt_id_idx',
+      query: `SELECT "id"
+                FROM "BidDecision"
+               WHERE ("createdAt", "id") >
+                     (TIMESTAMPTZ '2026-01-01 00:00:00+00',
+                      '00000000-0000-0000-0000-000000000000'::uuid)
+               ORDER BY "createdAt", "id"
+               LIMIT 100`,
+    },
+    {
+      index: 'AuditEvent_createdAt_id_idx',
+      query: `SELECT "id"
+                FROM "AuditEvent"
+               WHERE ("createdAt", "id") >
+                     (TIMESTAMPTZ '2026-01-01 00:00:00+00',
+                      '00000000-0000-0000-0000-000000000000'::uuid)
+               ORDER BY "createdAt", "id"
+               LIMIT 100`,
+    },
+    {
+      index: 'WbWriteAttempt_terminal_cleanup_idx',
+      query: `SELECT "id"
+                FROM "WbWriteAttempt"
+               WHERE "status" IN ('ACCEPTED', 'REJECTED')
+                 AND "completedAt" < TIMESTAMPTZ '2026-08-01 00:00:00+00'
+               ORDER BY "completedAt", "id"
+               LIMIT 100`,
+    },
+    {
+      index: 'WbWriteAttempt_dispatching_recovery_idx',
+      query: `SELECT "id"
+                FROM "WbWriteAttempt"
+               WHERE "status" = 'DISPATCHING'
+                 AND "dispatchCommittedAt" < TIMESTAMPTZ '2026-08-01 00:00:00+00'`,
+    },
+    {
+      index: 'BiddingPolicy_target_temporal_idx',
+      query: `SELECT "id"
+                FROM "BiddingPolicy"
+               WHERE "enabled" = true
+                 AND "scope" = 'TARGET'
+                 AND "targetId" = '00000000-0000-0000-0000-000000000002'::uuid
+                 AND "validFrom" <= TIMESTAMPTZ '2026-08-01 00:00:00+00'
+                 AND ("validTo" IS NULL OR "validTo" > TIMESTAMPTZ '2026-08-01 00:00:00+00')
+               ORDER BY "version" DESC
+               LIMIT 1`,
+    },
+    {
+      index: 'BiddingPolicy_campaign_temporal_idx',
+      query: `SELECT "id"
+                FROM "BiddingPolicy"
+               WHERE "enabled" = true
+                 AND "scope" = 'CAMPAIGN'
+                 AND "campaignId" = '00000000-0000-0000-0000-000000000001'::uuid
+                 AND "validFrom" <= TIMESTAMPTZ '2026-08-01 00:00:00+00'
+                 AND ("validTo" IS NULL OR "validTo" > TIMESTAMPTZ '2026-08-01 00:00:00+00')
+               ORDER BY "version" DESC
+               LIMIT 1`,
+    },
+    {
+      index: 'BiddingPolicy_deployment_temporal_idx',
+      query: `SELECT "id"
+                FROM "BiddingPolicy"
+               WHERE "enabled" = true
+                 AND "scope" = 'DEPLOYMENT'
+                 AND "validFrom" <= TIMESTAMPTZ '2026-08-01 00:00:00+00'
+                 AND ("validTo" IS NULL OR "validTo" > TIMESTAMPTZ '2026-08-01 00:00:00+00')
+               ORDER BY "version" DESC
+               LIMIT 1`,
+    },
+  ])('supports the P1 representative predicate with $index', async ({ index, query }) => {
     const plan = await explain(query);
     expect(plan).toContain(index);
   });

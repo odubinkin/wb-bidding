@@ -436,6 +436,9 @@ model BiddingPolicy {
   createdByActor  String
   metricSnapshots MetricSnapshot[]
 
+  // SQL-only index BiddingPolicy_target_temporal_idx is partial and uses INCLUDE columns.
+  // SQL-only index BiddingPolicy_campaign_temporal_idx is partial and uses INCLUDE columns.
+  // SQL-only index BiddingPolicy_deployment_temporal_idx is partial and uses INCLUDE columns.
   @@unique([scope, campaignId, targetId, version])
   @@index([scope, campaignId, targetId, validFrom, validTo])
 }
@@ -487,6 +490,7 @@ model BidDecision {
   writeAttemptItems     WbWriteAttemptItem[]
 
   @@index([targetId, createdAt])
+  @@index([createdAt, id], map: "BidDecision_createdAt_id_idx")
 }
 
 model BidExperiment {
@@ -522,6 +526,7 @@ model BidExperiment {
   createdAt                    DateTime         @default(now()) @db.Timestamptz(3)
   completedAt                  DateTime?        @db.Timestamptz(3)
 
+  // SQL-only index BidExperiment_non_terminal_created_idx is partial.
   @@index([targetId, status])
 }
 
@@ -580,6 +585,8 @@ model WbWriteAttempt {
   errorCode             String?
   items                 WbWriteAttemptItem[]
 
+  // SQL-only index WbWriteAttempt_terminal_cleanup_idx is partial.
+  // SQL-only index WbWriteAttempt_dispatching_recovery_idx is partial.
   @@index([status, preparedAt])
 }
 
@@ -701,6 +708,7 @@ model AuditEvent {
 
   @@index([entityType, entityId, createdAt])
   @@index([correlationId])
+  @@index([createdAt, id], map: "AuditEvent_createdAt_id_idx")
 }
 
 model SchedulerRun {
