@@ -1,10 +1,11 @@
 ---
 id: "202608031232-VPA795"
 title: "Prevent built smoke response timeout after HTTP success"
-status: "DOING"
+result_summary: "Built smoke responses are detached from expired request timeout signals."
+status: "DONE"
 priority: "med"
 owner: "CODER"
-revision: 14
+revision: 15
 origin:
   system: "manual"
 depends_on: []
@@ -37,11 +38,16 @@ quality_review:
     - ".agentplane/tasks/202608031232-VPA795/blueprint/resolved-snapshot.json"
   findings:
     - "Successful responses are now fully consumed while their one-second timeout is active, and later parsing uses a detached Response; syntax, quality, build, routing, and workflow checks passed."
-commit: null
+commit:
+  hash: "0264ca8d9fc1d1eeb836457b89ce0ce11da50c7f"
+  message: "🚧 VPA795 task: detach built smoke response timeouts"
 comments:
   -
     author: "CODER"
     body: "Start: continue direct-mode task in current checkout."
+  -
+    author: "CODER"
+    body: "Verified: timeout-safe response buffering passes all approved local checks and evaluator review, with CI smoke explicitly pending."
 events:
   -
     type: "status"
@@ -56,8 +62,15 @@ events:
     author: "CODER"
     state: "ok"
     note: "Response detachment fix passes syntax, formatting, full quality, build, routing, and workflow checks; database-backed smoke is an approved local skip pending CI because DATABASE_URL is absent."
+  -
+    type: "status"
+    at: "2026-08-03T12:36:51.003Z"
+    author: "CODER"
+    from: "DOING"
+    to: "DONE"
+    note: "Verified: timeout-safe response buffering passes all approved local checks and evaluator review, with CI smoke explicitly pending."
 doc_version: 3
-doc_updated_at: "2026-08-03T12:35:52.786Z"
+doc_updated_at: "2026-08-03T12:36:51.005Z"
 doc_updated_by: "CODER"
 description: "Fix smoke-built-apps so per-request timeout signals cannot abort successful response bodies while later startup probes finish. Preserve bounded startup retries and validate the built artifacts path without external service setup."
 sections:
