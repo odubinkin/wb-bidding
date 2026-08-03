@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "task_id": "202608031202-GSETF7",
+  "evaluator_id": "recovery-context",
+  "evaluator_profile": "EVALUATOR",
+  "generated_at": "2026-08-03T12:07:34.946Z",
+  "verdict": "pass",
+  "summary": "The scoped quality bootstrap fix satisfies the approved fresh-checkout acceptance contract.",
+  "evaluated_sha": "ed33004da14f76fe27b770b77ebc1401076a229c",
+  "blueprint_digest": "ed7667151fa58c7217113a5a994e1c6b47ecb32d9d0d36cdd41663b590f95fcc",
+  "findings": [
+    "package.json now generates the ignored Prisma client before type-aware checks; the client-absent pnpm run quality check and required routing and workflow checks passed."
+  ],
+  "evidence_refs": [
+    ".agentplane/tasks/202608031202-GSETF7/README.md",
+    "pnpm run quality"
+  ],
+  "missing_tests": [],
+  "hidden_assumptions": [],
+  "residual_risks": [
+    "The generated client remains ignored by design, so direct lint or typecheck commands still assume generation; the CI quality entrypoint is now self-contained."
+  ]
+}

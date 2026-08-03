@@ -4,7 +4,7 @@ title: "Make quality checks generate Prisma client in fresh checkouts"
 status: "DOING"
 priority: "med"
 owner: "CODER"
-revision: 13
+revision: 16
 origin:
   system: "manual"
 depends_on: []
@@ -18,10 +18,26 @@ plan_approval:
   note: null
 verification:
   state: "ok"
-  updated_at: "2026-08-03T12:06:29.632Z"
+  updated_at: "2026-08-03T12:07:46.845Z"
   updated_by: "CODER"
-  note: "Fresh-state pnpm run quality passed after Prisma generation was added; routing policy and AgentPlane doctor also passed, with only pre-existing informational and historical warnings."
+  note: "verified-202608031202-GSETF7"
   attempts: 0
+quality_review:
+  state: "pass"
+  updated_at: "2026-08-03T12:07:34.946Z"
+  updated_by: "EVALUATOR"
+  note: "The scoped quality bootstrap fix satisfies the approved fresh-checkout acceptance contract."
+  evaluated_sha: "ed33004da14f76fe27b770b77ebc1401076a229c"
+  blueprint_digest: "ed7667151fa58c7217113a5a994e1c6b47ecb32d9d0d36cdd41663b590f95fcc"
+  evidence_refs:
+    - ".agentplane/tasks/202608031202-GSETF7/README.md"
+    - ".agentplane/tasks/202608031202-GSETF7/quality/20260803-120734946-recovery-context/quality-report.json"
+    - ".agentplane/tasks/202608031202-GSETF7/quality/20260803-120734946-recovery-context/evaluator-prompt.md"
+    - ".agentplane/tasks/202608031202-GSETF7/quality/20260803-120734946-recovery-context/evaluator-opinion.md"
+    - ".agentplane/tasks/202608031202-GSETF7/blueprint/resolved-snapshot.json"
+    - "pnpm run quality"
+  findings:
+    - "package.json now generates the ignored Prisma client before type-aware checks; the client-absent pnpm run quality check and required routing and workflow checks passed."
 commit: null
 comments:
   -
@@ -41,8 +57,20 @@ events:
     author: "CODER"
     state: "ok"
     note: "Fresh-state pnpm run quality passed after Prisma generation was added; routing policy and AgentPlane doctor also passed, with only pre-existing informational and historical warnings."
+  -
+    type: "verify"
+    at: "2026-08-03T12:07:08.541Z"
+    author: "CODER"
+    state: "ok"
+    note: "verified-202608031202-GSETF7"
+  -
+    type: "verify"
+    at: "2026-08-03T12:07:46.845Z"
+    author: "CODER"
+    state: "ok"
+    note: "verified-202608031202-GSETF7"
 doc_version: 3
-doc_updated_at: "2026-08-03T12:06:29.711Z"
+doc_updated_at: "2026-08-03T12:07:47.067Z"
 doc_updated_by: "CODER"
 description: "Fix the CI quality failure where ignored Prisma client output is absent after a frozen install, causing cascading type-aware ESLint errors. Keep the change minimal and verify both fresh generated-state behavior and the full quality command."
 sections:
@@ -77,6 +105,66 @@ sections:
     - operator_action: run_exact_argv
     - can_execute_now: true
     - safe_command: agentplane task verify-show 202608031202-GSETF7
+    - diagnostic_command: none
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: true
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: none
+
+    ### 2026-08-03T12:07:08.541Z — VERIFY — ok
+
+    By: CODER
+
+    Note: verified-202608031202-GSETF7
+    Attempts: 0
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-08-03T12:06:29.711Z, excerpt_hash=sha256:467a144d66728d57ca6c589e28a0fa934acb91c877a9191348886d640725b2fb
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202608031202-GSETF7/blueprint/resolved-snapshot.json
+    - old_digest: ed7667151fa58c7217113a5a994e1c6b47ecb32d9d0d36cdd41663b590f95fcc
+    - current_digest: ed7667151fa58c7217113a5a994e1c6b47ecb32d9d0d36cdd41663b590f95fcc
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202608031202-GSETF7
+
+    DecisionContextRef:
+    - operator_action: run_exact_argv
+    - can_execute_now: true
+    - safe_command: agentplane task complete 202608031202-GSETF7 --result verified-202608031202-GSETF7 --commit ed33004da14f76fe27b770b77ebc1401076a229c
+    - diagnostic_command: none
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: true
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: none
+
+    ### 2026-08-03T12:07:46.845Z — VERIFY — ok
+
+    By: CODER
+
+    Note: verified-202608031202-GSETF7
+    Attempts: 0
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-08-03T12:07:08.622Z, excerpt_hash=sha256:467a144d66728d57ca6c589e28a0fa934acb91c877a9191348886d640725b2fb
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202608031202-GSETF7/blueprint/resolved-snapshot.json
+    - old_digest: ed7667151fa58c7217113a5a994e1c6b47ecb32d9d0d36cdd41663b590f95fcc
+    - current_digest: ed7667151fa58c7217113a5a994e1c6b47ecb32d9d0d36cdd41663b590f95fcc
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202608031202-GSETF7
+
+    DecisionContextRef:
+    - operator_action: run_exact_argv
+    - can_execute_now: true
+    - safe_command: agentplane task complete 202608031202-GSETF7 --result verified-202608031202-GSETF7 --commit ed33004da14f76fe27b770b77ebc1401076a229c
     - diagnostic_command: none
     - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
     - freshness: route=computed_local remote=remote_skipped
@@ -133,6 +221,66 @@ DecisionContextRef:
 - operator_action: run_exact_argv
 - can_execute_now: true
 - safe_command: agentplane task verify-show 202608031202-GSETF7
+- diagnostic_command: none
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: true
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: none
+
+### 2026-08-03T12:07:08.541Z — VERIFY — ok
+
+By: CODER
+
+Note: verified-202608031202-GSETF7
+Attempts: 0
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-08-03T12:06:29.711Z, excerpt_hash=sha256:467a144d66728d57ca6c589e28a0fa934acb91c877a9191348886d640725b2fb
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202608031202-GSETF7/blueprint/resolved-snapshot.json
+- old_digest: ed7667151fa58c7217113a5a994e1c6b47ecb32d9d0d36cdd41663b590f95fcc
+- current_digest: ed7667151fa58c7217113a5a994e1c6b47ecb32d9d0d36cdd41663b590f95fcc
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202608031202-GSETF7
+
+DecisionContextRef:
+- operator_action: run_exact_argv
+- can_execute_now: true
+- safe_command: agentplane task complete 202608031202-GSETF7 --result verified-202608031202-GSETF7 --commit ed33004da14f76fe27b770b77ebc1401076a229c
+- diagnostic_command: none
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: true
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: none
+
+### 2026-08-03T12:07:46.845Z — VERIFY — ok
+
+By: CODER
+
+Note: verified-202608031202-GSETF7
+Attempts: 0
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-08-03T12:07:08.622Z, excerpt_hash=sha256:467a144d66728d57ca6c589e28a0fa934acb91c877a9191348886d640725b2fb
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202608031202-GSETF7/blueprint/resolved-snapshot.json
+- old_digest: ed7667151fa58c7217113a5a994e1c6b47ecb32d9d0d36cdd41663b590f95fcc
+- current_digest: ed7667151fa58c7217113a5a994e1c6b47ecb32d9d0d36cdd41663b590f95fcc
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202608031202-GSETF7
+
+DecisionContextRef:
+- operator_action: run_exact_argv
+- can_execute_now: true
+- safe_command: agentplane task complete 202608031202-GSETF7 --result verified-202608031202-GSETF7 --commit ed33004da14f76fe27b770b77ebc1401076a229c
 - diagnostic_command: none
 - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
 - freshness: route=computed_local remote=remote_skipped
