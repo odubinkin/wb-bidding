@@ -1,10 +1,11 @@
 ---
 id: "202608031140-GTAYB9"
 title: "Fix GitHub Actions action versions"
-status: "DOING"
+result_summary: "Updated CI to resolvable Trivy and Node.js 24-compatible action versions"
+status: "DONE"
 priority: "high"
 owner: "CODER"
-revision: 8
+revision: 11
 origin:
   system: "manual"
 depends_on: []
@@ -29,7 +30,7 @@ plan_approval:
   note: null
 verification:
   state: "ok"
-  updated_at: "2026-08-03T11:43:39.772Z"
+  updated_at: "2026-08-03T11:43:56.605Z"
   updated_by: "CODER"
   note: "verified-202608031140-GTAYB9"
   attempts: 0
@@ -51,11 +52,19 @@ quality_review:
     - "task verification record: prettier, YAML parse, doctor, and routing checks passed"
   findings:
     - "No correctness or scope defects found: both jobs retain their commands and inputs; only action refs changed."
-commit: null
+commit:
+  hash: "bffb986bd0c17351ef5752fd477bdea4e2819e65"
+  message: "🚧 GTAYB9 task: record evaluator pass"
 comments:
   -
     author: "CODER"
     body: "Start: inspect the failed GitHub Actions run, update only CI action refs, and execute the approved verification contract."
+  -
+    author: "CODER"
+    body: "Verified: verified-202608031140-GTAYB9. Guided shortcut recorded verification and is closing the direct task with traceable commit metadata."
+  -
+    author: "CODER"
+    body: "Verified: CI now references resolvable Trivy and Node.js 24-compatible GitHub Actions; upstream refs, formatting, YAML parsing, policy routing, and evaluator review all passed."
 events:
   -
     type: "status"
@@ -76,8 +85,28 @@ events:
     author: "CODER"
     state: "ok"
     note: "verified-202608031140-GTAYB9"
+  -
+    type: "verify"
+    at: "2026-08-03T11:43:56.605Z"
+    author: "CODER"
+    state: "ok"
+    note: "verified-202608031140-GTAYB9"
+  -
+    type: "status"
+    at: "2026-08-03T11:43:56.887Z"
+    author: "CODER"
+    from: "DOING"
+    to: "DONE"
+    note: "Verified: verified-202608031140-GTAYB9. Guided shortcut recorded verification and is closing the direct task with traceable commit metadata."
+  -
+    type: "status"
+    at: "2026-08-03T11:44:34.646Z"
+    author: "CODER"
+    from: "DONE"
+    to: "DONE"
+    note: "Verified: CI now references resolvable Trivy and Node.js 24-compatible GitHub Actions; upstream refs, formatting, YAML parsing, policy routing, and evaluator review all passed."
 doc_version: 3
-doc_updated_at: "2026-08-03T11:43:39.860Z"
+doc_updated_at: "2026-08-03T11:44:34.648Z"
 doc_updated_by: "CODER"
 description: "Repair the failing CI workflow by replacing the unresolved Trivy action tag and upgrading JavaScript-based actions away from deprecated Node.js 20 runtimes, without changing job behavior."
 sections:
@@ -167,6 +196,36 @@ sections:
     - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
     - risks: none
 
+    ### 2026-08-03T11:43:56.605Z — VERIFY — ok
+
+    By: CODER
+
+    Note: verified-202608031140-GTAYB9
+    Attempts: 0
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-08-03T11:43:39.860Z, excerpt_hash=sha256:521e658c776db8cb80cdee5840e00e983d2a7540be229db82d3dd74d6d1a0e82
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202608031140-GTAYB9/blueprint/resolved-snapshot.json
+    - old_digest: 91b6568af90914ceb764a3ff46bf093c7b98247877e4e97e09c7a2344b4efe34
+    - current_digest: 91b6568af90914ceb764a3ff46bf093c7b98247877e4e97e09c7a2344b4efe34
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202608031140-GTAYB9
+
+    DecisionContextRef:
+    - operator_action: run_exact_argv
+    - can_execute_now: true
+    - safe_command: agentplane task complete 202608031140-GTAYB9 --result verified-202608031140-GTAYB9 --commit bffb986bd0c17351ef5752fd477bdea4e2819e65
+    - diagnostic_command: none
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: true
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: none
+
     <!-- END VERIFICATION RESULTS -->
   Rollback Plan: |-
     - Revert task-related commit(s).
@@ -175,6 +234,10 @@ sections:
     - Observation: The local environment has no actionlint binary, and the first Ruby fallback used an unavailable Psych safe_load_file method.
       Impact: Full actionlint semantic validation was unavailable locally; the first fallback attempt did not validate the file.
       Resolution: The supported YAML.safe_load API parsed both jobs successfully, all replacement refs resolved upstream, and hosted CI remains the final post-push confirmation.
+extensions:
+  implementation_commit:
+    hash: "be2876631ec9b2e03965576533c24742223c4c4e"
+    message: "🚧 GTAYB9 task: fix GitHub Actions action versions"
 id_source: "generated"
 ---
 ## Summary
@@ -266,6 +329,36 @@ DecisionContextRef:
 - operator_action: run_exact_argv
 - can_execute_now: true
 - safe_command: agentplane task complete 202608031140-GTAYB9 --result verified-202608031140-GTAYB9 --commit be2876631ec9b2e03965576533c24742223c4c4e
+- diagnostic_command: none
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: true
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: none
+
+### 2026-08-03T11:43:56.605Z — VERIFY — ok
+
+By: CODER
+
+Note: verified-202608031140-GTAYB9
+Attempts: 0
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-08-03T11:43:39.860Z, excerpt_hash=sha256:521e658c776db8cb80cdee5840e00e983d2a7540be229db82d3dd74d6d1a0e82
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202608031140-GTAYB9/blueprint/resolved-snapshot.json
+- old_digest: 91b6568af90914ceb764a3ff46bf093c7b98247877e4e97e09c7a2344b4efe34
+- current_digest: 91b6568af90914ceb764a3ff46bf093c7b98247877e4e97e09c7a2344b4efe34
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202608031140-GTAYB9
+
+DecisionContextRef:
+- operator_action: run_exact_argv
+- can_execute_now: true
+- safe_command: agentplane task complete 202608031140-GTAYB9 --result verified-202608031140-GTAYB9 --commit bffb986bd0c17351ef5752fd477bdea4e2819e65
 - diagnostic_command: none
 - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
 - freshness: route=computed_local remote=remote_skipped
