@@ -4,7 +4,7 @@ title: "Fix TypeScript lint rootDir errors"
 status: "DOING"
 priority: "med"
 owner: "CODER"
-revision: 15
+revision: 16
 origin:
   system: "manual"
 depends_on: []
@@ -27,6 +27,22 @@ verification:
     Command: pnpm run test:unit. Result: pass. Evidence: 13 files and 126 tests passed. Scope: unit regressions.
     Command: git diff --check; ap doctor; routing policy check. Result: pass. Evidence: no whitespace errors, doctor OK, policy routing OK. Scope: task diff and workflow integrity.
   attempts: 0
+quality_review:
+  state: "pass"
+  updated_at: "2026-08-03T10:38:53.080Z"
+  updated_by: "EVALUATOR"
+  note: "Workspace migrated to TypeScript 6.0.3 with explicit TS6 project boundaries and Node globals."
+  evaluated_sha: "2200cca31d3b913627bbbc42e36abce528dc8bae"
+  blueprint_digest: "3cb73a476d2755c2cc41b5f5cd365470ffd2012ea0943fb3df29cf51e25348b7"
+  evidence_refs:
+    - ".agentplane/tasks/202608031026-NBMN10/README.md"
+    - ".agentplane/tasks/202608031026-NBMN10/quality/20260803-103853080-recovery-context/quality-report.json"
+    - ".agentplane/tasks/202608031026-NBMN10/quality/20260803-103853080-recovery-context/evaluator-prompt.md"
+    - ".agentplane/tasks/202608031026-NBMN10/quality/20260803-103853080-recovery-context/evaluator-opinion.md"
+    - ".agentplane/tasks/202608031026-NBMN10/blueprint/resolved-snapshot.json"
+    - "commits 5c122fd and 2200cca; pnpm tsc 6.0.3; lint/typecheck/build/unit logs"
+  findings:
+    - "All nine project configs, repository lint/typecheck/build, frozen install, and 126 unit tests pass; lockfile contains no unrelated dependency upgrades."
 commit: null
 comments:
   -

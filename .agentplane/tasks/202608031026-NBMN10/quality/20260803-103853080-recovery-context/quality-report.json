@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "task_id": "202608031026-NBMN10",
+  "evaluator_id": "recovery-context",
+  "evaluator_profile": "EVALUATOR",
+  "generated_at": "2026-08-03T10:38:53.080Z",
+  "verdict": "pass",
+  "summary": "Workspace migrated to TypeScript 6.0.3 with explicit TS6 project boundaries and Node globals.",
+  "evaluated_sha": "2200cca31d3b913627bbbc42e36abce528dc8bae",
+  "blueprint_digest": "3cb73a476d2755c2cc41b5f5cd365470ffd2012ea0943fb3df29cf51e25348b7",
+  "findings": [
+    "All nine project configs, repository lint/typecheck/build, frozen install, and 126 unit tests pass; lockfile contains no unrelated dependency upgrades."
+  ],
+  "evidence_refs": [
+    ".agentplane/tasks/202608031026-NBMN10/README.md",
+    "commits 5c122fd and 2200cca; pnpm tsc 6.0.3; lint/typecheck/build/unit logs"
+  ],
+  "missing_tests": [],
+  "hidden_assumptions": [],
+  "residual_risks": []
+}
