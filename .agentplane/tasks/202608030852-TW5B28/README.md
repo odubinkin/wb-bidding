@@ -4,7 +4,7 @@ title: "Strengthen critical scenario test coverage"
 status: "DOING"
 priority: "high"
 owner: "TESTER"
-revision: 14
+revision: 16
 origin:
   system: "manual"
 depends_on: []
@@ -31,10 +31,30 @@ plan_approval:
   note: null
 verification:
   state: "ok"
-  updated_at: "2026-08-03T09:15:51.251Z"
-  updated_by: "TESTER"
-  note: "Expanded critical coverage and all approved verification layers pass."
+  updated_at: "2026-08-03T09:17:52.226Z"
+  updated_by: "CODER"
+  note: "verified-202608030852-TW5B28"
   attempts: 0
+quality_review:
+  state: "pass"
+  updated_at: "2026-08-03T09:17:38.474Z"
+  updated_by: "EVALUATOR"
+  note: "Coverage hardening is scoped, deterministic, and fully verified without production behavior changes."
+  evaluated_sha: "19f36324952177c65827518a65472830e3c2b563"
+  blueprint_digest: "d276a4ec4eaba10fd518dd9c6b4b8903a49d2861f382260e2fcc36ac5bf81166"
+  evidence_refs:
+    - ".agentplane/tasks/202608030852-TW5B28/README.md"
+    - ".agentplane/tasks/202608030852-TW5B28/quality/20260803-091738474-recovery-context/quality-report.json"
+    - ".agentplane/tasks/202608030852-TW5B28/quality/20260803-091738474-recovery-context/evaluator-prompt.md"
+    - ".agentplane/tasks/202608030852-TW5B28/quality/20260803-091738474-recovery-context/evaluator-opinion.md"
+    - ".agentplane/tasks/202608030852-TW5B28/blueprint/resolved-snapshot.json"
+    - "pnpm run quality: pass, 125 unit tests and 79.97% line coverage over expanded scope"
+    - "PostgreSQL 18: 36 integration, 4 E2E, 23 load, and 30 runbook tests pass"
+    - "pnpm run test:mutation: 100% score, 9/9 killed"
+    - "pnpm run build; ap doctor; policy routing: pass"
+  findings:
+    - "The former narrow aggregate coverage gate is replaced by expanded per-file measurement with stronger domain overrides."
+    - "Runtime bootstrap, scheduler shutdown, Admin success routes, Stage 5 populated upgrade, and real bidder bootstrap now have executable regression evidence."
 commit: null
 comments:
   -
@@ -54,8 +74,14 @@ events:
     author: "TESTER"
     state: "ok"
     note: "Expanded critical coverage and all approved verification layers pass."
+  -
+    type: "verify"
+    at: "2026-08-03T09:17:52.226Z"
+    author: "CODER"
+    state: "ok"
+    note: "verified-202608030852-TW5B28"
 doc_version: 3
-doc_updated_at: "2026-08-03T09:16:27.684Z"
+doc_updated_at: "2026-08-03T09:17:52.396Z"
 doc_updated_by: "TESTER"
 description: "Close the approved gaps in CI coverage gates, runtime composition, Admin API, runbook shutdown, database migration coverage, and representative system E2E tests without modifying production behavior."
 sections:
@@ -128,6 +154,36 @@ sections:
     - operator_action: run_exact_argv
     - can_execute_now: true
     - safe_command: agentplane task verify-show 202608030852-TW5B28
+    - diagnostic_command: none
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: true
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: none
+
+    ### 2026-08-03T09:17:52.226Z — VERIFY — ok
+
+    By: CODER
+
+    Note: verified-202608030852-TW5B28
+    Attempts: 0
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-08-03T09:16:27.684Z, excerpt_hash=sha256:843509e7ac560015434194ed758c1026e587da686a456122b3ccdc3d434303fa
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202608030852-TW5B28/blueprint/resolved-snapshot.json
+    - old_digest: d276a4ec4eaba10fd518dd9c6b4b8903a49d2861f382260e2fcc36ac5bf81166
+    - current_digest: d276a4ec4eaba10fd518dd9c6b4b8903a49d2861f382260e2fcc36ac5bf81166
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202608030852-TW5B28
+
+    DecisionContextRef:
+    - operator_action: run_exact_argv
+    - can_execute_now: true
+    - safe_command: agentplane task complete 202608030852-TW5B28 --result verified-202608030852-TW5B28 --commit 19f36324952177c65827518a65472830e3c2b563
     - diagnostic_command: none
     - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
     - freshness: route=computed_local remote=remote_skipped
@@ -232,6 +288,36 @@ DecisionContextRef:
 - operator_action: run_exact_argv
 - can_execute_now: true
 - safe_command: agentplane task verify-show 202608030852-TW5B28
+- diagnostic_command: none
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: true
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: none
+
+### 2026-08-03T09:17:52.226Z — VERIFY — ok
+
+By: CODER
+
+Note: verified-202608030852-TW5B28
+Attempts: 0
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-08-03T09:16:27.684Z, excerpt_hash=sha256:843509e7ac560015434194ed758c1026e587da686a456122b3ccdc3d434303fa
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202608030852-TW5B28/blueprint/resolved-snapshot.json
+- old_digest: d276a4ec4eaba10fd518dd9c6b4b8903a49d2861f382260e2fcc36ac5bf81166
+- current_digest: d276a4ec4eaba10fd518dd9c6b4b8903a49d2861f382260e2fcc36ac5bf81166
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202608030852-TW5B28
+
+DecisionContextRef:
+- operator_action: run_exact_argv
+- can_execute_now: true
+- safe_command: agentplane task complete 202608030852-TW5B28 --result verified-202608030852-TW5B28 --commit 19f36324952177c65827518a65472830e3c2b563
 - diagnostic_command: none
 - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
 - freshness: route=computed_local remote=remote_skipped
