@@ -71,6 +71,7 @@ async function executeTestStatement<TRow>(
   if (
     normalized.startsWith('SELECT') ||
     normalized.startsWith('WITH') ||
+    normalized.startsWith('EXPLAIN') ||
     /\bRETURNING\b/u.test(normalized)
   ) {
     const rows = await database.$queryRawUnsafe<TRow[]>(statement, ...values);

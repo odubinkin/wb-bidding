@@ -302,6 +302,8 @@ model CampaignStatDaily {
   sourceChecksum            String             @db.Char(64)
   syncRunId                 String             @db.Uuid
   normalizedAggregationKind String
+  // SQL-only index CampaignStatDaily_latest_content_idx uses COALESCE(normQueryCanonical, '')
+  // in its key, which Prisma schema index definitions cannot express.
 
   @@unique([wbCampaignId, nmId, date, sourceVersion, appType])
   @@index([campaignId, date])
@@ -547,6 +549,8 @@ model DecisionQueueItem {
   manualRetryBlocked       Boolean             @default(false)
   failureClassification    String?
   version                  BigInt              @default(1)
+  // SQL-only index DecisionQueueItem_claim_ready_idx is partial and uses INCLUDE columns.
+  // SQL-only index DecisionQueueItem_verify_due_idx is partial, uses NULLS FIRST, and uses INCLUDE.
 
   @@index([status, availableAt, priority])
   @@index([leaseUntil])
@@ -765,10 +769,15 @@ model SyncSourceSnapshot {
   invalidReason   String?
   syncRunId       String          @db.Uuid
   createdAt       DateTime        @default(now()) @db.Timestamptz(3)
+  // SQL-only index SyncSourceSnapshot_recommendation_lookup_idx is partial and indexes
+  // the normalizedData ->> 'nmId' JSON expression, neither of which Prisma can express here.
 
   @@index([dataKind, fetchedAt])
   @@index([targetId, dataKind, fetchedAt])
   @@index([syncRunId])
+  @@index([campaignId, dataKind, fetchedAt(sort: Desc), createdAt(sort: Desc)], map: "SyncSourceSnapshot_campaign_latest_idx")
+  @@index([dataKind, campaignId, sourceDate, sourceChecksum, valid, fetchedAt], map: "SyncSourceSnapshot_campaign_evidence_idx")
+  @@index([dataKind, targetId, sourceDate, sourceChecksum, valid, fetchedAt], map: "SyncSourceSnapshot_target_evidence_idx")
 }
 
 model TargetDataSnapshot {
