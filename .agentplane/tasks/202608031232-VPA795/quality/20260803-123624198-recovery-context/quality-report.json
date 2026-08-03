@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "task_id": "202608031232-VPA795",
+  "evaluator_id": "recovery-context",
+  "evaluator_profile": "EVALUATOR",
+  "generated_at": "2026-08-03T12:36:24.198Z",
+  "verdict": "pass",
+  "summary": "The scoped timeout-detachment fix satisfies the approved local acceptance contract and preserves bounded startup behavior.",
+  "evaluated_sha": "0264ca8d9fc1d1eeb836457b89ce0ce11da50c7f",
+  "blueprint_digest": "7a7c2cc11600ca6d2fd5563e30dbc67b4bd1c6379bedd3c88495c4ef6a6df78f",
+  "findings": [
+    "Successful responses are now fully consumed while their one-second timeout is active, and later parsing uses a detached Response; syntax, quality, build, routing, and workflow checks passed."
+  ],
+  "evidence_refs": [
+    ".agentplane/tasks/202608031232-VPA795/README.md"
+  ],
+  "missing_tests": [
+    "pnpm run smoke:built was not run locally because DATABASE_URL is absent; the approved plan assigns the full database-backed check to CI."
+  ],
+  "hidden_assumptions": [],
+  "residual_risks": [
+    "CI must confirm the complete bidder and mock process smoke with PostgreSQL."
+  ]
+}
