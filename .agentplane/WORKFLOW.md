@@ -67,8 +67,8 @@ execution:
     - "Credential, keychain, or SSH material changes."
 framework:
   cli:
-    expected_version: "0.6.24"
-  last_update: "2026-07-27T10:27:35.212Z"
+    expected_version: "0.6.25"
+  last_update: "2026-08-03T07:50:31.641Z"
   source: "https://github.com/basilisk-labs/agentplane"
 in_scope_paths:
   - "**"
