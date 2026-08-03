@@ -1,10 +1,11 @@
 ---
 id: "202608031202-GSETF7"
 title: "Make quality checks generate Prisma client in fresh checkouts"
-status: "DOING"
+result_summary: "Quality now generates Prisma Client before type-aware checks in fresh checkouts."
+status: "DONE"
 priority: "med"
 owner: "CODER"
-revision: 16
+revision: 17
 origin:
   system: "manual"
 depends_on: []
@@ -38,11 +39,16 @@ quality_review:
     - "pnpm run quality"
   findings:
     - "package.json now generates the ignored Prisma client before type-aware checks; the client-absent pnpm run quality check and required routing and workflow checks passed."
-commit: null
+commit:
+  hash: "ed33004da14f76fe27b770b77ebc1401076a229c"
+  message: "🚧 GSETF7 task: generate Prisma client before quality checks"
 comments:
   -
     author: "CODER"
     body: "Start: continue direct-mode task in current checkout."
+  -
+    author: "CODER"
+    body: "Verified: fresh-state quality regenerated Prisma Client and all declared checks passed without scope drift."
 events:
   -
     type: "status"
@@ -69,8 +75,15 @@ events:
     author: "CODER"
     state: "ok"
     note: "verified-202608031202-GSETF7"
+  -
+    type: "status"
+    at: "2026-08-03T12:08:24.702Z"
+    author: "CODER"
+    from: "DOING"
+    to: "DONE"
+    note: "Verified: fresh-state quality regenerated Prisma Client and all declared checks passed without scope drift."
 doc_version: 3
-doc_updated_at: "2026-08-03T12:07:47.067Z"
+doc_updated_at: "2026-08-03T12:08:24.704Z"
 doc_updated_by: "CODER"
 description: "Fix the CI quality failure where ignored Prisma client output is absent after a frozen install, causing cascading type-aware ESLint errors. Keep the change minimal and verify both fresh generated-state behavior and the full quality command."
 sections:
