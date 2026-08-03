@@ -1,4 +1,3 @@
-/* eslint-disable jsdoc/check-param-names, jsdoc/require-jsdoc, jsdoc/require-param */
 import { Rational, divideOrNull } from './rational.js';
 import type {
   BidCandidate,
@@ -9,6 +8,9 @@ import type {
 
 const PPM = 1_000_000n;
 
+/**
+ * Defines the data contract for exact bucket.
+ */
 interface ExactBucket {
   readonly bidMinor: bigint;
   readonly clicks: bigint;
@@ -41,9 +43,9 @@ export interface DiagnosticMetrics {
 /**
  * Builds deterministic exact response buckets, including weighted PAVA and safety adjustments.
  *
- * @param days - Eligible finalized days from the baseline window.
- * @param paymentType - Target payment type.
- * @param policy - Resolved immutable policy.
+ * @param days Eligible finalized days from the baseline window.
+ * @param paymentType Target payment type.
+ * @param policy Resolved immutable policy.
  * @returns Public bucket explanation and an opaque exact curve.
  */
 export function buildBidResponseCurve(
@@ -171,10 +173,10 @@ export function buildBidResponseCurve(
 /**
  * Scores a candidate only inside the evidence-supported interval.
  *
- * @param candidateBidMinor - Candidate bid.
- * @param curve - Exact response curve.
- * @param contributionMinor - Signed contribution per ordered unit.
- * @param horizonDays - Positive prediction horizon.
+ * @param candidateBidMinor Candidate bid.
+ * @param curve Exact response curve.
+ * @param contributionMinor Signed contribution per ordered unit.
+ * @param horizonDays Positive prediction horizon.
  * @returns Candidate score, or null when extrapolation would be required.
  */
 export function scoreCandidate(
@@ -230,8 +232,8 @@ export function scoreCandidate(
 /**
  * Selects the maximum exact score with the normative deterministic tie-break.
  *
- * @param candidates - Candidate scores.
- * @param currentBidMinor - Current confirmed bid.
+ * @param candidates Candidate scores.
+ * @param currentBidMinor Current confirmed bid.
  * @returns Winning candidate.
  */
 export function selectBestCandidate(
@@ -267,7 +269,12 @@ export function selectBestCandidate(
 /**
  * Calculates diagnostic ratios with explicit zero-denominator handling.
  *
- * @param totals - Exact aggregate counters.
+ * @param totals Exact aggregate counters.
+ * @param totals.attributedRevenueMinor attributed revenue minor field of the validated totals.
+ * @param totals.clicks clicks field of the validated totals.
+ * @param totals.orderedUnits ordered units field of the validated totals.
+ * @param totals.spendMinor spend minor field of the validated totals.
+ * @param totals.views views field of the validated totals.
  * @returns Scale-six decimal ratios or null.
  */
 export function calculateDiagnosticMetrics(totals: {
@@ -293,7 +300,7 @@ export function calculateDiagnosticMetrics(totals: {
 /**
  * Performs weighted non-decreasing isotonic regression.
  *
- * @param points - Exact values and positive weights.
+ * @param points Exact values and positive weights.
  * @returns One adjusted value per input point.
  */
 export function weightedPava(
@@ -348,11 +355,11 @@ export function weightedPava(
 /**
  * Interpolates inside a closed bid interval without floating point.
  *
- * @param leftBid - Left bound.
- * @param leftValue - Left exact value.
- * @param rightBid - Right bound.
- * @param rightValue - Right exact value.
- * @param candidateBid - Candidate inside the interval.
+ * @param leftBid Left bound.
+ * @param leftValue Left exact value.
+ * @param rightBid Right bound.
+ * @param rightValue Right exact value.
+ * @param candidateBid Candidate inside the interval.
  * @returns Exact interpolated value.
  */
 export function interpolate(
@@ -369,6 +376,12 @@ export function interpolate(
   return leftValue.add(rightValue.subtract(leftValue).multiply(position));
 }
 
+/**
+ * Converts to public bucket into its required representation.
+ *
+ * @param bucket Aggregated response-curve bucket being evaluated.
+ * @returns Constructed or normalized result.
+ */
 function toPublicBucket(bucket: ExactBucket): BidResponseBucket {
   return Object.freeze({
     bidMinor: bucket.bidMinor,
@@ -388,6 +401,13 @@ function toPublicBucket(bucket: ExactBucket): BidResponseBucket {
   });
 }
 
+/**
+ * Retrieves left index.
+ *
+ * @param curve Estimated bid-response curve used for scoring.
+ * @param bid Bid value evaluated by the decision rule.
+ * @returns Requested value or bounded result set.
+ */
 function findLeftIndex(curve: readonly ExactBucket[], bid: bigint): number {
   if (
     curve.length === 0 ||
@@ -407,10 +427,22 @@ function findLeftIndex(curve: readonly ExactBucket[], bid: bigint): number {
   return found;
 }
 
+/**
+ * Performs the decimal or null operation while preserving domain invariants.
+ *
+ * @param value Value to validate, transform, or persist.
+ * @returns Result produced by the decimal or null operation.
+ */
 function decimalOrNull(value: Rational | null): string | null {
   return value === null ? null : value.toDecimalString();
 }
 
+/**
+ * Parses and validates scale six.
+ *
+ * @param value Value to validate, transform, or persist.
+ * @returns Parsed and validated representation.
+ */
 function parseScaleSix(value: string): Rational {
   const match = /^(-?)(\d+)\.(\d{6})$/.exec(value);
   if (match === null) {
@@ -420,10 +452,23 @@ function parseScaleSix(value: string): Rational {
   return new Rational(sign * (BigInt(match[2] ?? '0') * PPM + BigInt(match[3] ?? '0')), PPM);
 }
 
+/**
+ * Performs the compare big int operation while preserving domain invariants.
+ *
+ * @param left Left-hand value used by the comparison.
+ * @param right Right-hand value used by the comparison.
+ * @returns Result produced by the compare big int operation.
+ */
 function compareBigInt(left: bigint, right: bigint): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
+/**
+ * Performs the abs operation while preserving domain invariants.
+ *
+ * @param value Value to validate, transform, or persist.
+ * @returns Result produced by the abs operation.
+ */
 function abs(value: bigint): bigint {
   return value < 0n ? -value : value;
 }

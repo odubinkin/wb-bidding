@@ -1,4 +1,3 @@
-/* eslint-disable jsdoc/require-jsdoc */
 import { randomUUID } from 'node:crypto';
 import { advisoryTransactionLock, withTransaction } from '@wb-bidder/database';
 import { redactSecrets } from '../redaction.js';
@@ -16,6 +15,18 @@ import { WriteLeaseRepositoryBase } from './lease.js';
 
 /** Cohesive write-pipeline repository capability layer. */
 export class WriteDispatchRepositoryBase extends WriteLeaseRepositoryBase {
+  /**
+   * Performs the prepare operation while preserving domain invariants.
+   *
+   * @param input Validated input values for the operation.
+   * @param input.workerId Replica-safe worker identifier owning the lease.
+   * @param input.endpointKey Endpoint profile key selecting transport behavior.
+   * @param input.method method field of the validated input.
+   * @param input.items Items processed as one bounded operation.
+   * @param input.visibilityDelayMs Propagation delay before verification may begin.
+   * @param input.reconciliationDeadlineMs reconciliation deadline ms field of the validated input.
+   * @returns Result produced by the prepare operation.
+   */
   public async prepare(input: {
     readonly workerId: string;
     readonly endpointKey: string;
@@ -117,6 +128,15 @@ export class WriteDispatchRepositoryBase extends WriteLeaseRepositoryBase {
     );
   }
 
+  /**
+   * Performs the commit dispatch operation while preserving domain invariants.
+   *
+   * @param prepared Prepared dispatch batch and its immutable evidence.
+   * @param workerId Replica-safe worker identifier owning the lease.
+   * @param visibilityDelayMs Propagation delay before verification may begin.
+   * @param reconciliationDeadlineMs Validated reconciliation deadline ms value supplied to the operation.
+   * @param preWriteStateMaximumAgeMs Validated pre write state maximum age ms value supplied to the operation.
+   */
   public async commitDispatch(
     prepared: PreparedWrite,
     workerId: string,
@@ -222,6 +242,13 @@ export class WriteDispatchRepositoryBase extends WriteLeaseRepositoryBase {
     );
   }
 
+  /**
+   * Performs the reject prepared no dispatch operation while preserving domain invariants.
+   *
+   * @param prepared Prepared dispatch batch and its immutable evidence.
+   * @param workerId Replica-safe worker identifier owning the lease.
+   * @param code Stable machine-readable outcome code.
+   */
   public async rejectPreparedNoDispatch(
     prepared: PreparedWrite,
     workerId: string,
@@ -268,6 +295,13 @@ export class WriteDispatchRepositoryBase extends WriteLeaseRepositoryBase {
     });
   }
 
+  /**
+   * Performs the complete dispatch operation while preserving domain invariants.
+   *
+   * @param attemptId Write-attempt identifier selecting the persisted attempt.
+   * @param result Operation result to convert or expose.
+   * @param latencyMs Observed operation latency in milliseconds.
+   */
   public async completeDispatch(
     attemptId: string,
     result: DispatchResult,
@@ -319,6 +353,13 @@ export class WriteDispatchRepositoryBase extends WriteLeaseRepositoryBase {
     });
   }
 
+  /**
+   * Updates unknown.
+   *
+   * @param attemptId Write-attempt identifier selecting the persisted attempt.
+   * @param code Stable machine-readable outcome code.
+   * @param detail Human-readable diagnostic detail.
+   */
   public async markUnknown(attemptId: string, code: string, detail: unknown): Promise<void> {
     await withTransaction(this.database, async (transaction) => {
       await transaction.wbWriteAttempt.updateMany({
@@ -352,6 +393,12 @@ export class WriteDispatchRepositoryBase extends WriteLeaseRepositoryBase {
     });
   }
 
+  /**
+   * Updates pre byte failure.
+   *
+   * @param attemptId Write-attempt identifier selecting the persisted attempt.
+   * @param detail Human-readable diagnostic detail.
+   */
   public async markPreByteFailure(attemptId: string, detail: unknown): Promise<void> {
     await withTransaction(this.database, async (transaction) => {
       const code = 'TRANSPORT_PRE_BYTE_RETRIES_EXHAUSTED';

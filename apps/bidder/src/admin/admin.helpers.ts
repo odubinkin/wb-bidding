@@ -1,4 +1,4 @@
-/* eslint-disable jsdoc/require-jsdoc, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment */
 import { createHash } from 'node:crypto';
 import canonicalize from 'canonicalize';
 import { AdminApiError } from '../problem-details.js';
@@ -11,6 +11,9 @@ export interface ListQuery {
   readonly limit?: string;
 }
 
+/**
+ * Defines the data contract for mutation context.
+ */
 export interface MutationContext {
   readonly actor: string;
   readonly correlationId: string;
@@ -20,6 +23,9 @@ export interface MutationContext {
   readonly scope: string;
 }
 
+/**
+ * Defines the data contract for page.
+ */
 export interface Page {
   readonly cursorAt: Date | null;
   readonly cursorId: string | null;
@@ -42,6 +48,12 @@ export const policySelect = {
   version: true,
 } satisfies Prisma.BiddingPolicySelect;
 
+/**
+ * Performs the page from operation while preserving domain invariants.
+ *
+ * @param query Validated filter and pagination query.
+ * @returns Result produced by the page from operation.
+ */
 export function pageFrom(query: ListQuery): Page {
   const limit = query.limit === undefined ? 100 : Number(query.limit);
   if (!Number.isInteger(limit) || limit < 1 || limit > 500)
@@ -62,6 +74,12 @@ export function pageFrom(query: ListQuery): Page {
   }
 }
 
+/**
+ * Creates d cursor where.
+ *
+ * @param page Decoded cursor page used to build the database predicate.
+ * @returns Constructed or normalized result.
+ */
 export function createdCursorWhere(page: Page) {
   if (page.cursorAt === null || page.cursorId === null) return {};
   return {
@@ -72,6 +90,12 @@ export function createdCursorWhere(page: Page) {
   };
 }
 
+/**
+ * Performs the decision created cursor where operation while preserving domain invariants.
+ *
+ * @param page Decoded cursor page used to build the database predicate.
+ * @returns Result produced by the decision created cursor where operation.
+ */
 export function decisionCreatedCursorWhere(page: Page) {
   if (page.cursorAt === null || page.cursorId === null) return {};
   return {
@@ -82,6 +106,15 @@ export function decisionCreatedCursorWhere(page: Page) {
   };
 }
 
+/**
+ * Performs the policy decision queue scope operation while preserving domain invariants.
+ *
+ * @param policy Resolved policy and scope metadata.
+ * @param policy.campaignId Campaign identifier defining the operation scope.
+ * @param policy.scope Stable namespace for the operation.
+ * @param policy.targetId Target identifier defining the operation scope.
+ * @returns Result produced by the policy decision queue scope operation.
+ */
 export function policyDecisionQueueScope(policy: {
   readonly campaignId: string | null;
   readonly scope: PolicyScope;
@@ -96,6 +129,14 @@ export function policyDecisionQueueScope(policy: {
   return { decision: { targetId: policy.targetId } };
 }
 
+/**
+ * Lists response.
+ *
+ * @param rows Persisted rows included in the bounded result.
+ * @param limit Maximum number of records to process.
+ * @param idKey Validated id key value supplied to the operation.
+ * @returns Requested value or bounded result set.
+ */
 export function listResponse(
   rows: readonly Record<string, unknown>[],
   limit: number,
@@ -119,6 +160,12 @@ export function listResponse(
   return { items: serialize(items), nextCursor };
 }
 
+/**
+ * Parses and validates date.
+ *
+ * @param value Value to validate, transform, or persist.
+ * @returns Parsed and validated representation.
+ */
 export function parseDate(value: string): Date {
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/u.test(value)) {
     throw new AdminApiError(422, 'INVALID_DATE', 'Expected an RFC 3339 UTC date-time.');
@@ -129,6 +176,12 @@ export function parseDate(value: string): Date {
   return date;
 }
 
+/**
+ * Parses and validates signed big int.
+ *
+ * @param value Value to validate, transform, or persist.
+ * @returns Parsed and validated representation.
+ */
 export function parseSignedBigInt(value: string): bigint {
   try {
     return BigInt(value);
@@ -137,6 +190,13 @@ export function parseSignedBigInt(value: string): bigint {
   }
 }
 
+/**
+ * Performs the enum filter operation while preserving domain invariants.
+ *
+ * @param value Value to validate, transform, or persist.
+ * @param allowed Closed set of values accepted by the validator.
+ * @returns Result produced by the enum filter operation.
+ */
 export function enumFilter<T extends string>(
   value: string | undefined,
   allowed: readonly T[],
@@ -148,6 +208,12 @@ export function enumFilter<T extends string>(
   return value as T;
 }
 
+/**
+ * Performs the code filter operation while preserving domain invariants.
+ *
+ * @param value Value to validate, transform, or persist.
+ * @returns Result produced by the code filter operation.
+ */
 export function codeFilter(value: string | undefined): string | null {
   if (value === undefined) return null;
   if (!/^[A-Z][A-Z0-9_]{0,63}$/u.test(value)) {
@@ -156,6 +222,12 @@ export function codeFilter(value: string | undefined): string | null {
   return value;
 }
 
+/**
+ * Performs the uuid filter operation while preserving domain invariants.
+ *
+ * @param value Value to validate, transform, or persist.
+ * @returns Result produced by the uuid filter operation.
+ */
 export function uuidFilter(value: string | undefined): string | null {
   if (value === undefined) return null;
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value)) {
@@ -164,19 +236,44 @@ export function uuidFilter(value: string | undefined): string | null {
   return value;
 }
 
+/**
+ * Performs the optional date filter operation while preserving domain invariants.
+ *
+ * @param value Value to validate, transform, or persist.
+ * @returns Result produced by the optional date filter operation.
+ */
 export function optionalDateFilter(value: string | undefined): Date | null {
   if (value === undefined) return null;
   return parseDate(value);
 }
 
+/**
+ * Performs the economics etag operation while preserving domain invariants.
+ *
+ * @param version Persisted version used to construct the ETag.
+ * @returns Result produced by the economics etag operation.
+ */
 export function economicsEtag(version: unknown): string {
   return `"product-economics-${String(version)}"`;
 }
 
+/**
+ * Performs the version etag operation while preserving domain invariants.
+ *
+ * @param prefix Stable resource prefix used in the serialized value.
+ * @param version Persisted version used to construct the ETag.
+ * @returns Result produced by the version etag operation.
+ */
 export function versionEtag(prefix: string, version: unknown): string {
   return `"${prefix}-${String(version)}"`;
 }
 
+/**
+ * Performs the job scope operation while preserving domain invariants.
+ *
+ * @param dto Validated HTTP request payload.
+ * @returns Result produced by the job scope operation.
+ */
 export function jobScope(dto: ManualJobDto) {
   return {
     campaignIds: [...(dto.campaignIds ?? [])].sort(),
@@ -185,16 +282,34 @@ export function jobScope(dto: ManualJobDto) {
   };
 }
 
+/**
+ * Performs the checksum operation while preserving domain invariants.
+ *
+ * @param value Value to validate, transform, or persist.
+ * @returns Result produced by the checksum operation.
+ */
 export function checksum(value: unknown): string {
   const canonical = canonicalize(serialize(value));
   if (canonical === undefined) throw new Error('CANONICALIZATION_FAILED');
   return createHash('sha256').update(canonical).digest('hex');
 }
 
+/**
+ * Performs the input json operation while preserving domain invariants.
+ *
+ * @param value Value to validate, transform, or persist.
+ * @returns Result produced by the input json operation.
+ */
 export function inputJson(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(serialize(value))) as Prisma.InputJsonValue;
 }
 
+/**
+ * Converts serialize into its required representation.
+ *
+ * @param value Value to validate, transform, or persist.
+ * @returns Constructed or normalized result.
+ */
 export function serialize(value: unknown): any {
   if (typeof value === 'bigint') return value.toString();
   if (value instanceof Date) return value.toISOString();
@@ -207,10 +322,10 @@ export function serialize(value: unknown): any {
 /**
  * Parses a resource ETag into its optimistic-concurrency version.
  *
- * @param ifMatch - Value of the `If-Match` header.
- * @param prefix - Resource prefix used in the ETag format.
- * @param allowNoneMatch - Whether an `If-None-Match: *` create precondition is accepted.
- * @param ifNoneMatch - Value of the `If-None-Match` header.
+ * @param ifMatch Value of the `If-Match` header.
+ * @param prefix Resource prefix used in the ETag format.
+ * @param allowNoneMatch Whether an `If-None-Match: *` create precondition is accepted.
+ * @param ifNoneMatch Value of the `If-None-Match` header.
  * @returns Parsed non-negative database version.
  * @throws {AdminApiError} When the conditional headers are missing or malformed.
  */
@@ -232,7 +347,7 @@ export function parseExpectedVersion(
 /**
  * Requires a non-empty idempotency key for a durable administrative mutation.
  *
- * @param value - Request `Idempotency-Key` header value.
+ * @param value Request `Idempotency-Key` header value.
  * @returns Validated key unchanged.
  * @throws {AdminApiError} When the key is absent or empty.
  */

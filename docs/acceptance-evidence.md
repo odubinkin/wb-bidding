@@ -85,27 +85,16 @@
 Построчное покрытие раздела 25.4 хранится в
 [матрице E2E-сценариев](e2e-scenario-evidence.md).
 
-## Локальный verification snapshot 2026-07-30
+## Текущее состояние локальной проверки
 
-На новой PostgreSQL 18 database с применёнными семью migrations подтверждено:
+Текущий исходный код использует девять forward-only Prisma migrations. Базовый локальный контур
+подтверждает `126` unit, `1` golden, `2` OpenAPI, `19` contract и `3` property tests. Проверка
+`pnpm run quality` также включает format, ESLint/JSDoc, typecheck, architecture/profile/fixture
+gates и Prisma schema validation. Отдельно выполняются `docs:check`, secret/container checks и
+PostgreSQL-зависимые integration, E2E, load и runbook suites согласно
+[документации тестирования](testing.md).
 
-- `pnpm run quality`: 99 unit, 1 golden, 2 OpenAPI и 11 contract tests; coverage
-  98.04% statements, 90.40% branches, 99.09% functions, 98.00% lines;
-- `test:integration`: 25 tests, включая единый card lifecycle
-  sync → decision → durable dispatch → reconciliation → `APPLIED`, а также cluster
-  discovery/current state/statistics/performance-day;
-- `test:e2e`: 3 tests, включая cluster `POST → APPLIED → DELETE → ABSENT`;
-  `test:load`: 4 tests; `test:runbook`: 23 tests;
-- property suite: 3 tests; source mutation score: 100% (9/9 killed);
-- frozen install, workspace build, built bidder/mock smoke, profile/checksum, deprecated endpoint,
-  secret и container policy gates;
-- `pnpm audit --audit-level=high` и `pnpm audit --audit-level=high --prod` без известных
-  уязвимостей; Trivy HIGH/CRITICAL scan двух локально собранных runtime images без findings;
-- Docker build, `docker compose config` для production/full-mock/mock-only и `smoke:compose`
-  для mock-only/full-mock;
-- Agentplane routing check и `ap doctor` без ошибок.
-
-Локально не подтверждены только обязательный WB sandbox smoke, hosted CI run и внешние
-release-owner решения. По направлению пользователя GitHub не используется: проект ещё не
-опубликован. Все эти ограничения и их влияние на буквальный DoD зафиксированы в
+Локально не закрываются только обязательный WB sandbox smoke, hosted CI run и внешние
+release-owner решения. GitHub пока не используется, production writes остаются выключены. Эти
+ограничения и их влияние на буквальный DoD зафиксированы в
 [реестре расхождений](implementation-deviations.md).

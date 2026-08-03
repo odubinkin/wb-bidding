@@ -1,4 +1,3 @@
-/* eslint-disable jsdoc/check-param-names, jsdoc/require-jsdoc, jsdoc/require-param */
 import { roundToQuantum } from './rational.js';
 
 const PPM = 1_000_000n;
@@ -37,7 +36,14 @@ export interface ExperimentState {
 /**
  * Plans a lower-only exploration bid through legal bounds and quantum.
  *
- * @param input - Experiment prerequisites.
+ * @param input Experiment prerequisites.
+ * @param input.currentBidMinor current bid minor field of the validated input.
+ * @param input.explorationStepPpm exploration step ppm field of the validated input.
+ * @param input.floorMinor floor minor field of the validated input.
+ * @param input.maxSpendMinor max spend minor field of the validated input.
+ * @param input.plannedFullDays planned full days field of the validated input.
+ * @param input.quantumMinor quantum minor field of the validated input.
+ * @param input.safetyBufferPpm safety buffer ppm field of the validated input.
  * @returns Planned experiment or null when no distinct lower candidate exists.
  */
 export function planLowerExperiment(input: {
@@ -89,8 +95,14 @@ export function planLowerExperiment(input: {
 /**
  * Advances collection using model time and the complete observed spend, never wall-clock sleeps.
  *
- * @param state - Current immutable experiment state.
- * @param input - Newly synchronized evidence.
+ * @param state Current immutable experiment state.
+ * @param input Newly synchronized evidence.
+ * @param input.collectedEligibleDays collected eligible days field of the validated input.
+ * @param input.configurationValid configuration valid field of the validated input.
+ * @param input.evaluationNotBefore evaluation not before field of the validated input.
+ * @param input.now now field of the validated input.
+ * @param input.observedExperimentSpendMinor observed experiment spend minor field of the validated input.
+ * @param input.reservedUnobservedSpendMinor reserved unobserved spend minor field of the validated input.
  * @returns Next immutable state.
  */
 export function advanceExperiment(
@@ -144,8 +156,14 @@ export function advanceExperiment(
 /**
  * Resolves a revert target without bypassing current legal bounds.
  *
- * @param state - Reverting experiment.
- * @param input - Current verified capability and bounds.
+ * @param state Reverting experiment.
+ * @param input Current verified capability and bounds.
+ * @param input.capabilityAvailable capability available field of the validated input.
+ * @param input.now now field of the validated input.
+ * @param input.policyMaxBidMinor policy max bid minor field of the validated input.
+ * @param input.policyMinBidMinor policy min bid minor field of the validated input.
+ * @param input.quantumMinor quantum minor field of the validated input.
+ * @param input.wbMinimumBidMinor wb minimum bid minor field of the validated input.
  * @returns Revert instruction or fail-closed terminal state.
  */
 export function resolveExperimentRevert(
@@ -196,9 +214,9 @@ export function resolveExperimentRevert(
 /**
  * Marks a verified revert result terminal.
  *
- * @param state - Reverting state.
- * @param actualBidMinor - Confirmed live bid.
- * @param now - Model clock instant.
+ * @param state Reverting state.
+ * @param actualBidMinor Confirmed live bid.
+ * @param now Model clock instant.
  * @returns Terminal state.
  */
 export function confirmExperimentRevert(
@@ -219,6 +237,12 @@ export function confirmExperimentRevert(
   });
 }
 
+/**
+ * Determines whether is terminal is satisfied.
+ *
+ * @param status Lifecycle status to count or classify.
+ * @returns Whether the requested condition is satisfied.
+ */
 function isTerminal(status: ExperimentState['status']): boolean {
   return [
     'ACCEPTED',
@@ -230,14 +254,34 @@ function isTerminal(status: ExperimentState['status']): boolean {
   ].includes(status);
 }
 
+/**
+ * Performs the valid ppm operation while preserving domain invariants.
+ *
+ * @param value Value to validate, transform, or persist.
+ * @returns Result produced by the valid ppm operation.
+ */
 function validPpm(value: number): boolean {
   return Number.isInteger(value) && value >= 0 && value <= Number(PPM);
 }
 
+/**
+ * Performs the maximum operation while preserving domain invariants.
+ *
+ * @param values Values to validate or transform.
+ * @returns Result produced by the maximum operation.
+ */
 function maximum(...values: readonly bigint[]): bigint {
   return values.reduce((current, value) => (value > current ? value : current));
 }
 
+/**
+ * Performs the clamp operation while preserving domain invariants.
+ *
+ * @param value Value to validate, transform, or persist.
+ * @param lower Lower numeric bound used by the calculation.
+ * @param upper Upper numeric bound used by the calculation.
+ * @returns Result produced by the clamp operation.
+ */
 function clamp(value: bigint, lower: bigint, upper: bigint): bigint {
   return value < lower ? lower : value > upper ? upper : value;
 }

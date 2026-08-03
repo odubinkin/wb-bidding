@@ -1,4 +1,3 @@
-/* eslint-disable jsdoc/require-jsdoc, jsdoc/require-param */
 import { DocumentBuilder, SwaggerModule, type OpenAPIObject } from '@nestjs/swagger';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
@@ -7,7 +6,7 @@ import type { INestApplication } from '@nestjs/common';
 /**
  * Builds the machine-readable bidder contract from runtime DTO metadata.
  *
- * @param application - Initialized Nest application.
+ * @param application Initialized Nest application.
  * @returns Generated OpenAPI 3.x document.
  */
 export function buildBidderOpenApi(application: INestApplication): OpenAPIObject {
@@ -32,8 +31,9 @@ export function buildBidderOpenApi(application: INestApplication): OpenAPIObject
 /**
  * Mounts protected-by-deployment Swagger UI and JSON routes.
  *
- * @param application - Initialized Nest application.
- * @param document - Generated OpenAPI document.
+ * @param application Initialized Nest application.
+ * @param document Generated OpenAPI document.
+ * @param serviceToken Configured service token required to access protected documentation.
  * @returns Nothing after both documentation routes are registered.
  */
 export function mountBidderOpenApi(
@@ -41,6 +41,13 @@ export function mountBidderOpenApi(
   document: OpenAPIObject,
   serviceToken: string,
 ): void {
+  /**
+   * Performs the authorize docs operation while preserving domain invariants.
+   *
+   * @param request Current administrative HTTP request.
+   * @param response HTTP response used to publish status and headers.
+   * @param next Next middleware callback in the HTTP pipeline.
+   */
   const authorizeDocs = (request: Request, response: Response, next: NextFunction): void => {
     const authorization = request.header('authorization');
     const supplied = authorization?.startsWith('Bearer ') ? authorization.slice(7) : '';

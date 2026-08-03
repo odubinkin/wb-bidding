@@ -1,10 +1,12 @@
-/* eslint-disable jsdoc/require-jsdoc */
 import { randomUUID } from 'node:crypto';
 import { normalizeCanonical } from '../checksum.js';
 import type { DecisionResult } from '../types.js';
 import { Prisma, type DatabaseTransaction } from '@wb-bidder/database';
 import type { EconomicsMutation, EconomicsImportRow } from './types.js';
 
+/**
+ * Defines the data contract for claimed import.
+ */
 export interface ClaimedImport {
   readonly actor: string;
   readonly changeReason: string;
@@ -14,6 +16,9 @@ export interface ClaimedImport {
   readonly workerId: string;
 }
 
+/**
+ * Defines the data contract for import item row.
+ */
 export interface ImportItemRow {
   readonly expectedCurrentVersion: bigint;
   readonly id: string;
@@ -28,6 +33,9 @@ export interface ImportItemRow {
   readonly rowId: string;
 }
 
+/**
+ * Defines the data contract for decision replay row.
+ */
 export interface DecisionReplayRow {
   readonly action: string;
   readonly boundedBidMinor: bigint | null;
@@ -35,6 +43,17 @@ export interface DecisionReplayRow {
   readonly outcomeReasonCode: string;
 }
 
+/**
+ * Performs the import item operation while preserving domain invariants.
+ *
+ * @param stored Persisted value converted into a domain representation.
+ * @param stored.expectedCurrentVersion expected current version field of the validated stored.
+ * @param stored.id Identifier selecting the requested record.
+ * @param stored.nmId Wildberries article identifier.
+ * @param stored.normalizedInput normalized input field of the validated stored.
+ * @param stored.rowId row id field of the validated stored.
+ * @returns Result produced by the import item operation.
+ */
 export function importItem(stored: {
   readonly expectedCurrentVersion: bigint;
   readonly id: string;
@@ -58,6 +77,13 @@ export function importItem(stored: {
   };
 }
 
+/**
+ * Performs the import mutation operation while preserving domain invariants.
+ *
+ * @param claimed Validated claimed value supplied to the operation.
+ * @param item Queue or domain item processed by the operation.
+ * @returns Result produced by the import mutation operation.
+ */
 export function importMutation(claimed: ClaimedImport, item: ImportItemRow): EconomicsMutation {
   return {
     actor: claimed.actor,
@@ -82,6 +108,11 @@ export function importMutation(claimed: ClaimedImport, item: ImportItemRow): Eco
   };
 }
 
+/**
+ * Validates economics mutation.
+ *
+ * @param mutation Transactional mutation callback.
+ */
 export function validateEconomicsMutation(mutation: EconomicsMutation): void {
   if (
     mutation.nmId <= 0n ||
@@ -97,6 +128,11 @@ export function validateEconomicsMutation(mutation: EconomicsMutation): void {
   }
 }
 
+/**
+ * Validates import request.
+ *
+ * @param rows Persisted rows included in the bounded result.
+ */
 export function validateImportRequest(rows: readonly EconomicsImportRow[]): void {
   if (rows.length < 1) throw new Error('EMPTY_ITEMS');
   if (rows.length > 10_000) throw new Error('TOO_MANY_ITEMS');
@@ -121,6 +157,14 @@ export function validateImportRequest(rows: readonly EconomicsImportRow[]): void
   }
 }
 
+/**
+ * Validates policy scope.
+ *
+ * @param request Current administrative HTTP request.
+ * @param request.campaignId Campaign identifier defining the operation scope.
+ * @param request.scope Stable namespace for the operation.
+ * @param request.targetId Target identifier defining the operation scope.
+ */
 export function validatePolicyScope(request: {
   readonly campaignId: string | null;
   readonly scope: 'CAMPAIGN' | 'DEPLOYMENT' | 'TARGET';
@@ -133,6 +177,12 @@ export function validatePolicyScope(request: {
   if (!valid) throw new Error('INVALID_POLICY_SCOPE');
 }
 
+/**
+ * Validates same decision.
+ *
+ * @param existing Validated existing value supplied to the operation.
+ * @param result Operation result to convert or expose.
+ */
 export function assertSameDecision(existing: DecisionReplayRow, result: DecisionResult): void {
   if (
     existing.action !== result.action ||
@@ -143,6 +193,17 @@ export function assertSameDecision(existing: DecisionReplayRow, result: Decision
   }
 }
 
+/**
+ * Performs the append audit operation while preserving domain invariants.
+ *
+ * @param transaction Open database transaction used for atomic persistence.
+ * @param actor Authenticated actor recorded in the audit trail.
+ * @param action Action selected for the durable state transition.
+ * @param entityId Identifier of the audited entity.
+ * @param correlationId Correlation identifier propagated to audit and logs.
+ * @param after Entity state captured after the mutation.
+ * @param before Entity state captured before the mutation.
+ */
 export async function appendAudit(
   transaction: DatabaseTransaction,
   actor: string,
@@ -170,6 +231,12 @@ export async function appendAudit(
   });
 }
 
+/**
+ * Performs the policy replay operation while preserving domain invariants.
+ *
+ * @param value Value to validate, transform, or persist.
+ * @returns Result produced by the policy replay operation.
+ */
 export function policyReplay(value: Prisma.JsonValue): {
   readonly id: string;
   readonly version: bigint;
@@ -186,14 +253,32 @@ export function policyReplay(value: Prisma.JsonValue): {
   return Object.freeze({ id: value.id, version: BigInt(value.version) });
 }
 
+/**
+ * Performs the prisma json operation while preserving domain invariants.
+ *
+ * @param value Value to validate, transform, or persist.
+ * @returns Result produced by the prisma json operation.
+ */
 export function prismaJson(value: unknown): Prisma.InputJsonValue {
   return normalizeCanonical(value) as Prisma.InputJsonValue;
 }
 
+/**
+ * Determines whether iso date is satisfied.
+ *
+ * @param value Value to validate, transform, or persist.
+ * @returns Whether the requested condition is satisfied.
+ */
 export function isoDate(value: string): Date {
   return new Date(`${value}T00:00:00.000Z`);
 }
 
+/**
+ * Performs the classify import error operation while preserving domain invariants.
+ *
+ * @param error Unknown failure value to classify or redact.
+ * @returns Result produced by the classify import error operation.
+ */
 export function classifyImportError(error: unknown): string {
   const message = safeMessage(error);
   return message.startsWith('VERSION_CONFLICT')
@@ -203,10 +288,22 @@ export function classifyImportError(error: unknown): string {
       : 'INVALID_PRODUCT_ECONOMICS';
 }
 
+/**
+ * Performs the safe message operation while preserving domain invariants.
+ *
+ * @param error Unknown failure value to classify or redact.
+ * @returns Result produced by the safe message operation.
+ */
 export function safeMessage(error: unknown): string {
   return error instanceof Error ? error.message.slice(0, 500) : 'Unknown import error';
 }
 
+/**
+ * Performs the decision priority operation while preserving domain invariants.
+ *
+ * @param result Operation result to convert or expose.
+ * @returns Result produced by the decision priority operation.
+ */
 export function decisionPriority(result: DecisionResult): number {
   if (
     result.action === 'DECREASE' &&

@@ -1,4 +1,4 @@
-/* eslint-disable jsdoc/require-jsdoc, @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
 import { Inject } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { DATABASE_CLIENT } from '../database.js';
@@ -21,6 +21,12 @@ export class AdminServiceBase {
   protected readonly decisions: DecisionRepository;
   protected readonly writes: WritePipelineRepository;
 
+  /**
+   * Creates a admin service base instance with its required dependencies.
+   *
+   * @param database Database client used for the transactional operation.
+   * @param clock Clock supplying deterministic operation timestamps.
+   */
   public constructor(
     @Inject(DATABASE_CLIENT) database: DatabaseClient,
     protected readonly clock: RuntimeClockService,
@@ -30,6 +36,13 @@ export class AdminServiceBase {
     this.writes = new WritePipelineRepository(database);
   }
 
+  /**
+   * Performs the transactional mutation operation while preserving domain invariants.
+   *
+   * @param input Validated input values for the operation.
+   * @param mutation Transactional mutation callback.
+   * @returns Result produced by the transactional mutation operation.
+   */
   protected async transactionalMutation(
     input: MutationContext,
     mutation: (transaction: DatabaseTransaction, audit: { before?: unknown }) => Promise<unknown>,

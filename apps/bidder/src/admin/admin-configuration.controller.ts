@@ -1,4 +1,4 @@
-/* eslint-disable jsdoc/require-jsdoc, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-conversion, @typescript-eslint/restrict-template-expressions */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-conversion, @typescript-eslint/restrict-template-expressions */
 import {
   Body,
   Controller,
@@ -64,6 +64,9 @@ import {
   versionHeader,
 } from './admin-controller.helpers.js';
 
+/**
+ * Coordinates admin configuration controller behavior and its runtime dependencies.
+ */
 @ApiBearerAuth('admin-service-token')
 @ApiProduces('application/json', 'application/problem+json')
 @ApiExtraModels(
@@ -150,8 +153,21 @@ import {
 @UseGuards(AdminAuthGuard)
 @Controller('/api/v1')
 export class AdminConfigurationController {
+  /**
+   * Creates a admin configuration controller instance with its required dependencies.
+   *
+   * @param service Application service handling the request.
+   */
   public constructor(private readonly service: AdminService) {}
 
+  /**
+   * Retrieves economics.
+   *
+   * @param nmId Wildberries article identifier.
+   * @param at Optional effective timestamp for the lookup.
+   * @param response HTTP response used to publish status and headers.
+   * @returns Requested value or bounded result set.
+   */
   @ApiTags('product-economics')
   @ApiOperation({ summary: 'Read the effective immutable product economics version.' })
   @ApiParam({ name: 'nmId', schema: { pattern: '^[1-9][0-9]*$', type: 'string' } })
@@ -172,6 +188,19 @@ export class AdminConfigurationController {
     return result.body;
   }
 
+  /**
+   * Updates economics.
+   *
+   * @param nmId Wildberries article identifier.
+   * @param dto Validated HTTP request payload.
+   * @param idempotencyKey Client key used to make the mutation safely repeatable.
+   * @param ifMatch Conditional request ETag supplied by the client.
+   * @param ifNoneMatch Conditional create header supplied by the client.
+   * @param principal Authenticated administrative principal.
+   * @param request Current administrative HTTP request.
+   * @param response HTTP response used to publish status and headers.
+   * @returns Result produced by the update economics operation.
+   */
   @ApiTags('product-economics')
   @ApiOperation({ summary: 'Create the next immutable product economics version.' })
   @ApiHeader({ name: 'Idempotency-Key', required: true })
@@ -209,6 +238,16 @@ export class AdminConfigurationController {
     return result.body;
   }
 
+  /**
+   * Creates import.
+   *
+   * @param dto Validated HTTP request payload.
+   * @param idempotencyKey Client key used to make the mutation safely repeatable.
+   * @param principal Authenticated administrative principal.
+   * @param request Current administrative HTTP request.
+   * @param response HTTP response used to publish status and headers.
+   * @returns Constructed or normalized result.
+   */
   @ApiTags('product-economics')
   @ApiHeader({ name: 'Idempotency-Key', required: true })
   @ApiAcceptedResponse({ type: EconomicsImportResponseDto })
@@ -232,6 +271,12 @@ export class AdminConfigurationController {
     return result;
   }
 
+  /**
+   * Retrieves import.
+   *
+   * @param importId Import batch identifier selecting the durable operation.
+   * @returns Requested value or bounded result set.
+   */
   @ApiTags('product-economics')
   @ApiOkResponse({ type: EconomicsImportResponseDto })
   @RequirePermission('product-economics:read')
@@ -240,6 +285,13 @@ export class AdminConfigurationController {
     return this.service.getImport(importId);
   }
 
+  /**
+   * Lists import items.
+   *
+   * @param importId Import batch identifier selecting the durable operation.
+   * @param query Validated filter and pagination query.
+   * @returns Requested value or bounded result set.
+   */
   @ApiTags('product-economics')
   @ApiOkResponse({ description: 'Cursor-paginated per-row import results.', type: CursorPageDto })
   @ApiQuery({ name: 'status', required: false })
@@ -254,6 +306,12 @@ export class AdminConfigurationController {
     return this.service.listImportItems(importId, query);
   }
 
+  /**
+   * Lists policies.
+   *
+   * @param query Validated filter and pagination query.
+   * @returns Requested value or bounded result set.
+   */
   @ApiTags('policies')
   @ApiOkResponse({
     description: 'Cursor-paginated immutable policy versions.',
@@ -268,6 +326,13 @@ export class AdminConfigurationController {
     return this.service.listPolicies(query);
   }
 
+  /**
+   * Retrieves policy.
+   *
+   * @param policyId Policy identifier selecting the immutable policy.
+   * @param response HTTP response used to publish status and headers.
+   * @returns Requested value or bounded result set.
+   */
   @ApiTags('policies')
   @ApiOkResponse({ type: PolicyResponseDto })
   @RequirePermission('policies:read')
@@ -281,6 +346,16 @@ export class AdminConfigurationController {
     return result.body;
   }
 
+  /**
+   * Creates policy.
+   *
+   * @param dto Validated HTTP request payload.
+   * @param idempotencyKey Client key used to make the mutation safely repeatable.
+   * @param principal Authenticated administrative principal.
+   * @param request Current administrative HTTP request.
+   * @param response HTTP response used to publish status and headers.
+   * @returns Constructed or normalized result.
+   */
   @ApiTags('policies')
   @ApiHeader({ name: 'Idempotency-Key', required: true })
   @ApiCreatedResponse({ type: PolicyResponseDto })
@@ -306,6 +381,18 @@ export class AdminConfigurationController {
     return result.body;
   }
 
+  /**
+   * Updates policy.
+   *
+   * @param policyId Policy identifier selecting the immutable policy.
+   * @param dto Validated HTTP request payload.
+   * @param idempotencyKey Client key used to make the mutation safely repeatable.
+   * @param ifMatch Conditional request ETag supplied by the client.
+   * @param principal Authenticated administrative principal.
+   * @param request Current administrative HTTP request.
+   * @param response HTTP response used to publish status and headers.
+   * @returns Result produced by the activate policy operation.
+   */
   @ApiTags('policies')
   @ApiHeader({ name: 'Idempotency-Key', required: true })
   @ApiHeader({ name: 'If-Match', required: true })
@@ -334,6 +421,12 @@ export class AdminConfigurationController {
     return result;
   }
 
+  /**
+   * Lists assignments.
+   *
+   * @param query Validated filter and pagination query.
+   * @returns Requested value or bounded result set.
+   */
   @ApiTags('policies')
   @ApiOkResponse({ type: CursorPageDto })
   @ApiQuery({ name: 'campaignId', required: false, type: String })
@@ -346,6 +439,19 @@ export class AdminConfigurationController {
     return this.service.listAssignments(query);
   }
 
+  /**
+   * Performs the assign policy operation while preserving domain invariants.
+   *
+   * @param scopeType Assignment scope type selecting campaign or target behavior.
+   * @param scopeId Campaign or target identifier for the assignment.
+   * @param dto Validated HTTP request payload.
+   * @param idempotencyKey Client key used to make the mutation safely repeatable.
+   * @param ifMatch Conditional request ETag supplied by the client.
+   * @param principal Authenticated administrative principal.
+   * @param request Current administrative HTTP request.
+   * @param response HTTP response used to publish status and headers.
+   * @returns Result produced by the assign policy operation.
+   */
   @ApiTags('policies')
   @ApiHeader({ name: 'Idempotency-Key', required: true })
   @ApiHeader({ name: 'If-Match', required: true })
@@ -377,6 +483,11 @@ export class AdminConfigurationController {
     return result.body;
   }
 
+  /**
+   * Retrieves automation.
+   *
+   * @returns Requested value or bounded result set.
+   */
   @ApiTags('automation')
   @ApiOkResponse({ type: AutomationResponseDto })
   @RequirePermission('automation:read')
@@ -385,6 +496,18 @@ export class AdminConfigurationController {
     return this.service.getAutomation();
   }
 
+  /**
+   * Updates campaign automation.
+   *
+   * @param campaignId Campaign identifier defining the operation scope.
+   * @param dto Validated HTTP request payload.
+   * @param idempotencyKey Client key used to make the mutation safely repeatable.
+   * @param ifMatch Conditional request ETag supplied by the client.
+   * @param principal Authenticated administrative principal.
+   * @param request Current administrative HTTP request.
+   * @param response HTTP response used to publish status and headers.
+   * @returns Result produced by the set campaign automation operation.
+   */
   @ApiTags('automation')
   @ApiHeader({ name: 'Idempotency-Key', required: true })
   @ApiHeader({ name: 'If-Match', required: true })
@@ -414,6 +537,18 @@ export class AdminConfigurationController {
     return result;
   }
 
+  /**
+   * Updates target automation.
+   *
+   * @param targetId Target identifier defining the operation scope.
+   * @param dto Validated HTTP request payload.
+   * @param idempotencyKey Client key used to make the mutation safely repeatable.
+   * @param ifMatch Conditional request ETag supplied by the client.
+   * @param principal Authenticated administrative principal.
+   * @param request Current administrative HTTP request.
+   * @param response HTTP response used to publish status and headers.
+   * @returns Result produced by the set target automation operation.
+   */
   @ApiTags('automation')
   @ApiHeader({ name: 'Idempotency-Key', required: true })
   @ApiHeader({ name: 'If-Match', required: true })
@@ -443,6 +578,17 @@ export class AdminConfigurationController {
     return result;
   }
 
+  /**
+   * Updates global kill.
+   *
+   * @param dto Validated HTTP request payload.
+   * @param idempotencyKey Client key used to make the mutation safely repeatable.
+   * @param ifMatch Conditional request ETag supplied by the client.
+   * @param principal Authenticated administrative principal.
+   * @param request Current administrative HTTP request.
+   * @param response HTTP response used to publish status and headers.
+   * @returns Result produced by the set global kill operation.
+   */
   @ApiTags('automation')
   @ApiHeader({ name: 'Idempotency-Key', required: true })
   @ApiHeader({ name: 'If-Match', required: true })

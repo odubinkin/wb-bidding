@@ -46,6 +46,7 @@ Git, логи или запросы в Swagger. Полная последова�
 | `CURRENT_STATE_TARGET_SYNC_SLA_MINUTES` | integer min; `20`; `1..1440`           |    нет | Максимальный полный обход current bids; не выше freshness.                |
 | `CURRENT_BID_FRESHNESS_MINUTES`         | integer min; `20`; `1..1440`           |    нет | Более старое состояние блокирует расчёт/write.                            |
 | `DATA_SYNC_CRON`                        | cron; `25 */30 * * * *`                |    нет | Частота медленного data sync.                                             |
+| `CAMPAIGN_STATISTICS_FRESHNESS_MINUTES` | integer min; `180`; `1..43200`         |    нет | Максимальный возраст успешного чтения дневной статистики для решения.     |
 | `DECISION_CRON`                         | cron; `45 */30 * * * *`                |    нет | Частота расчёта решений только из БД.                                     |
 | `CAMPAIGN_APPLY_CRON`                   | cron; `*/10 * * * * *`                 |    нет | Частота lease/dispatch очереди.                                           |
 | `MINIMUM_BID_TARGET_SYNC_SLA_MINUTES`   | integer min; `720`; `1..43200`         |    нет | SLA полного обхода minimum bids.                                          |

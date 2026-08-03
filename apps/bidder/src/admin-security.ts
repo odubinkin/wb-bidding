@@ -1,4 +1,4 @@
-/* eslint-disable jsdoc/require-jsdoc, @typescript-eslint/no-unnecessary-condition */
+/* eslint-disable @typescript-eslint/no-unnecessary-condition */
 import {
   applyDecorators,
   createParamDecorator,
@@ -34,7 +34,7 @@ export type AdminRequest = Request & {
 /**
  * Declares the permission enforced by {@link AdminAuthGuard} for a controller handler.
  *
- * @param permission - Canonical administrative permission identifier.
+ * @param permission Canonical administrative permission identifier.
  * @returns Nest method decorator and OpenAPI extension metadata.
  */
 export const RequirePermission = (permission: string): MethodDecorator =>
@@ -57,11 +57,23 @@ export const Principal = createParamDecorator(
  */
 @Injectable()
 export class AdminAuthGuard implements CanActivate {
+  /**
+   * Creates a admin auth guard instance with its required dependencies.
+   *
+   * @param configuration Validated immutable application configuration.
+   * @param reflector Nest metadata reflector used to resolve permissions.
+   */
   public constructor(
     @Inject(APP_CONFIGURATION) private readonly configuration: AppConfiguration,
     private readonly reflector: Reflector,
   ) {}
 
+  /**
+   * Determines whether can activate is satisfied.
+   *
+   * @param context Current request or execution context.
+   * @returns Whether the requested condition is satisfied.
+   */
   public canActivate(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest<AdminRequest>();
     const authorization = request.header('authorization');
@@ -103,6 +115,13 @@ const ALL_ADMIN_PERMISSIONS: ReadonlySet<string> = new Set([
   'audit:read',
 ]);
 
+/**
+ * Performs the safe equal operation while preserving domain invariants.
+ *
+ * @param left Left-hand value used by the comparison.
+ * @param right Right-hand value used by the comparison.
+ * @returns Result produced by the safe equal operation.
+ */
 function safeEqual(left: string, right: string): boolean {
   return timingSafeEqual(
     createHash('sha256').update(left).digest(),

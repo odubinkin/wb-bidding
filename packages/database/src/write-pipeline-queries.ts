@@ -1,4 +1,3 @@
-/* eslint-disable jsdoc/require-param, jsdoc/require-returns */
 import { Prisma } from './generated/prisma/client.js';
 import type { DatabaseClient } from './client.js';
 import { queryRaw } from './sql.js';
@@ -25,7 +24,18 @@ export interface WriteClaimRow {
   readonly wbCampaignId: string;
 }
 
-/** Atomically claims one bounded decision-queue page across worker replicas. */
+/**
+ * Atomically claims one bounded decision-queue page across worker replicas.
+ *
+ * @param database Database client used for the transactional operation.
+ * @param input Validated input values for the operation.
+ * @param input.action Action selected for the durable state transition.
+ * @param input.leaseSeconds Duration of the worker lease in seconds.
+ * @param input.limit Maximum number of records to process.
+ * @param input.targetKind Target kind selecting card or cluster behavior.
+ * @param input.workerId Replica-safe worker identifier owning the lease.
+ * @returns Result produced by the claim decision queue items operation.
+ */
 export async function claimDecisionQueueItems(
   database: DatabaseClient,
   input: {
@@ -98,7 +108,14 @@ export async function claimDecisionQueueItems(
   );
 }
 
-/** Deletes a bounded, lock-safe page of terminal write-attempt detail records. */
+/**
+ * Deletes a bounded, lock-safe page of terminal write-attempt detail records.
+ *
+ * @param database Database client used for the transactional operation.
+ * @param retentionDays Retention window applied to terminal records.
+ * @param limit Maximum number of records to process.
+ * @returns Result produced by the cleanup terminal write attempts operation.
+ */
 export async function cleanupTerminalWriteAttempts(
   database: DatabaseClient,
   retentionDays: number,

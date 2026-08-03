@@ -1,4 +1,4 @@
-/* eslint-disable jsdoc/require-jsdoc, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return */
 import { AdminApiError } from '../problem-details.js';
 import type { PolicyCreateDto } from '../admin-dto.js';
 import { type DecisionPolicy } from '@wb-bidder/decision-engine';
@@ -20,6 +20,12 @@ import { AdminEconomicsServiceBase } from './admin-economics.service.js';
 
 /** Cohesive Admin application-service capability layer. */
 export class AdminPolicyServiceBase extends AdminEconomicsServiceBase {
+  /**
+   * Lists policies.
+   *
+   * @param query Validated filter and pagination query.
+   * @returns Requested value or bounded result set.
+   */
   public async listPolicies(query: ListQuery & { scope?: string }) {
     const page = pageFrom(query);
     const scope = enumFilter<PolicyScope>(query.scope, ['DEPLOYMENT', 'CAMPAIGN', 'TARGET']);
@@ -38,6 +44,12 @@ export class AdminPolicyServiceBase extends AdminEconomicsServiceBase {
     );
   }
 
+  /**
+   * Retrieves policy.
+   *
+   * @param id Identifier selecting the requested record.
+   * @returns Requested value or bounded result set.
+   */
   public async getPolicy(id: string) {
     const row = await this.database.biddingPolicy.findUnique({
       select: policySelect,
@@ -47,6 +59,15 @@ export class AdminPolicyServiceBase extends AdminEconomicsServiceBase {
     return { body: serialize(row), etag: versionEtag('policy', row.version) };
   }
 
+  /**
+   * Creates policy.
+   *
+   * @param actor Authenticated actor recorded in the audit trail.
+   * @param correlationId Correlation identifier propagated to audit and logs.
+   * @param idempotencyKey Client key used to make the mutation safely repeatable.
+   * @param dto Validated HTTP request payload.
+   * @returns Constructed or normalized result.
+   */
   public async createPolicy(
     actor: string,
     correlationId: string,
@@ -78,6 +99,12 @@ export class AdminPolicyServiceBase extends AdminEconomicsServiceBase {
     };
   }
 
+  /**
+   * Updates policy.
+   *
+   * @param input Validated input values for the operation.
+   * @returns Result produced by the activate policy operation.
+   */
   public async activatePolicy(input: MutationContext & { readonly policyId: string }) {
     return this.transactionalMutation(input, async (transaction, audit) => {
       const policy = await transaction.biddingPolicy.findUnique({
@@ -122,6 +149,12 @@ export class AdminPolicyServiceBase extends AdminEconomicsServiceBase {
     });
   }
 
+  /**
+   * Performs the assign policy operation while preserving domain invariants.
+   *
+   * @param input Validated input values for the operation.
+   * @returns Result produced by the assign policy operation.
+   */
   public async assignPolicy(
     input: MutationContext & {
       readonly policyId: string;
@@ -162,6 +195,12 @@ export class AdminPolicyServiceBase extends AdminEconomicsServiceBase {
     return this.getPolicy(created.id);
   }
 
+  /**
+   * Lists assignments.
+   *
+   * @param query Validated filter and pagination query.
+   * @returns Requested value or bounded result set.
+   */
   public async listAssignments(query: ListQuery & { campaignId?: string; targetId?: string }) {
     const page = pageFrom(query);
     const campaignId = uuidFilter(query.campaignId);

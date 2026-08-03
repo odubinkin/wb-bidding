@@ -1,4 +1,3 @@
-/* eslint-disable jsdoc/require-jsdoc */
 import { performance } from 'node:perf_hooks';
 import { WbApiError } from '@wb-bidder/wb-api';
 
@@ -26,6 +25,14 @@ export interface ExecutorOptions {
  * Executes writes only after durable evidence and DISPATCHING commit.
  */
 export class WriteExecutor {
+  /**
+   * Creates a write executor instance with its required dependencies.
+   *
+   * @param repository Persistence repository used by the operation.
+   * @param gateway WB gateway used to read and write external state.
+   * @param validator Pre-dispatch validator enforcing current safety gates.
+   * @param options Validated execution options and safety thresholds.
+   */
   public constructor(
     private readonly repository: WritePipelineRepository,
     private readonly gateway: WriteGateway,
@@ -33,6 +40,12 @@ export class WriteExecutor {
     private readonly options: ExecutorOptions,
   ) {}
 
+  /**
+   * Executes run once with the required safety and persistence checks.
+   *
+   * @param workerId Replica-safe worker identifier owning the lease.
+   * @returns Outcome produced after the required safety checks complete.
+   */
   public async runOnce(workerId: string): Promise<number> {
     const claimed = await this.repository.claim(
       workerId,
@@ -230,6 +243,9 @@ export class WriteExecutor {
   }
 }
 
+/**
+ * Coordinates lease heartbeat behavior and its runtime dependencies.
+ */
 class LeaseHeartbeat {
   private readonly activeQueueItemIds: Set<string>;
   private failure: Error | undefined;
@@ -237,6 +253,14 @@ class LeaseHeartbeat {
   private running = false;
   private timer: ReturnType<typeof setTimeout> | undefined;
 
+  /**
+   * Creates a lease heartbeat instance with its required dependencies.
+   *
+   * @param repository Persistence repository used by the operation.
+   * @param workerId Replica-safe worker identifier owning the lease.
+   * @param queueItemIds Queue item identifiers whose leases are renewed together.
+   * @param leaseSeconds Duration of the worker lease in seconds.
+   */
   public constructor(
     private readonly repository: WritePipelineRepository,
     private readonly workerId: string,
@@ -246,27 +270,44 @@ class LeaseHeartbeat {
     this.activeQueueItemIds = new Set(queueItemIds);
   }
 
+  /**
+   * Performs the start operation while preserving domain invariants.
+   */
   public start(): void {
     if (this.running || this.activeQueueItemIds.size === 0) return;
     this.running = true;
     this.schedule();
   }
 
+  /**
+   * Validates healthy.
+   */
   public assertHealthy(): void {
     if (this.failure !== undefined) throw this.failure;
   }
 
+  /**
+   * Releases or removes the selected state.
+   *
+   * @param queueItemId Queue item identifier selecting the durable work item.
+   */
   public async remove(queueItemId: string): Promise<void> {
     if (this.renewal !== undefined) await this.renewal;
     this.assertHealthy();
     this.activeQueueItemIds.delete(queueItemId);
   }
 
+  /**
+   * Performs the renew now operation while preserving domain invariants.
+   */
   public async renewNow(): Promise<void> {
     await this.renewOnce();
     this.assertHealthy();
   }
 
+  /**
+   * Performs the stop operation while preserving domain invariants.
+   */
   public async stop(): Promise<void> {
     this.running = false;
     if (this.timer !== undefined) clearTimeout(this.timer);
@@ -274,6 +315,9 @@ class LeaseHeartbeat {
     if (this.renewal !== undefined) await this.renewal;
   }
 
+  /**
+   * Performs the schedule operation while preserving domain invariants.
+   */
   private schedule(): void {
     this.timer = setTimeout(
       () => {
@@ -285,6 +329,11 @@ class LeaseHeartbeat {
     );
   }
 
+  /**
+   * Performs the renew once operation while preserving domain invariants.
+   *
+   * @returns Result produced by the renew once operation.
+   */
   private renewOnce(): Promise<void> {
     if (this.renewal !== undefined) return this.renewal;
     this.renewal = this.renew().finally(() => {
@@ -293,6 +342,9 @@ class LeaseHeartbeat {
     return this.renewal;
   }
 
+  /**
+   * Performs the renew operation while preserving domain invariants.
+   */
   private async renew(): Promise<void> {
     if (this.failure !== undefined || this.activeQueueItemIds.size === 0) return;
     const queueItemIds = [...this.activeQueueItemIds];
@@ -311,6 +363,12 @@ class LeaseHeartbeat {
   }
 }
 
+/**
+ * Performs the selector for endpoint operation while preserving domain invariants.
+ *
+ * @param endpointKey Endpoint profile key selecting transport behavior.
+ * @returns Result produced by the selector for endpoint operation.
+ */
 function selectorForEndpoint(endpointKey: string): {
   readonly action: 'DELETE' | 'SET';
   readonly targetKind: 'CARD' | 'CLUSTER';
@@ -321,6 +379,13 @@ function selectorForEndpoint(endpointKey: string): {
   throw new Error('UNSUPPORTED_WRITE_ENDPOINT');
 }
 
+/**
+ * Performs the supports endpoint operation while preserving domain invariants.
+ *
+ * @param endpointKey Endpoint profile key selecting transport behavior.
+ * @param item Queue or domain item processed by the operation.
+ * @returns Result produced by the supports endpoint operation.
+ */
 function supportsEndpoint(endpointKey: string, item: ClaimedQueueItem): boolean {
   if (item.campaignBidType === 'UNKNOWN' || item.campaignPaymentType === 'UNKNOWN') return false;
   if (endpointKey === 'cardBidsWrite') {
@@ -338,6 +403,12 @@ function supportsEndpoint(endpointKey: string, item: ClaimedQueueItem): boolean 
   return false;
 }
 
+/**
+ * Performs the method for endpoint operation while preserving domain invariants.
+ *
+ * @param endpointKey Endpoint profile key selecting transport behavior.
+ * @returns Result produced by the method for endpoint operation.
+ */
 function methodForEndpoint(endpointKey: string): 'DELETE' | 'PATCH' | 'POST' {
   if (endpointKey === 'cardBidsWrite') return 'PATCH';
   if (endpointKey === 'clusterWriteBids') return 'POST';
@@ -345,6 +416,12 @@ function methodForEndpoint(endpointKey: string): 'DELETE' | 'PATCH' | 'POST' {
   throw new Error('UNSUPPORTED_WRITE_ENDPOINT');
 }
 
+/**
+ * Performs the oldest state age ms operation while preserving domain invariants.
+ *
+ * @param items Items processed as one bounded operation.
+ * @returns Result produced by the oldest state age ms operation.
+ */
 function oldestStateAgeMs(
   items: readonly { readonly live: { readonly observedAt: Date } }[],
 ): number {

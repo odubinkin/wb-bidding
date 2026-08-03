@@ -1,4 +1,3 @@
-/* eslint-disable jsdoc/require-jsdoc */
 import { Inject, Injectable, type OnApplicationShutdown } from '@nestjs/common';
 
 import { APP_CONFIGURATION } from './application-config.js';
@@ -12,6 +11,12 @@ export const DATABASE_CLIENT = Symbol('DATABASE_CLIENT');
 export const databaseClientProvider = {
   provide: DATABASE_CLIENT,
   inject: [APP_CONFIGURATION],
+  /**
+   * Builds the shared database client from validated application configuration.
+   *
+   * @param configuration Validated immutable application configuration.
+   * @returns Configured Prisma database client.
+   */
   useFactory(configuration: AppConfiguration): DatabaseClient {
     return createDatabaseClient({
       applicationName: 'wb-bidder',
@@ -27,8 +32,14 @@ export const databaseClientProvider = {
  */
 @Injectable()
 export class DatabaseLifecycle implements OnApplicationShutdown {
+  /**
+   * Creates a lifecycle hook for the shared database client.
+   *
+   * @param database Database client used for the transactional operation.
+   */
   public constructor(@Inject(DATABASE_CLIENT) private readonly database: DatabaseClient) {}
 
+  /** Disconnects the database client during graceful application shutdown. */
   public async onApplicationShutdown(): Promise<void> {
     await this.database.$disconnect();
   }

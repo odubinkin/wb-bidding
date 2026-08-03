@@ -1,4 +1,3 @@
-/* eslint-disable jsdoc/require-jsdoc */
 import { cleanupTerminalWriteAttempts, withTransaction } from '@wb-bidder/database';
 import type { ReconciliationWorkItem } from '../types.js';
 import { loadReconciliationWorkPage, toClaimed, parseStoredLiveState } from './helpers.js';
@@ -6,6 +5,11 @@ import { WriteDispatchRepositoryBase } from './dispatch.js';
 
 /** Cohesive write-pipeline repository capability layer. */
 export class WriteRecoveryRepositoryBase extends WriteDispatchRepositoryBase {
+  /**
+   * Executes recover crash windows with the required safety and persistence checks.
+   *
+   * @returns Outcome produced after the required safety checks complete.
+   */
   public async recoverCrashWindows(): Promise<{
     readonly prepared: number;
     readonly unknown: number;
@@ -88,7 +92,7 @@ export class WriteRecoveryRepositoryBase extends WriteDispatchRepositoryBase {
    *
    * Individual state transitions remain serialized by `recordReconciliation` row locks.
    *
-   * @param limit - Maximum rows, from 1 through 500.
+   * @param limit Maximum rows, from 1 through 500.
    * @returns Due work ordered by verification time and queue identity.
    */
   public async loadReconciliationBatch(limit: number): Promise<readonly ReconciliationWorkItem[]> {
@@ -116,7 +120,7 @@ export class WriteRecoveryRepositoryBase extends WriteDispatchRepositoryBase {
   /**
    * Releases queue leases owned by a stopping process.
    *
-   * @param workerId - Exact lease owner.
+   * @param workerId Exact lease owner.
    * @returns Number of released queue rows.
    */
   public async releaseWorkerLeases(workerId: string): Promise<number> {
@@ -140,8 +144,8 @@ export class WriteRecoveryRepositoryBase extends WriteDispatchRepositoryBase {
    * PREPARED, DISPATCHING, UNKNOWN, and pending reconciliation are never selected.
    * Business audit and decisions remain intact.
    *
-   * @param retentionDays - Positive configured retention.
-   * @param limit - Maximum attempts deleted in one transaction.
+   * @param retentionDays Positive configured retention.
+   * @param limit Maximum attempts deleted in one transaction.
    * @returns Deleted attempt count.
    */
   public async cleanupTerminalAttempts(retentionDays: number, limit = 1_000): Promise<number> {

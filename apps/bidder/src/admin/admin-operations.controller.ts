@@ -1,4 +1,3 @@
-/* eslint-disable jsdoc/require-jsdoc */
 import {
   Body,
   Controller,
@@ -49,6 +48,9 @@ import { AdminService } from './admin.service.js';
 import { parseExpectedVersion, requireIdempotency, type ListQuery } from './admin.helpers.js';
 import { correlationId, versionHeader } from './admin-controller.helpers.js';
 
+/**
+ * Coordinates admin operations controller behavior and its runtime dependencies.
+ */
 @ApiBearerAuth('admin-service-token')
 @ApiProduces('application/json', 'application/problem+json')
 @ApiExtraModels(
@@ -135,8 +137,22 @@ import { correlationId, versionHeader } from './admin-controller.helpers.js';
 @UseGuards(AdminAuthGuard)
 @Controller('/api/v1')
 export class AdminOperationsController {
+  /**
+   * Creates a admin operations controller instance with its required dependencies.
+   *
+   * @param service Application service handling the request.
+   */
   public constructor(private readonly service: AdminService) {}
 
+  /**
+   * Creates resync job.
+   *
+   * @param dto Validated HTTP request payload.
+   * @param idempotencyKey Client key used to make the mutation safely repeatable.
+   * @param principal Authenticated administrative principal.
+   * @param request Current administrative HTTP request.
+   * @returns Constructed or normalized result.
+   */
   @ApiTags('jobs')
   @ApiHeader({ name: 'Idempotency-Key', required: true })
   @ApiAcceptedResponse({ type: ManualJobResponseDto })
@@ -159,6 +175,15 @@ export class AdminOperationsController {
     });
   }
 
+  /**
+   * Creates recalculate job.
+   *
+   * @param dto Validated HTTP request payload.
+   * @param idempotencyKey Client key used to make the mutation safely repeatable.
+   * @param principal Authenticated administrative principal.
+   * @param request Current administrative HTTP request.
+   * @returns Constructed or normalized result.
+   */
   @ApiTags('jobs')
   @ApiHeader({ name: 'Idempotency-Key', required: true })
   @ApiAcceptedResponse({ type: ManualJobResponseDto })
@@ -181,6 +206,12 @@ export class AdminOperationsController {
     });
   }
 
+  /**
+   * Retrieves job.
+   *
+   * @param jobId Manual job identifier selecting the durable job.
+   * @returns Requested value or bounded result set.
+   */
   @ApiTags('jobs')
   @ApiOkResponse({ type: ManualJobResponseDto })
   @RequirePermission('jobs:read')
@@ -189,6 +220,12 @@ export class AdminOperationsController {
     return this.service.getJob(jobId);
   }
 
+  /**
+   * Lists decisions.
+   *
+   * @param query Validated filter and pagination query.
+   * @returns Requested value or bounded result set.
+   */
   @ApiTags('decisions')
   @ApiOkResponse({ type: CursorPageDto })
   @ApiQuery({ name: 'campaignId', required: false, type: String })
@@ -209,6 +246,12 @@ export class AdminOperationsController {
     return this.service.listDecisions(query);
   }
 
+  /**
+   * Retrieves decision.
+   *
+   * @param decisionId Decision identifier selecting the durable record.
+   * @returns Requested value or bounded result set.
+   */
   @ApiTags('decisions')
   @ApiOkResponse({ type: DecisionResponseDto })
   @RequirePermission('decisions:read')
@@ -217,6 +260,12 @@ export class AdminOperationsController {
     return this.service.getDecision(decisionId);
   }
 
+  /**
+   * Lists failures.
+   *
+   * @param query Validated filter and pagination query.
+   * @returns Requested value or bounded result set.
+   */
   @ApiTags('queue')
   @ApiOkResponse({ type: CursorPageDto })
   @ApiQuery({ name: 'classification', required: false })
@@ -228,6 +277,18 @@ export class AdminOperationsController {
     return this.service.listFailures(query);
   }
 
+  /**
+   * Performs the retry failure operation while preserving domain invariants.
+   *
+   * @param decisionId Decision identifier selecting the durable record.
+   * @param dto Validated HTTP request payload.
+   * @param idempotencyKey Client key used to make the mutation safely repeatable.
+   * @param ifMatch Conditional request ETag supplied by the client.
+   * @param principal Authenticated administrative principal.
+   * @param request Current administrative HTTP request.
+   * @param response HTTP response used to publish status and headers.
+   * @returns Result produced by the retry failure operation.
+   */
   @ApiTags('queue')
   @ApiHeader({ name: 'Idempotency-Key', required: true })
   @ApiHeader({ name: 'If-Match', required: true })
@@ -256,6 +317,12 @@ export class AdminOperationsController {
     return result;
   }
 
+  /**
+   * Lists audit.
+   *
+   * @param query Validated filter and pagination query.
+   * @returns Requested value or bounded result set.
+   */
   @ApiTags('audit')
   @ApiOkResponse({ type: CursorPageDto })
   @ApiQuery({ name: 'campaignId', required: false, type: String })

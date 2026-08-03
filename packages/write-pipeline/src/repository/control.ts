@@ -1,4 +1,3 @@
-/* eslint-disable jsdoc/require-jsdoc */
 import { withTransaction } from '@wb-bidder/database';
 import { DEPLOYMENT_CONTROL_ID } from './types.js';
 import { checksum, appendAudit, replayIdempotency, storeIdempotency } from './helpers.js';
@@ -7,6 +6,12 @@ import { WriteReconciliationRepositoryBase } from './reconciliation.js';
 
 /** Cohesive write-pipeline repository capability layer. */
 export class WriteControlRepositoryBase extends WriteReconciliationRepositoryBase {
+  /**
+   * Updates global kill.
+   *
+   * @param input Validated input values for the operation.
+   * @returns Result produced by the set global kill operation.
+   */
   public async setGlobalKill(input: ControlMutation): Promise<bigint> {
     return withTransaction(
       this.database,

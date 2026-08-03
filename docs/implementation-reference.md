@@ -200,13 +200,13 @@ OpenAPI/contract тесты, Prisma validation и profile/deprecated-endpoint ch
 
 ## Навигация по исходникам
 
-| Аспект          | Основные исходники                                                            | Проверки                                                          |
-| --------------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| Startup/runtime | `apps/bidder/src/runtime-*.ts`, `app.module.ts`, `main.ts`                    | `production-runtime.integration.spec.ts`, `runtime-clock.spec.ts` |
-| HTTP/Admin      | `admin.controller.ts`, `admin.service.ts`, `admin-*.ts`, `problem-details.ts` | `admin-api.contract.spec.ts`, OpenAPI tests                       |
-| Sync/evidence   | `packages/data-sync/src/*`                                                    | `data-sync*.spec.ts`, load sync capacity                          |
-| Decision        | `packages/decision-engine/src/*`, `decision-job.service.ts`                   | unit/golden/property/mutation/integration                         |
-| WB transport    | `packages/wb-api/src/*`                                                       | `wb-api.spec.ts`, rate-limiter integration                        |
-| Write/reconcile | `packages/write-pipeline/src/*`, `write-runtime.service.ts`                   | write pipeline integration/E2E/runbook                            |
-| Mock            | `apps/wb-mock/src/*`                                                          | mock contract/OpenAPI/E2E                                         |
-| Delivery        | `Dockerfile*`, `docker-compose*.yml`, `scripts/*`                             | compose/built/container/secret/docs checks                        |
+| Аспект          | Основные исходники                                                                                                               | Проверки                                                          |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| Startup/runtime | `apps/bidder/src/runtime-*.ts`, `apps/bidder/src/app.module.ts`, `apps/bidder/src/main.ts`                                       | `production-runtime.integration.spec.ts`, `runtime-clock.spec.ts` |
+| HTTP/Admin      | `apps/bidder/src/admin/`, `apps/bidder/src/admin-dto.ts`, `apps/bidder/src/admin-security.ts`, `problem-details.ts`              | `admin-api.contract.spec.ts`, OpenAPI tests                       |
+| Sync/evidence   | `packages/data-sync/src/repository/`, `packages/data-sync/src/worker/`                                                           | `data-sync*.spec.ts`, load sync capacity                          |
+| Decision        | `packages/decision-engine/src/`, `apps/bidder/src/decision-job/`, `apps/bidder/src/experiment-runtime/`                          | unit/golden/property/mutation/integration                         |
+| WB transport    | `packages/wb-api/src/client/`, `packages/wb-api/src/transport.ts`, `packages/wb-api/src/rate-limiter.ts`                         | `wb-api.spec.ts`, rate-limiter integration                        |
+| Write/reconcile | `packages/write-pipeline/src/repository/`, `packages/write-pipeline/src/executor.ts`, `apps/bidder/src/write-runtime.service.ts` | write pipeline integration/E2E/runbook                            |
+| Mock            | `apps/wb-mock/src/mock-state/`, `apps/wb-mock/src/mock.controller.ts`, `apps/wb-mock/src/promotion.controller.ts`                | mock contract/OpenAPI/E2E                                         |
+| Delivery        | `Dockerfile*`, `docker-compose*.yml`, `scripts/*`                                                                                | compose/built/container/secret/docs checks                        |

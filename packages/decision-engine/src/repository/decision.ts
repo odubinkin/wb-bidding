@@ -1,4 +1,3 @@
-/* eslint-disable jsdoc/require-jsdoc */
 import { randomUUID } from 'node:crypto';
 import { uuidV7 } from '../ids.js';
 import type { DecisionResult } from '../types.js';
@@ -9,6 +8,24 @@ import { DecisionPolicyRepositoryBase } from './policy.js';
 
 /** Cohesive decision repository capability layer. */
 export class DecisionPersistenceRepositoryBase extends DecisionPolicyRepositoryBase {
+  /**
+   * Performs the persist decision operation while preserving domain invariants.
+   *
+   * @param request Current administrative HTTP request.
+   * @param request.calculatedAt calculated at field of the validated request.
+   * @param request.currentBidMinor current bid minor field of the validated request.
+   * @param request.economicsId economics id field of the validated request.
+   * @param request.economicsVersion economics version field of the validated request.
+   * @param request.experiment experiment field of the validated request.
+   * @param request.expectedContributionMinor expected contribution minor field of the validated request.
+   * @param request.periodEnd period end field of the validated request.
+   * @param request.periodStart period start field of the validated request.
+   * @param request.policyId Policy identifier selecting the immutable policy.
+   * @param request.policyVersion policy version field of the validated request.
+   * @param request.result Operation result to convert or expose.
+   * @param request.targetId Target identifier defining the operation scope.
+   * @returns Result produced by the persist decision operation.
+   */
   public async persistDecision(request: {
     readonly calculatedAt: Date;
     readonly currentBidMinor: bigint | null;

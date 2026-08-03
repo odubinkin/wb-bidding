@@ -1,8 +1,13 @@
-/* eslint-disable jsdoc/require-jsdoc */
 import { randomUUID } from 'node:crypto';
 import { type AdminRequest } from '../admin-security.js';
 import { AdminApiError } from '../problem-details.js';
 
+/**
+ * Performs the correlation id operation while preserving domain invariants.
+ *
+ * @param request Current administrative HTTP request.
+ * @returns Result produced by the correlation id operation.
+ */
 export function correlationId(request: AdminRequest): string {
   if (request.correlationId !== undefined) return request.correlationId;
   const supplied = request.header('x-correlation-id');
@@ -11,12 +16,24 @@ export function correlationId(request: AdminRequest): string {
   return request.correlationId;
 }
 
+/**
+ * Performs the positive big int operation while preserving domain invariants.
+ *
+ * @param value Value to validate, transform, or persist.
+ * @returns Result produced by the positive big int operation.
+ */
 export function positiveBigInt(value: string): bigint {
   if (!/^[1-9][0-9]*$/u.test(value))
     throw new AdminApiError(422, 'INVALID_NM_ID', 'nmId must be a positive decimal string.');
   return BigInt(value);
 }
 
+/**
+ * Performs the date or now operation while preserving domain invariants.
+ *
+ * @param value Value to validate, transform, or persist.
+ * @returns Result produced by the date or now operation.
+ */
 export function dateOrNow(value: string | undefined): Date | undefined {
   if (value === undefined) return undefined;
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/u.test(value))
@@ -27,6 +44,13 @@ export function dateOrNow(value: string | undefined): Date | undefined {
   return result;
 }
 
+/**
+ * Performs the version header operation while preserving domain invariants.
+ *
+ * @param prefix Stable resource prefix used in the serialized value.
+ * @param result Operation result to convert or expose.
+ * @returns Result produced by the version header operation.
+ */
 export function versionHeader(prefix: string, result: unknown): string {
   const version =
     typeof result === 'object' && result !== null && 'version' in result

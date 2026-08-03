@@ -1,4 +1,3 @@
-/* eslint-disable jsdoc/require-jsdoc */
 import { randomUUID } from 'node:crypto';
 import { scopedChecksum } from '../checksum.js';
 import {
@@ -25,10 +24,16 @@ export class DecisionEconomicsRepositoryBase {
   /**
    * Creates a repository.
    *
-   * @param database - Shared Prisma Client.
+   * @param database Shared Prisma Client.
    */
   public constructor(protected readonly database: DatabaseClient) {}
 
+  /**
+   * Creates economics version.
+   *
+   * @param mutation Transactional mutation callback.
+   * @returns Constructed or normalized result.
+   */
   public async createEconomicsVersion(
     mutation: EconomicsMutation,
   ): Promise<{ readonly created: boolean; readonly id: string; readonly version: bigint }> {
@@ -123,6 +128,19 @@ export class DecisionEconomicsRepositoryBase {
     });
   }
 
+  /**
+   * Performs the enqueue economics import operation while preserving domain invariants.
+   *
+   * @param request Current administrative HTTP request.
+   * @param request.actor Authenticated actor recorded in the audit trail.
+   * @param request.changeReason change reason field of the validated request.
+   * @param request.correlationId Correlation identifier propagated to audit and logs.
+   * @param request.dryRun dry run field of the validated request.
+   * @param request.idempotencyKey Client key used to make the mutation safely repeatable.
+   * @param request.idempotencyScope idempotency scope field of the validated request.
+   * @param request.rows Persisted rows included in the bounded result.
+   * @returns Result produced by the enqueue economics import operation.
+   */
   public async enqueueEconomicsImport(request: {
     readonly actor: string;
     readonly changeReason?: string;
@@ -204,6 +222,12 @@ export class DecisionEconomicsRepositoryBase {
     });
   }
 
+  /**
+   * Executes process next economics import with the required safety and persistence checks.
+   *
+   * @param workerId Replica-safe worker identifier owning the lease.
+   * @returns Outcome produced after the required safety checks complete.
+   */
   public async processNextEconomicsImport(workerId: string): Promise<string | null> {
     const claimed = await this.claimImport(workerId);
     if (claimed === null) return null;
@@ -257,6 +281,12 @@ export class DecisionEconomicsRepositoryBase {
       by: ['status'],
       where: { importId: claimed.id },
     });
+    /**
+     * Performs the count operation while preserving domain invariants.
+     *
+     * @param status Lifecycle status to count or classify.
+     * @returns Result produced by the count operation.
+     */
     const count = (status: 'FAILED' | 'SUCCEEDED' | 'VALIDATED'): number =>
       statuses.find((row) => row.status === status)?._count._all ?? 0;
     const failed = count('FAILED');
@@ -280,6 +310,12 @@ export class DecisionEconomicsRepositoryBase {
     return claimed.id;
   }
 
+  /**
+   * Performs the claim import operation while preserving domain invariants.
+   *
+   * @param workerId Replica-safe worker identifier owning the lease.
+   * @returns Result produced by the claim import operation.
+   */
   protected async claimImport(workerId: string): Promise<ClaimedImport | null> {
     const row = await claimEconomicsImportRecord(this.database, workerId);
     return row === null

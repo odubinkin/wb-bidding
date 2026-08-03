@@ -1,4 +1,3 @@
-/* eslint-disable jsdoc/require-jsdoc */
 import { randomUUID } from 'node:crypto';
 import { withTransaction } from '@wb-bidder/database';
 import type { ReconciliationObservation } from '../types.js';
@@ -16,6 +15,20 @@ import { WriteRecoveryRepositoryBase } from './recovery.js';
 
 /** Cohesive write-pipeline repository capability layer. */
 export class WriteReconciliationRepositoryBase extends WriteRecoveryRepositoryBase {
+  /**
+   * Updates reconciliation.
+   *
+   * @param input Validated input values for the operation.
+   * @param input.attemptItemId attempt item id field of the validated input.
+   * @param input.decisionId Decision identifier selecting the durable record.
+   * @param input.targetId Target identifier defining the operation scope.
+   * @param input.observation observation field of the validated input.
+   * @param input.observedAt observed at field of the validated input.
+   * @param input.minimumReadIntervalMs minimum read interval ms field of the validated input.
+   * @param input.requiredStableReadCount required stable read count field of the validated input.
+   * @param input.maximumWriteAttempts maximum write attempts field of the validated input.
+   * @returns Result produced by the record reconciliation operation.
+   */
   public async recordReconciliation(input: {
     readonly attemptItemId: string;
     readonly decisionId: string;
@@ -84,6 +97,19 @@ export class WriteReconciliationRepositoryBase extends WriteRecoveryRepositoryBa
     );
   }
 
+  /**
+   * Performs the retry failure operation while preserving domain invariants.
+   *
+   * @param input Validated input values for the operation.
+   * @param input.actor Authenticated actor recorded in the audit trail.
+   * @param input.correlationId Correlation identifier propagated to audit and logs.
+   * @param input.decisionId Decision identifier selecting the durable record.
+   * @param input.expectedVersion Optimistic-concurrency version required by the mutation.
+   * @param input.idempotencyKey Client key used to make the mutation safely repeatable.
+   * @param input.idempotencyScope idempotency scope field of the validated input.
+   * @param input.reason Stable reason code explaining the outcome.
+   * @returns Result produced by the retry failure operation.
+   */
   public async retryFailure(input: {
     readonly actor: string;
     readonly correlationId: string;

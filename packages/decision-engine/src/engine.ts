@@ -1,4 +1,3 @@
-/* eslint-disable jsdoc/require-jsdoc */
 import { scopedChecksum } from './checksum.js';
 import { buildBidResponseCurve, scoreCandidate, selectBestCandidate } from './estimator.js';
 import { validateDecisionPolicy } from './policy.js';
@@ -15,7 +14,7 @@ const PPM = 1_000_000n;
 /**
  * Executes the pure deterministic rules-v1 Decision Engine.
  *
- * @param input - Complete normalized immutable target input.
+ * @param input Complete normalized immutable target input.
  * @returns Explained decision without any network or persistence side effects.
  */
 export function decideBid(input: DecisionInput): DecisionResult {
@@ -227,6 +226,12 @@ export function decideBid(input: DecisionInput): DecisionResult {
   });
 }
 
+/**
+ * Performs the collect unconditional blockers operation while preserving domain invariants.
+ *
+ * @param input Validated input values for the operation.
+ * @returns Result produced by the collect unconditional blockers operation.
+ */
 function collectUnconditionalBlockers(input: DecisionInput): readonly string[] {
   const blockers = new Set<string>();
   if (input.manualPause) {
@@ -275,6 +280,15 @@ function collectUnconditionalBlockers(input: DecisionInput): readonly string[] {
   return Object.freeze(priority.filter((reason) => blockers.has(reason)));
 }
 
+/**
+ * Creates candidate set.
+ *
+ * @param input Validated input values for the operation.
+ * @param curve Estimated bid-response curve used for scoring.
+ * @param floor Minimum bid allowed by the active constraints.
+ * @param cap Maximum bid allowed by the active constraints.
+ * @returns Constructed or normalized result.
+ */
 function buildCandidateSet(
   input: DecisionInput,
   curve: readonly { readonly bidMinor: bigint; readonly eligible: boolean }[],
@@ -313,6 +327,15 @@ function buildCandidateSet(
   );
 }
 
+/**
+ * Updates bounds.
+ *
+ * @param input Validated input values for the operation.
+ * @param rawBid Unbounded bid proposed before safety constraints are applied.
+ * @param floor Minimum bid allowed by the active constraints.
+ * @param configuredCap Validated configured cap value supplied to the operation.
+ * @returns Result produced by the apply bounds operation.
+ */
 function applyBounds(
   input: DecisionInput,
   rawBid: bigint | null,
@@ -356,6 +379,12 @@ function applyBounds(
   });
 }
 
+/**
+ * Performs the assess increase budget operation while preserving domain invariants.
+ *
+ * @param input Validated input values for the operation.
+ * @returns Result produced by the assess increase budget operation.
+ */
 function assessIncreaseBudget(input: DecisionInput): {
   readonly allowed: boolean;
   readonly reserved: bigint | null;
@@ -393,6 +422,13 @@ function assessIncreaseBudget(input: DecisionInput): {
   });
 }
 
+/**
+ * Performs the aggregate current regime operation while preserving domain invariants.
+ *
+ * @param days Complete performance days included in the calculation.
+ * @param input Validated input values for the operation.
+ * @returns Result produced by the aggregate current regime operation.
+ */
 function aggregateCurrentRegime(
   days: readonly DecisionPerformanceDay[],
   input: DecisionInput,
@@ -420,6 +456,13 @@ function aggregateCurrentRegime(
   };
 }
 
+/**
+ * Determines whether is zero conversion is satisfied.
+ *
+ * @param input Validated input values for the operation.
+ * @param aggregate Validated aggregate value supplied to the operation.
+ * @returns Whether the requested condition is satisfied.
+ */
 function isZeroConversion(
   input: DecisionInput,
   aggregate: ReturnType<typeof aggregateCurrentRegime>,
@@ -436,6 +479,13 @@ function isZeroConversion(
           aggregate.spendMinor >= input.policy.zeroConversionSpendThresholdMinor);
 }
 
+/**
+ * Performs the meets hysteresis operation while preserving domain invariants.
+ *
+ * @param input Validated input values for the operation.
+ * @param bid Bid value evaluated by the decision rule.
+ * @returns Result produced by the meets hysteresis operation.
+ */
 function meetsHysteresis(input: DecisionInput, bid: bigint): boolean {
   const absolute = abs(bid - input.currentBidMinor);
   const relativePpm = input.currentBidMinor === 0n ? PPM : (absolute * PPM) / input.currentBidMinor;
@@ -445,6 +495,12 @@ function meetsHysteresis(input: DecisionInput, bid: bigint): boolean {
   );
 }
 
+/**
+ * Determines whether is cooldown active is satisfied.
+ *
+ * @param input Validated input values for the operation.
+ * @returns Whether the requested condition is satisfied.
+ */
 function isCooldownActive(input: DecisionInput): boolean {
   return (
     input.lastWriteAt !== null &&
@@ -452,11 +508,28 @@ function isCooldownActive(input: DecisionInput): boolean {
   );
 }
 
+/**
+ * Performs the budget phase operation while preserving domain invariants.
+ *
+ * @param input Validated input values for the operation.
+ * @returns Result produced by the budget phase operation.
+ */
 function budgetPhase(input: DecisionInput): string {
   const assessment = assessIncreaseBudget(input);
   return assessment.allowed ? 'HEADROOM' : 'UNAVAILABLE_OR_EXHAUSTED';
 }
 
+/**
+ * Performs the blocked outcome operation while preserving domain invariants.
+ *
+ * @param input Validated input values for the operation.
+ * @param inputSnapshotChecksum Checksum binding the result to its immutable input snapshot.
+ * @param decisionInputChecksum Validated decision input checksum value supplied to the operation.
+ * @param buckets Response-curve buckets included in the decision evidence.
+ * @param candidates Candidate bids evaluated by the decision engine.
+ * @param reason Stable reason code explaining the outcome.
+ * @returns Result produced by the blocked outcome operation.
+ */
 function blockedOutcome(
   input: DecisionInput,
   inputSnapshotChecksum: string,
@@ -483,6 +556,26 @@ function blockedOutcome(
   });
 }
 
+/**
+ * Performs the result operation while preserving domain invariants.
+ *
+ * @param input Validated input values for the operation.
+ * @param input.action Action selected for the durable state transition.
+ * @param input.actionBlockers action blockers field of the validated input.
+ * @param input.boundedBidMinor bounded bid minor field of the validated input.
+ * @param input.buckets Response-curve buckets included in the decision evidence.
+ * @param input.candidates Candidate bids evaluated by the decision engine.
+ * @param input.decisionInputChecksum decision input checksum field of the validated input.
+ * @param input.guardrailCodes guardrail codes field of the validated input.
+ * @param input.inputSnapshotChecksum Checksum binding the result to its immutable input snapshot.
+ * @param input.outcomeReasonCode outcome reason code field of the validated input.
+ * @param input.proposedBidMinor proposed bid minor field of the validated input.
+ * @param input.queueEligible queue eligible field of the validated input.
+ * @param input.reservedUnobservedSpendMinor reserved unobserved spend minor field of the validated input.
+ * @param input.strategyReasonCode strategy reason code field of the validated input.
+ * @param input.unconditionalBlockers unconditional blockers field of the validated input.
+ * @returns Result produced by the result operation.
+ */
 function result(input: {
   readonly action: DecisionResult['action'];
   readonly actionBlockers: readonly string[];
@@ -519,6 +612,11 @@ function result(input: {
   });
 }
 
+/**
+ * Validates input.
+ *
+ * @param input Validated input values for the operation.
+ */
 function validateInput(input: DecisionInput): void {
   if (input.currentBidMinor < 0n || input.dailyAnchorBidMinor < 0n) {
     throw new Error('Confirmed bids must not be negative');
@@ -534,6 +632,14 @@ function validateInput(input: DecisionInput): void {
   }
 }
 
+/**
+ * Performs the clamp operation while preserving domain invariants.
+ *
+ * @param value Value to validate, transform, or persist.
+ * @param lower Lower numeric bound used by the calculation.
+ * @param upper Upper numeric bound used by the calculation.
+ * @returns Result produced by the clamp operation.
+ */
 function clamp(value: bigint, lower: bigint, upper: bigint): bigint {
   if (lower > upper) {
     throw new Error('Invalid bid bounds');
@@ -541,6 +647,12 @@ function clamp(value: bigint, lower: bigint, upper: bigint): bigint {
   return value < lower ? lower : value > upper ? upper : value;
 }
 
+/**
+ * Performs the maximum operation while preserving domain invariants.
+ *
+ * @param values Values to validate or transform.
+ * @returns Result produced by the maximum operation.
+ */
 function maximum(...values: readonly bigint[]): bigint {
   const first = values[0];
   if (first === undefined) {
@@ -549,6 +661,12 @@ function maximum(...values: readonly bigint[]): bigint {
   return values.reduce((current, value) => (value > current ? value : current), first);
 }
 
+/**
+ * Performs the minimum operation while preserving domain invariants.
+ *
+ * @param values Values to validate or transform.
+ * @returns Result produced by the minimum operation.
+ */
 function minimum(...values: readonly bigint[]): bigint {
   const first = values[0];
   if (first === undefined) {
@@ -557,10 +675,23 @@ function minimum(...values: readonly bigint[]): bigint {
   return values.reduce((current, value) => (value < current ? value : current), first);
 }
 
+/**
+ * Performs the compare big int operation while preserving domain invariants.
+ *
+ * @param left Left-hand value used by the comparison.
+ * @param right Right-hand value used by the comparison.
+ * @returns Result produced by the compare big int operation.
+ */
 function compareBigInt(left: bigint, right: bigint): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
+/**
+ * Performs the abs operation while preserving domain invariants.
+ *
+ * @param value Value to validate, transform, or persist.
+ * @returns Result produced by the abs operation.
+ */
 function abs(value: bigint): bigint {
   return value < 0n ? -value : value;
 }

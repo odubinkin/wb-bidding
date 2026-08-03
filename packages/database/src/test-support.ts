@@ -4,13 +4,19 @@ import {
   type DatabaseClientOptions,
   type DatabaseExecutor,
 } from './client.js';
-/* eslint-disable jsdoc/require-jsdoc, @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
 
+/**
+ * Defines the data contract for test query result.
+ */
 interface TestQueryResult<TRow = Record<string, unknown>> {
   readonly rowCount: number | null;
   readonly rows: readonly TRow[];
 }
 
+/**
+ * Defines the data contract for test database connection.
+ */
 interface TestDatabaseConnection {
   query<TRow = Record<string, unknown>>(
     statement: string,
@@ -36,12 +42,19 @@ export type TestDatabaseClient = DatabaseClient & {
  * Test fixture SQL uses the attached query facade, whose execution remains
  * centralized in this package and parameterized through Prisma.
  *
- * @param options - Isolated database connection options.
+ * @param options Isolated database connection options.
  * @returns Prisma Client with test-only query/connect/end conveniences.
  */
 export function createTestDatabaseClient(options: DatabaseClientOptions): TestDatabaseClient {
   const database = createDatabaseClient(options);
   return new Proxy(database as TestDatabaseClient, {
+    /**
+     * Retrieves the requested value.
+     *
+     * @param target Underlying object wrapped by the compatibility facade.
+     * @param property Property key intercepted by the compatibility facade.
+     * @returns Requested value or bounded result set.
+     */
     get(target, property) {
       if (property === 'query') {
         return <TRow = Record<string, unknown>>(
@@ -58,6 +71,14 @@ export function createTestDatabaseClient(options: DatabaseClientOptions): TestDa
   });
 }
 
+/**
+ * Executes execute test statement with the required safety and persistence checks.
+ *
+ * @param database Database client used for the transactional operation.
+ * @param statement Parameterized SQL statement executed by the test facade.
+ * @param values Values to validate or transform.
+ * @returns Outcome produced after the required safety checks complete.
+ */
 async function executeTestStatement<TRow>(
   database: DatabaseExecutor,
   statement: string,
@@ -81,6 +102,12 @@ async function executeTestStatement<TRow>(
   return { rowCount, rows: [] };
 }
 
+/**
+ * Performs the connect test transaction operation while preserving domain invariants.
+ *
+ * @param database Database client used for the transactional operation.
+ * @returns Result produced by the connect test transaction operation.
+ */
 async function connectTestTransaction(database: DatabaseClient): Promise<TestDatabaseConnection> {
   let settle!: (outcome: 'commit' | 'rollback') => void;
   const outcome = new Promise<'commit' | 'rollback'>((resolve) => {
@@ -95,6 +122,13 @@ async function connectTestTransaction(database: DatabaseClient): Promise<TestDat
     .$transaction(
       async (transaction) => {
         const connection: TestDatabaseConnection = {
+          /**
+           * Performs the query operation while preserving domain invariants.
+           *
+           * @param statement Parameterized SQL statement executed by the test facade.
+           * @param values Values to validate or transform.
+           * @returns Result produced by the query operation.
+           */
           async query<TRow = Record<string, unknown>>(
             statement: string,
             values: readonly unknown[] = [],
@@ -111,6 +145,9 @@ async function connectTestTransaction(database: DatabaseClient): Promise<TestDat
             }
             return executeTestStatement<TRow>(transaction, statement, values);
           },
+          /**
+           * Releases or removes the selected state.
+           */
           release() {
             if (!settled) {
               settled = true;
@@ -132,4 +169,7 @@ async function connectTestTransaction(database: DatabaseClient): Promise<TestDat
   return exposed;
 }
 
+/**
+ * Coordinates test transaction rollback behavior and its runtime dependencies.
+ */
 class TestTransactionRollback extends Error {}

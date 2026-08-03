@@ -1,4 +1,3 @@
-/* eslint-disable jsdoc/require-jsdoc */
 import type { WbApiClient } from '@wb-bidder/wb-api';
 
 import type {
@@ -9,14 +8,28 @@ import type {
   WriteGateway,
 } from './types.js';
 
+/**
+ * Defines the supported values for dispatch input.
+ */
 type DispatchInput = Parameters<WriteGateway['dispatch']>[1][number];
 
 /**
  * Card-bid gateway that preserves WB identifiers only at the transport boundary.
  */
 export class WbCardBidGateway implements WriteGateway {
+  /**
+   * Creates a wb card bid gateway instance with its required dependencies.
+   *
+   * @param client Database or API client used by the operation.
+   */
   public constructor(private readonly client: WbApiClient) {}
 
+  /**
+   * Retrieves live state.
+   *
+   * @param item Queue or domain item processed by the operation.
+   * @returns Requested value or bounded result set.
+   */
   public async readLiveState(item: ClaimedQueueItem): Promise<LiveBidState> {
     assertCard(item.targetKind);
     const campaignId = safeWbNumber(item.wbCampaignId);
@@ -40,6 +53,14 @@ export class WbCardBidGateway implements WriteGateway {
     });
   }
 
+  /**
+   * Executes dispatch with the required safety and persistence checks.
+   *
+   * @param endpointKey Endpoint profile key selecting transport behavior.
+   * @param items Items processed as one bounded operation.
+   * @param correlationId Correlation identifier propagated to audit and logs.
+   * @returns Outcome produced after the required safety checks complete.
+   */
   public async dispatch(
     endpointKey: string,
     items: readonly DispatchInput[],
@@ -49,18 +70,42 @@ export class WbCardBidGateway implements WriteGateway {
     return this.dispatchWith(items, correlationId, (payload) => this.client.writeCardBids(payload));
   }
 
+  /**
+   * Performs the reserve dispatch operation while preserving domain invariants.
+   *
+   * @param endpointKey Endpoint profile key selecting transport behavior.
+   * @returns Result produced by the reserve dispatch operation.
+   */
   public async reserveDispatch(endpointKey: string): Promise<DispatchReservation> {
     if (endpointKey !== 'cardBidsWrite') throw new Error('UNSUPPORTED_WRITE_ENDPOINT');
     const reserved = await this.client.reserveCardBidWrite();
     return Object.freeze({
+      /**
+       * Executes dispatch with the required safety and persistence checks.
+       *
+       * @param items Items processed as one bounded operation.
+       * @param correlationId Correlation identifier propagated to audit and logs.
+       * @returns Outcome produced after the required safety checks complete.
+       */
       dispatch: (items: readonly DispatchInput[], correlationId: string) =>
         this.dispatchWith(items, correlationId, (payload) => reserved.dispatch(payload)),
+      /**
+       * Releases or removes the selected state.
+       */
       release: () => {
         reserved.release();
       },
     });
   }
 
+  /**
+   * Executes dispatch with with the required safety and persistence checks.
+   *
+   * @param items Items processed as one bounded operation.
+   * @param correlationId Correlation identifier propagated to audit and logs.
+   * @param write Transport callback that performs the bounded write.
+   * @returns Outcome produced after the required safety checks complete.
+   */
   private async dispatchWith(
     items: readonly DispatchInput[],
     correlationId: string,
@@ -122,8 +167,19 @@ export class WbCardBidGateway implements WriteGateway {
  * Verified-mock cluster gateway preserving the exact normQuery wire spelling.
  */
 export class WbClusterBidGateway implements WriteGateway {
+  /**
+   * Creates a wb cluster bid gateway instance with its required dependencies.
+   *
+   * @param client Database or API client used by the operation.
+   */
   public constructor(private readonly client: WbApiClient) {}
 
+  /**
+   * Retrieves live state.
+   *
+   * @param item Queue or domain item processed by the operation.
+   * @returns Requested value or bounded result set.
+   */
   public async readLiveState(item: ClaimedQueueItem): Promise<LiveBidState> {
     if (item.targetKind !== 'CLUSTER' || item.normQueryWire === null) {
       throw new Error('CLUSTER_TARGET_REQUIRED');
@@ -148,6 +204,14 @@ export class WbClusterBidGateway implements WriteGateway {
     });
   }
 
+  /**
+   * Executes dispatch with the required safety and persistence checks.
+   *
+   * @param endpointKey Endpoint profile key selecting transport behavior.
+   * @param items Items processed as one bounded operation.
+   * @param correlationId Correlation identifier propagated to audit and logs.
+   * @returns Outcome produced after the required safety checks complete.
+   */
   public async dispatch(
     endpointKey: string,
     items: readonly DispatchInput[],
@@ -161,20 +225,45 @@ export class WbClusterBidGateway implements WriteGateway {
     );
   }
 
+  /**
+   * Performs the reserve dispatch operation while preserving domain invariants.
+   *
+   * @param endpointKey Endpoint profile key selecting transport behavior.
+   * @returns Result produced by the reserve dispatch operation.
+   */
   public async reserveDispatch(endpointKey: string): Promise<DispatchReservation> {
     assertClusterEndpoint(endpointKey);
     const reserved = await this.client.reserveClusterBidWrite(endpointKey);
     return Object.freeze({
+      /**
+       * Executes dispatch with the required safety and persistence checks.
+       *
+       * @param items Items processed as one bounded operation.
+       * @param correlationId Correlation identifier propagated to audit and logs.
+       * @returns Outcome produced after the required safety checks complete.
+       */
       dispatch: (items: readonly DispatchInput[], correlationId: string) =>
         this.dispatchWith(endpointKey, items, correlationId, (payload) =>
           reserved.dispatch(payload),
         ),
+      /**
+       * Releases or removes the selected state.
+       */
       release: () => {
         reserved.release();
       },
     });
   }
 
+  /**
+   * Executes dispatch with with the required safety and persistence checks.
+   *
+   * @param endpointKey Endpoint profile key selecting transport behavior.
+   * @param items Items processed as one bounded operation.
+   * @param correlationId Correlation identifier propagated to audit and logs.
+   * @param write Transport callback that performs the bounded write.
+   * @returns Outcome produced after the required safety checks complete.
+   */
   private async dispatchWith(
     endpointKey: 'clusterDeleteBids' | 'clusterWriteBids',
     items: readonly DispatchInput[],
@@ -229,9 +318,20 @@ export class WbClusterBidGateway implements WriteGateway {
   }
 }
 
+/**
+ * Defines the supported values for card write payload.
+ */
 type CardWritePayload = Parameters<WbApiClient['writeCardBids']>[0];
+/**
+ * Defines the supported values for cluster write payload.
+ */
 type ClusterWritePayload = Parameters<WbApiClient['writeClusterBids']>[0];
 
+/**
+ * Validates cluster endpoint.
+ *
+ * @param endpointKey Endpoint profile key selecting transport behavior.
+ */
 function assertClusterEndpoint(
   endpointKey: string,
 ): asserts endpointKey is 'clusterDeleteBids' | 'clusterWriteBids' {
@@ -240,21 +340,44 @@ function assertClusterEndpoint(
   }
 }
 
+/**
+ * Validates d norm query.
+ *
+ * @param value Value to validate, transform, or persist.
+ * @returns Result produced by the required norm query operation.
+ */
 function requiredNormQuery(value: string | null): string {
   if (value === null || value.length === 0) throw new Error('CLUSTER_NORM_QUERY_REQUIRED');
   return value;
 }
 
+/**
+ * Validates card.
+ *
+ * @param targetKind Target kind selecting card or cluster behavior.
+ */
 function assertCard(targetKind: 'CARD' | 'CLUSTER'): void {
   if (targetKind !== 'CARD') throw new Error('CLUSTER_GATEWAY_REQUIRED');
 }
 
+/**
+ * Performs the safe wb number operation while preserving domain invariants.
+ *
+ * @param value Value to validate, transform, or persist.
+ * @returns Result produced by the safe wb number operation.
+ */
 function safeWbNumber(value: bigint): number {
   const result = Number(value);
   if (!Number.isSafeInteger(result) || result <= 0) throw new Error('WB_ID_OUT_OF_SAFE_RANGE');
   return result;
 }
 
+/**
+ * Performs the safe positive bid operation while preserving domain invariants.
+ *
+ * @param value Value to validate, transform, or persist.
+ * @returns Result produced by the safe positive bid operation.
+ */
 function safePositiveBid(value: bigint | null): number {
   if (value === null) throw new Error('CARD_BID_REQUIRED');
   const result = Number(value);
@@ -262,6 +385,12 @@ function safePositiveBid(value: bigint | null): number {
   return result;
 }
 
+/**
+ * Performs the placement wire operation while preserving domain invariants.
+ *
+ * @param value Value to validate, transform, or persist.
+ * @returns Result produced by the placement wire operation.
+ */
 function placementWire(
   value: 'COMBINED' | 'RECOMMENDATIONS' | 'SEARCH',
 ): 'combined' | 'recommendations' | 'search' {

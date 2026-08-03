@@ -1,4 +1,3 @@
-/* eslint-disable jsdoc/require-jsdoc */
 import { claimDecisionQueueItems, type DatabaseClient } from '@wb-bidder/database';
 import type { ClaimedQueueItem } from '../types.js';
 import { toClaimed } from './helpers.js';
@@ -7,10 +6,26 @@ import { toClaimed } from './helpers.js';
 export class WriteLeaseRepositoryBase {
   protected readonly database: DatabaseClient;
 
+  /**
+   * Creates a write lease repository base instance with its required dependencies.
+   *
+   * @param database Database client used for the transactional operation.
+   */
   public constructor(database: DatabaseClient) {
     this.database = database;
   }
 
+  /**
+   * Performs the claim operation while preserving domain invariants.
+   *
+   * @param workerId Replica-safe worker identifier owning the lease.
+   * @param limit Maximum number of records to process.
+   * @param leaseSeconds Duration of the worker lease in seconds.
+   * @param selector Bounded selector used to choose eligible records.
+   * @param selector.action Action selected for the durable state transition.
+   * @param selector.targetKind Target kind selecting card or cluster behavior.
+   * @returns Result produced by the claim operation.
+   */
   public async claim(
     workerId: string,
     limit: number,
@@ -33,6 +48,14 @@ export class WriteLeaseRepositoryBase {
     return Object.freeze(rows.map(toClaimed));
   }
 
+  /**
+   * Performs the heartbeat operation while preserving domain invariants.
+   *
+   * @param workerId Replica-safe worker identifier owning the lease.
+   * @param queueItemIds Queue item identifiers whose leases are renewed together.
+   * @param leaseSeconds Duration of the worker lease in seconds.
+   * @returns Result produced by the heartbeat operation.
+   */
   public async heartbeat(workerId: string, queueItemIds: readonly string[], leaseSeconds: number) {
     if (queueItemIds.length === 0) return 0;
     const result = await this.database.decisionQueueItem.updateMany({
@@ -42,6 +65,14 @@ export class WriteLeaseRepositoryBase {
     return result.count;
   }
 
+  /**
+   * Releases or removes lease.
+   *
+   * @param queueItemId Queue item identifier selecting the durable work item.
+   * @param workerId Replica-safe worker identifier owning the lease.
+   * @param classification Failure classification assigned to the queue item.
+   * @param retryAt Earliest timestamp at which retry is allowed.
+   */
   public async releaseLease(
     queueItemId: string,
     workerId: string,
@@ -61,6 +92,14 @@ export class WriteLeaseRepositoryBase {
     });
   }
 
+  /**
+   * Performs the fail leased operation while preserving domain invariants.
+   *
+   * @param queueItemId Queue item identifier selecting the durable work item.
+   * @param workerId Replica-safe worker identifier owning the lease.
+   * @param code Stable machine-readable outcome code.
+   * @param classification Failure classification assigned to the queue item.
+   */
   public async failLeased(
     queueItemId: string,
     workerId: string,

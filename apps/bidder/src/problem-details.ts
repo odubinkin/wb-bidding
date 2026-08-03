@@ -1,4 +1,4 @@
-/* eslint-disable jsdoc/require-jsdoc, @typescript-eslint/no-unnecessary-condition, @typescript-eslint/no-unsafe-enum-comparison */
+/* eslint-disable @typescript-eslint/no-unnecessary-condition, @typescript-eslint/no-unsafe-enum-comparison */
 import { Catch, type ExceptionFilter, HttpException, HttpStatus } from '@nestjs/common';
 import type { ArgumentsHost } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
@@ -8,6 +8,13 @@ import type { AdminRequest } from './admin-security.js';
 
 /** Typed application error that maps a known Admin API failure to an HTTP response. */
 export class AdminApiError extends Error {
+  /**
+   * Creates a admin api error instance with its required dependencies.
+   *
+   * @param status Lifecycle status to count or classify.
+   * @param code Stable machine-readable outcome code.
+   * @param detail Human-readable diagnostic detail.
+   */
   public constructor(
     public readonly status: number,
     public readonly code: string,
@@ -22,6 +29,12 @@ export class AdminApiError extends Error {
  */
 @Catch()
 export class ProblemDetailsFilter implements ExceptionFilter {
+  /**
+   * Performs the catch operation while preserving domain invariants.
+   *
+   * @param exception Thrown value translated into a stable API problem.
+   * @param host HTTP arguments host used to write the response.
+   */
   public catch(exception: unknown, host: ArgumentsHost): void {
     const http = host.switchToHttp();
     const request = http.getRequest<AdminRequest>();
@@ -37,6 +50,13 @@ export class ProblemDetailsFilter implements ExceptionFilter {
   }
 }
 
+/**
+ * Converts to problem into its required representation.
+ *
+ * @param exception Thrown value translated into a stable API problem.
+ * @param correlationId Correlation identifier propagated to audit and logs.
+ * @returns Constructed or normalized result.
+ */
 function toProblem(exception: unknown, correlationId: string) {
   if (exception instanceof AdminApiError) {
     return {
@@ -83,6 +103,12 @@ function toProblem(exception: unknown, correlationId: string) {
   };
 }
 
+/**
+ * Converts map database error into its required representation.
+ *
+ * @param exception Thrown value translated into a stable API problem.
+ * @returns Constructed or normalized result.
+ */
 function mapDatabaseError(exception: unknown): {
   code: string;
   detail: string;
@@ -148,6 +174,12 @@ function mapDatabaseError(exception: unknown): {
   return { code: 'INTERNAL_ERROR', detail: 'Internal request processing failed.', status: 500 };
 }
 
+/**
+ * Performs the title for operation while preserving domain invariants.
+ *
+ * @param status Lifecycle status to count or classify.
+ * @returns Result produced by the title for operation.
+ */
 function titleFor(status: number): string {
   return (
     {

@@ -1,4 +1,3 @@
-/* eslint-disable jsdoc/require-jsdoc */
 const DECIMAL_SCALE = 1_000_000n;
 
 /**
@@ -13,8 +12,8 @@ export class Rational {
   /**
    * Creates a normalized exact rational.
    *
-   * @param numerator - Signed numerator.
-   * @param denominator - Non-zero denominator.
+   * @param numerator Signed numerator.
+   * @param denominator Non-zero denominator.
    */
   public constructor(numerator: bigint, denominator = 1n) {
     if (denominator === 0n) {
@@ -29,7 +28,7 @@ export class Rational {
   /**
    * Adds another exact value.
    *
-   * @param other - Addend.
+   * @param other Addend.
    * @returns Sum.
    */
   public add(other: Rational): Rational {
@@ -42,7 +41,7 @@ export class Rational {
   /**
    * Subtracts another exact value.
    *
-   * @param other - Subtrahend.
+   * @param other Subtrahend.
    * @returns Difference.
    */
   public subtract(other: Rational): Rational {
@@ -55,7 +54,7 @@ export class Rational {
   /**
    * Multiplies by an exact value.
    *
-   * @param other - Multiplier.
+   * @param other Multiplier.
    * @returns Product.
    */
   public multiply(other: Rational | bigint): Rational {
@@ -66,7 +65,7 @@ export class Rational {
   /**
    * Compares two exact values.
    *
-   * @param other - Comparator.
+   * @param other Comparator.
    * @returns Negative, zero, or positive ordering value.
    */
   public compare(other: Rational): number {
@@ -103,8 +102,8 @@ export class Rational {
 /**
  * Divides exact integer values and returns null for a zero denominator.
  *
- * @param numerator - Numerator.
- * @param denominator - Denominator.
+ * @param numerator Numerator.
+ * @param denominator Denominator.
  * @returns Exact ratio or null.
  */
 export function divideOrNull(numerator: bigint, denominator: bigint): Rational | null {
@@ -114,8 +113,8 @@ export function divideOrNull(numerator: bigint, denominator: bigint): Rational |
 /**
  * Rounds an integer to the nearest endpoint quantum, resolving exact halves downward.
  *
- * @param value - Non-negative integer bid.
- * @param quantum - Positive endpoint quantum.
+ * @param value Non-negative integer bid.
+ * @param quantum Positive endpoint quantum.
  * @returns Quantized bid.
  */
 export function roundToQuantum(value: bigint, quantum: bigint): bigint {
@@ -127,6 +126,13 @@ export function roundToQuantum(value: bigint, quantum: bigint): bigint {
   return value - lower <= upper - value ? lower : upper;
 }
 
+/**
+ * Performs the greatest common divisor operation while preserving domain invariants.
+ *
+ * @param left Left-hand value used by the comparison.
+ * @param right Right-hand value used by the comparison.
+ * @returns Result produced by the greatest common divisor operation.
+ */
 function greatestCommonDivisor(left: bigint, right: bigint): bigint {
   let a = left;
   let b = right;
@@ -138,6 +144,12 @@ function greatestCommonDivisor(left: bigint, right: bigint): bigint {
   return a === 0n ? 1n : a;
 }
 
+/**
+ * Performs the abs operation while preserving domain invariants.
+ *
+ * @param value Value to validate, transform, or persist.
+ * @returns Result produced by the abs operation.
+ */
 function abs(value: bigint): bigint {
   return value < 0n ? -value : value;
 }

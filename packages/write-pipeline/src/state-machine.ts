@@ -1,4 +1,3 @@
-/* eslint-disable jsdoc/require-jsdoc, jsdoc/require-param, jsdoc/require-returns */
 import { createHash } from 'node:crypto';
 import canonicalize from 'canonicalize';
 
@@ -18,6 +17,9 @@ const QUEUE_TRANSITIONS: Readonly<Record<QueueStatus, readonly QueueStatus[]>> =
 
 /**
  * Verifies a queue transition against the fail-closed lifecycle.
+ *
+ * @param from Current state at the start of the transition.
+ * @param to Requested destination state for the transition.
  */
 export function assertQueueTransition(from: QueueStatus, to: QueueStatus): void {
   if (!QUEUE_TRANSITIONS[from].includes(to)) {
@@ -27,6 +29,9 @@ export function assertQueueTransition(from: QueueStatus, to: QueueStatus): void 
 
 /**
  * Returns a stable secret-free state checksum.
+ *
+ * @param state State value to normalize or classify.
+ * @returns Result produced by the state checksum operation.
  */
 export function stateChecksum(state: LiveBidState): string {
   const canonical = canonicalize({
@@ -42,6 +47,11 @@ export function stateChecksum(state: LiveBidState): string {
 
 /**
  * Classifies a reconciliation read against pre-write and desired states.
+ *
+ * @param observed Live state observed from Wildberries.
+ * @param preWrite Live state captured immediately before dispatch.
+ * @param desired Desired live bid state produced by the decision.
+ * @returns Result produced by the classify reconciliation operation.
  */
 export function classifyReconciliation(
   observed: LiveBidState,
@@ -59,6 +69,16 @@ export function classifyReconciliation(
 
 /**
  * Determines whether another write can be scheduled from stable-old-state evidence.
+ *
+ * @param input Validated input values for the operation.
+ * @param input.stableReadCount stable read count field of the validated input.
+ * @param input.requiredStableReadCount required stable read count field of the validated input.
+ * @param input.fresh fresh field of the validated input.
+ * @param input.prevalidationPassed prevalidation passed field of the validated input.
+ * @param input.elapsedSincePreviousMs elapsed since previous ms field of the validated input.
+ * @param input.minimumReadIntervalMs minimum read interval ms field of the validated input.
+ * @param input.beforeDeadline before deadline field of the validated input.
+ * @returns Whether the requested condition is satisfied.
  */
 export function isSafeStableOldRetry(input: {
   readonly stableReadCount: number;
@@ -78,6 +98,13 @@ export function isSafeStableOldRetry(input: {
   );
 }
 
+/**
+ * Performs the same bid state operation while preserving domain invariants.
+ *
+ * @param left Left-hand value used by the comparison.
+ * @param right Right-hand value used by the comparison.
+ * @returns Result produced by the same bid state operation.
+ */
 function sameBidState(
   left: Pick<LiveBidState, 'bidMinor' | 'explicit'>,
   right: Pick<LiveBidState, 'bidMinor' | 'explicit'>,

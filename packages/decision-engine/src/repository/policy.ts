@@ -1,4 +1,3 @@
-/* eslint-disable jsdoc/require-jsdoc */
 import { randomUUID } from 'node:crypto';
 import { scopedChecksum } from '../checksum.js';
 import { validateDecisionPolicy } from '../policy.js';
@@ -14,6 +13,26 @@ import { DecisionEconomicsRepositoryBase } from './economics.js';
 
 /** Cohesive decision repository capability layer. */
 export class DecisionPolicyRepositoryBase extends DecisionEconomicsRepositoryBase {
+  /**
+   * Creates policy version.
+   *
+   * @param request Current administrative HTTP request.
+   * @param request.actor Authenticated actor recorded in the audit trail.
+   * @param request.campaignId Campaign identifier defining the operation scope.
+   * @param request.changeReason change reason field of the validated request.
+   * @param request.configuration Validated immutable application configuration.
+   * @param request.correlationId Correlation identifier propagated to audit and logs.
+   * @param request.enabled enabled field of the validated request.
+   * @param request.expectedCurrentVersion expected current version field of the validated request.
+   * @param request.idempotencyKey Client key used to make the mutation safely repeatable.
+   * @param request.idempotencyInput idempotency input field of the validated request.
+   * @param request.idempotencyScope idempotency scope field of the validated request.
+   * @param request.scope Stable namespace for the operation.
+   * @param request.supersedeQueued supersede queued field of the validated request.
+   * @param request.targetId Target identifier defining the operation scope.
+   * @param request.validFrom valid from field of the validated request.
+   * @returns Constructed or normalized result.
+   */
   public async createPolicyVersion(request: {
     readonly actor: string;
     readonly campaignId: string | null;
@@ -167,6 +186,14 @@ export class DecisionPolicyRepositoryBase extends DecisionEconomicsRepositoryBas
     });
   }
 
+  /**
+   * Performs the resolve policy operation while preserving domain invariants.
+   *
+   * @param targetId Target identifier defining the operation scope.
+   * @param campaignId Campaign identifier defining the operation scope.
+   * @param at Optional effective timestamp for the lookup.
+   * @returns Result produced by the resolve policy operation.
+   */
   public async resolvePolicy(
     targetId: string,
     campaignId: string,
@@ -203,6 +230,13 @@ export class DecisionPolicyRepositoryBase extends DecisionEconomicsRepositoryBas
     return policy === null ? null : Object.freeze(policy);
   }
 
+  /**
+   * Validates experiment capacity.
+   *
+   * @param transaction Open database transaction used for atomic persistence.
+   * @param targetId Target identifier defining the operation scope.
+   * @param plan Resolved policy plan used by the repository operation.
+   */
   protected async assertExperimentCapacity(
     transaction: DatabaseTransaction,
     targetId: string,

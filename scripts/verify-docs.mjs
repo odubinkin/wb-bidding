@@ -41,7 +41,7 @@ async function listTypeScriptSources(directory) {
     entries.map(async (entry) => {
       const absolute = path.join(directory, entry.name);
       if (entry.isDirectory()) {
-        return entry.name === 'dist' || entry.name === 'node_modules'
+        return ['coverage', 'dist', 'generated', 'node_modules'].includes(entry.name)
           ? []
           : listTypeScriptSources(absolute);
       }
@@ -109,8 +109,12 @@ for (const sourceDirectory of ['apps', 'packages']) {
   for (const relativePath of await listTypeScriptSources(
     path.join(repositoryRoot, sourceDirectory),
   )) {
-    if (!modules.includes(`\`${path.basename(relativePath)}\``)) {
+    if (!modules.includes(`\`${relativePath}\``)) {
       failures.push(`docs/modules.md: отсутствует описание ${relativePath}`);
+    }
+    const source = await readFile(path.join(repositoryRoot, relativePath), 'utf8');
+    if (/eslint-disable(?:-next-line)?[^\n]*jsdoc\//u.test(source)) {
+      failures.push(`${relativePath}: JSDoc-проверка отключена локальным ESLint suppression`);
     }
   }
 }

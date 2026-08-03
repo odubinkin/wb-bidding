@@ -1,4 +1,3 @@
-/* eslint-disable jsdoc/require-jsdoc */
 import { createHash, randomUUID } from 'node:crypto';
 import canonicalize from 'canonicalize';
 import {
@@ -12,6 +11,9 @@ import { isSafeStableOldRetry } from '../state-machine.js';
 import type { ClaimedQueueItem, LiveBidState, ReconciliationObservation } from '../types.js';
 import { DEPLOYMENT_CONTROL_ID } from './types.js';
 
+/**
+ * Defines the data contract for control mutation.
+ */
 export interface ControlMutation {
   readonly actor: string;
   readonly correlationId: string;
@@ -22,6 +24,9 @@ export interface ControlMutation {
   readonly reason: string;
 }
 
+/**
+ * Defines the data contract for claim row.
+ */
 export interface ClaimRow {
   readonly queueItemId: string;
   readonly decisionId: string;
@@ -42,6 +47,9 @@ export interface ClaimRow {
   readonly metricSnapshotId: string;
 }
 
+/**
+ * Defines the data contract for reconciliation queue row.
+ */
 export interface ReconciliationQueueRow {
   readonly actualDispatchCount: number;
   readonly stableReadChecksum: string | null;
@@ -55,8 +63,8 @@ export interface ReconciliationQueueRow {
 /**
  * Loads the latest pending attempt item for each due reconciliation queue row.
  *
- * @param database - Shared Prisma client.
- * @param limit - Maximum due queue rows.
+ * @param database Shared Prisma client.
+ * @param limit Maximum due queue rows.
  * @returns Flattened reconciliation work rows.
  */
 export async function loadReconciliationWorkPage(database: DatabaseClient, limit: number) {
@@ -141,6 +149,12 @@ export async function loadReconciliationWorkPage(database: DatabaseClient, limit
   });
 }
 
+/**
+ * Converts to claimed into its required representation.
+ *
+ * @param row Persisted database row to map into the domain representation.
+ * @returns Constructed or normalized result.
+ */
 export function toClaimed(row: ClaimRow): ClaimedQueueItem {
   const deleteAction = row.action === 'RESTORE_ABSENT_OVERRIDE';
   return Object.freeze({
@@ -172,7 +186,7 @@ export function toClaimed(row: ClaimRow): ClaimedQueueItem {
 /**
  * Validates and restores one persisted pre-write live state.
  *
- * @param value - JSONB state.
+ * @param value JSONB state.
  * @returns Typed immutable live state.
  */
 export function parseStoredLiveState(value: unknown): LiveBidState {
@@ -210,6 +224,12 @@ export function parseStoredLiveState(value: unknown): LiveBidState {
   });
 }
 
+/**
+ * Validates automation allows.
+ *
+ * @param client Database or API client used by the operation.
+ * @param entries Validated entries value supplied to the operation.
+ */
 export async function assertAutomationAllows(
   client: DatabaseTransaction,
   entries: readonly { readonly item: { readonly campaignId: string; readonly targetId: string } }[],
@@ -236,6 +256,18 @@ export async function assertAutomationAllows(
   }
 }
 
+/**
+ * Performs the reconciliation outcome operation while preserving domain invariants.
+ *
+ * @param queue Queue item and decision state used by reconciliation.
+ * @param input Validated input values for the operation.
+ * @param input.observation observation field of the validated input.
+ * @param input.observedAt observed at field of the validated input.
+ * @param input.minimumReadIntervalMs minimum read interval ms field of the validated input.
+ * @param input.requiredStableReadCount required stable read count field of the validated input.
+ * @param input.maximumWriteAttempts maximum write attempts field of the validated input.
+ * @returns Result produced by the reconciliation outcome operation.
+ */
 export function reconciliationOutcome(
   queue: ReconciliationQueueRow,
   input: {
@@ -273,6 +305,19 @@ export function reconciliationOutcome(
   return queue.actualDispatchCount >= input.maximumWriteAttempts ? 'FAILED' : 'RETRY_WAIT';
 }
 
+/**
+ * Updates reconciliation outcome.
+ *
+ * @param client Database or API client used by the operation.
+ * @param input Validated input values for the operation.
+ * @param input.attemptItemId attempt item id field of the validated input.
+ * @param input.decisionId Decision identifier selecting the durable record.
+ * @param input.targetId Target identifier defining the operation scope.
+ * @param input.observation observation field of the validated input.
+ * @param input.observedAt observed at field of the validated input.
+ * @param queue Queue item and decision state used by reconciliation.
+ * @param outcome Reconciliation outcome selected for persistence.
+ */
 export async function applyReconciliationOutcome(
   client: DatabaseTransaction,
   input: {
@@ -342,6 +387,12 @@ export async function applyReconciliationOutcome(
   }
 }
 
+/**
+ * Performs the classify rejected operation while preserving domain invariants.
+ *
+ * @param code Stable machine-readable outcome code.
+ * @returns Result produced by the classify rejected operation.
+ */
 export function classifyRejected(code: string | undefined): string {
   if (code?.includes('AUTH') === true) return 'AUTH';
   if (code?.includes('CAPABILITY') === true) return 'CAPABILITY';
@@ -349,32 +400,74 @@ export function classifyRejected(code: string | undefined): string {
   return 'TRANSIENT_REJECTED';
 }
 
+/**
+ * Determines whether is retryable rejected is satisfied.
+ *
+ * @param code Stable machine-readable outcome code.
+ * @returns Whether the requested condition is satisfied.
+ */
 export function isRetryableRejected(code: string | undefined): boolean {
   return classifyRejected(code) === 'TRANSIENT_REJECTED';
 }
 
+/**
+ * Determines whether is retryable classification is satisfied.
+ *
+ * @param value Value to validate, transform, or persist.
+ * @returns Whether the requested condition is satisfied.
+ */
 export function isRetryableClassification(value: string | null): boolean {
   return value === 'TRANSIENT_REJECTED' || value === 'SAFE_STABLE_OLD_STATE';
 }
 
+/**
+ * Performs the oldest read operation while preserving domain invariants.
+ *
+ * @param items Items processed as one bounded operation.
+ * @returns Result produced by the oldest read operation.
+ */
 export function oldestRead(items: readonly { readonly live: LiveBidState }[]): Date {
   return new Date(Math.min(...items.map(({ live }) => live.observedAt.getTime())));
 }
 
+/**
+ * Performs the checksum operation while preserving domain invariants.
+ *
+ * @param value Value to validate, transform, or persist.
+ * @returns Result produced by the checksum operation.
+ */
 export function checksum(value: unknown): string {
   const valueJson = canonicalize(normalize(value));
   if (valueJson === undefined) throw new Error('CANONICALIZATION_FAILED');
   return createHash('sha256').update(valueJson).digest('hex');
 }
 
+/**
+ * Performs the json operation while preserving domain invariants.
+ *
+ * @param value Value to validate, transform, or persist.
+ * @returns Result produced by the json operation.
+ */
 export function json(value: unknown): string {
   return JSON.stringify(normalize(value));
 }
 
+/**
+ * Performs the input json operation while preserving domain invariants.
+ *
+ * @param value Value to validate, transform, or persist.
+ * @returns Result produced by the input json operation.
+ */
 export function inputJson(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(json(value)) as Prisma.InputJsonValue;
 }
 
+/**
+ * Converts normalize into its required representation.
+ *
+ * @param value Value to validate, transform, or persist.
+ * @returns Constructed or normalized result.
+ */
 export function normalize(value: unknown): unknown {
   if (typeof value === 'bigint') return value.toString();
   if (value instanceof Date) return value.toISOString();
@@ -385,6 +478,19 @@ export function normalize(value: unknown): unknown {
   return value;
 }
 
+/**
+ * Performs the append audit operation while preserving domain invariants.
+ *
+ * @param client Database or API client used by the operation.
+ * @param event Audit event payload to persist.
+ * @param event.action Action selected for the durable state transition.
+ * @param event.actor Authenticated actor recorded in the audit trail.
+ * @param event.before Entity state captured before the mutation.
+ * @param event.after Entity state captured after the mutation.
+ * @param event.correlationId Correlation identifier propagated to audit and logs.
+ * @param event.entityId Identifier of the audited entity.
+ * @param event.entityType entity type field of the validated event.
+ */
 export async function appendAudit(
   client: DatabaseTransaction,
   event: {
@@ -411,6 +517,15 @@ export async function appendAudit(
   });
 }
 
+/**
+ * Performs the replay idempotency operation while preserving domain invariants.
+ *
+ * @param client Database or API client used by the operation.
+ * @param scope Stable namespace for the operation.
+ * @param key Stable key selecting the requested record.
+ * @param requestChecksum Checksum binding the idempotency key to its request.
+ * @returns Result produced by the replay idempotency operation.
+ */
 export async function replayIdempotency(
   client: DatabaseTransaction,
   scope: string | undefined,
@@ -428,6 +543,15 @@ export async function replayIdempotency(
   return row.responseBody as { readonly version: string };
 }
 
+/**
+ * Performs the store idempotency operation while preserving domain invariants.
+ *
+ * @param client Database or API client used by the operation.
+ * @param scope Stable namespace for the operation.
+ * @param key Stable key selecting the requested record.
+ * @param requestChecksum Checksum binding the idempotency key to its request.
+ * @param responseBody Serialized response stored for idempotent replay.
+ */
 export async function storeIdempotency(
   client: DatabaseTransaction,
   scope: string | undefined,

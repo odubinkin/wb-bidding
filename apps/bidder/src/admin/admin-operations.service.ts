@@ -1,4 +1,4 @@
-/* eslint-disable jsdoc/require-jsdoc, @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
 import { randomUUID } from 'node:crypto';
 import { AdminApiError } from '../problem-details.js';
 import type { ManualJobDto } from '../admin-dto.js';
@@ -25,6 +25,12 @@ import { AdminAutomationServiceBase } from './admin-automation.service.js';
 
 /** Cohesive Admin application-service capability layer. */
 export class AdminOperationsServiceBase extends AdminAutomationServiceBase {
+  /**
+   * Creates job.
+   *
+   * @param input Validated input values for the operation.
+   * @returns Constructed or normalized result.
+   */
   public async createJob(
     input: MutationContext & {
       readonly dto: ManualJobDto;
@@ -68,6 +74,12 @@ export class AdminOperationsServiceBase extends AdminAutomationServiceBase {
     });
   }
 
+  /**
+   * Retrieves job.
+   *
+   * @param jobId Manual job identifier selecting the durable job.
+   * @returns Requested value or bounded result set.
+   */
   public async getJob(jobId: string) {
     const row = await this.database.manualJob.findUnique({
       select: {
@@ -90,6 +102,12 @@ export class AdminOperationsServiceBase extends AdminAutomationServiceBase {
     return serialize({ ...body, jobId: id });
   }
 
+  /**
+   * Lists decisions.
+   *
+   * @param query Validated filter and pagination query.
+   * @returns Requested value or bounded result set.
+   */
   public async listDecisions(
     query: ListQuery & {
       action?: string;
@@ -143,6 +161,12 @@ export class AdminOperationsServiceBase extends AdminAutomationServiceBase {
     );
   }
 
+  /**
+   * Retrieves decision.
+   *
+   * @param decisionId Decision identifier selecting the durable record.
+   * @returns Requested value or bounded result set.
+   */
   public async getDecision(decisionId: string) {
     const row = await this.database.bidDecision.findUnique({
       include: {
@@ -182,6 +206,12 @@ export class AdminOperationsServiceBase extends AdminAutomationServiceBase {
     });
   }
 
+  /**
+   * Lists failures.
+   *
+   * @param query Validated filter and pagination query.
+   * @returns Requested value or bounded result set.
+   */
   public async listFailures(query: ListQuery & { classification?: string }) {
     const page = pageFrom(query);
     const classification = codeFilter(query.classification);
@@ -212,6 +242,18 @@ export class AdminOperationsServiceBase extends AdminAutomationServiceBase {
     );
   }
 
+  /**
+   * Performs the retry failure operation while preserving domain invariants.
+   *
+   * @param input Validated input values for the operation.
+   * @param input.actor Authenticated actor recorded in the audit trail.
+   * @param input.correlationId Correlation identifier propagated to audit and logs.
+   * @param input.decisionId Decision identifier selecting the durable record.
+   * @param input.expectedVersion Optimistic-concurrency version required by the mutation.
+   * @param input.idempotencyKey Client key used to make the mutation safely repeatable.
+   * @param input.reason Stable reason code explaining the outcome.
+   * @returns Result produced by the retry failure operation.
+   */
   public async retryFailure(input: {
     readonly actor: string;
     readonly correlationId: string;
@@ -227,6 +269,12 @@ export class AdminOperationsServiceBase extends AdminAutomationServiceBase {
     return { decisionId: input.decisionId, status: 'RETRY_WAIT', version: version.toString() };
   }
 
+  /**
+   * Lists audit.
+   *
+   * @param query Validated filter and pagination query.
+   * @returns Requested value or bounded result set.
+   */
   public async listAudit(
     query: ListQuery & {
       action?: string;

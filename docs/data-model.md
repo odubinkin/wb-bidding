@@ -96,9 +96,9 @@ reconciliation и failed rows не удаляются. Миграции прим
 
 ## Трассировка реализации
 
-Схема определена в `prisma/schema.prisma`, ограничения — в `prisma/migrations/`. Репозитории
-`packages/data-sync/src/repository.ts`, `packages/decision-engine/src/repository.ts` и
-`packages/write-pipeline/src/repository.ts` реализуют транзакции. Инварианты покрывают
+Схема определена в `prisma/schema.prisma`, ограничения — в `prisma/migrations/`. Разделённые
+репозитории `packages/data-sync/src/repository/`, `packages/decision-engine/src/repository/` и
+`packages/write-pipeline/src/repository/` реализуют транзакции. Инварианты покрывают
 `tests/integration/data-sync*.spec.ts`, `tests/integration/decision-engine.integration.spec.ts`,
 `tests/integration/write-pipeline.integration.spec.ts`, `tests/unit/decision-engine*.spec.ts` и
 `tests/contract/admin-api.contract.spec.ts`.
@@ -122,7 +122,8 @@ reconciliation и failed rows не удаляются. Миграции прим
 не позволяет запустить синхронизацию и запись для другого продавца, контура или несовместимых
 настроек аккаунта.
 
-**Где используется.** Создаётся и проверяется в `packages/data-sync/src/repository.ts`; наличие
+**Где используется.** Создаётся и проверяется в
+`packages/data-sync/src/repository/binding.ts`; наличие
 binding контролируют startup-проверки и health/observability в `apps/bidder`.
 
 | Параметр                  | Что это и для чего                                 | Где используется                                                          |
@@ -381,7 +382,7 @@ decision job и pre-dispatch validator выбирают версию, дейст
 идемпотентность, lease и итоговые счётчики от создаваемых версий `ProductEconomics`.
 
 **Где используется.** Создаётся и показывается Admin API; scheduler выдаёт batch import worker,
-а `packages/decision-engine/src/repository.ts` валидирует и применяет элементы.
+а `packages/decision-engine/src/repository/economics.ts` валидирует и применяет элементы.
 
 | Параметр           | Что это и для чего                       | Где используется                                                 |
 | ------------------ | ---------------------------------------- | ---------------------------------------------------------------- |
@@ -461,7 +462,7 @@ decision job выбирает наиболее конкретную активн
 экономика, policy, метрики и оценки кандидатов. Он позволяет объяснить решение без повторного
 чтения изменившейся БД.
 
-**Где используется.** Создаётся `packages/decision-engine/src/repository.ts` вместе с решением;
+**Где используется.** Создаётся `packages/decision-engine/src/repository/decision.ts` вместе с решением;
 читается Admin API и pre-dispatch validator для воспроизводимости и повторной проверки.
 
 | Параметр                             | Что это и для чего                            | Где используется                                               |
@@ -514,7 +515,8 @@ start/result/revert решения.
 **Что это и для чего.** Durable state machine контролируемого lower-only эксперимента. Она
 учитывает зрелые дни и полный расход, а при завершении безопасно возвращает исходное состояние.
 
-**Где используется.** Планируется decision job; `apps/bidder/src/experiment-runtime.service.ts`
+**Где используется.** Планируется decision job;
+`apps/bidder/src/experiment-runtime/experiment-runtime.service.ts`
 собирает дни, оценивает результат и создаёт revert, observability агрегирует состояния.
 
 | Параметр                       | Что это и для чего                               | Где используется                                               |
@@ -652,7 +654,8 @@ wire-значение, pre-write evidence и состояние reconciliation �
 **Что это и для чего.** Отдельный immutable live read после отправки ставки. Последовательность
 таких строк доказывает desired, old или third-party state вместо предположения по HTTP-ответу.
 
-**Где используется.** Добавляется reconciler в `packages/write-pipeline/src/repository.ts`;
+**Где используется.** Добавляется reconciler в
+`packages/write-pipeline/src/repository/reconciliation.ts`;
 используется для queue transitions, retry safety и retention write evidence.
 
 | Параметр              | Что это и для чего                                 | Где используется                                        |
@@ -727,7 +730,8 @@ validator применяют её как наиболее конкретный a
 **Что это и для чего.** Durable запрос на ручную фоновую операцию с явным scope, lease,
 результатом и ошибкой. HTTP-запрос не должен сам выполнять долгую или повторяемую работу.
 
-**Где используется.** Создаётся/читается Admin API; `apps/bidder/src/scheduler.service.ts`
+**Где используется.** Создаётся/читается Admin API;
+`apps/bidder/src/scheduler/scheduler.service.ts`
 выдаёт jobs worker и фиксирует lifecycle.
 
 | Параметр        | Что это и для чего                      | Где используется                                               |
@@ -796,7 +800,9 @@ source evidence, observability и integration tests проверяют recovery.
 **Что это и для чего.** Единственная контрольная точка для каждого вида синхронизации между
 запусками scheduler. Она хранит cursor, границы полного прохода и оценку backlog.
 
-**Где используется.** Читается и обновляется `packages/data-sync/src/repository.ts`; worker
+**Где используется.** Читается и обновляется
+`packages/data-sync/src/repository/campaign.ts` и `packages/data-sync/src/repository/performance.ts`;
+worker
 возобновляет discovery/statistics flows после restart.
 
 | Параметр              | Что это и для чего                         | Где используется                                   |

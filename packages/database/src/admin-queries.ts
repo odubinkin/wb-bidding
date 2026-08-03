@@ -1,4 +1,3 @@
-/* eslint-disable jsdoc/require-param, jsdoc/require-returns */
 import { Prisma } from './generated/prisma/client.js';
 import type { DatabaseClient } from './client.js';
 import { queryRaw } from './sql.js';
@@ -39,6 +38,10 @@ export interface AuditEventRow {
  * Audit entities intentionally use a generic string identity, so campaign and
  * target traversal cannot be represented as Prisma relations. The resulting
  * union read model remains centralized at the database boundary.
+ *
+ * @param database Database client used for the transactional operation.
+ * @param input Validated input values for the operation.
+ * @returns Requested value or bounded result set.
  */
 export async function loadAuditEventPage(
   database: DatabaseClient,

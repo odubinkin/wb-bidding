@@ -1,4 +1,4 @@
-/* eslint-disable jsdoc/require-jsdoc, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return */
 import { AdminApiError } from '../problem-details.js';
 import type { EconomicsImportDto, EconomicsUpdateDto } from '../admin-dto.js';
 import { type ImportItemStatus } from '@wb-bidder/database';
@@ -17,6 +17,13 @@ import { AdminServiceBase } from './admin-base.service.js';
 
 /** Cohesive Admin application-service capability layer. */
 export class AdminEconomicsServiceBase extends AdminServiceBase {
+  /**
+   * Retrieves economics.
+   *
+   * @param nmId Wildberries article identifier.
+   * @param at Optional effective timestamp for the lookup.
+   * @returns Requested value or bounded result set.
+   */
   public async getEconomics(nmId: bigint, at?: Date) {
     const effectiveAt = at ?? this.clock.now();
     const row = await this.database.productEconomics.findFirst({
@@ -45,6 +52,18 @@ export class AdminEconomicsServiceBase extends AdminServiceBase {
     return { body: serialize(row), etag: economicsEtag(row.version) };
   }
 
+  /**
+   * Updates economics.
+   *
+   * @param input Validated input values for the operation.
+   * @param input.actor Authenticated actor recorded in the audit trail.
+   * @param input.correlationId Correlation identifier propagated to audit and logs.
+   * @param input.dto Validated HTTP request payload.
+   * @param input.expectedVersion Optimistic-concurrency version required by the mutation.
+   * @param input.idempotencyKey Client key used to make the mutation safely repeatable.
+   * @param input.nmId Wildberries article identifier.
+   * @returns Result produced by the update economics operation.
+   */
   public async updateEconomics(input: {
     readonly actor: string;
     readonly correlationId: string;
@@ -81,6 +100,16 @@ export class AdminEconomicsServiceBase extends AdminServiceBase {
     }));
   }
 
+  /**
+   * Creates import.
+   *
+   * @param input Validated input values for the operation.
+   * @param input.actor Authenticated actor recorded in the audit trail.
+   * @param input.correlationId Correlation identifier propagated to audit and logs.
+   * @param input.dto Validated HTTP request payload.
+   * @param input.idempotencyKey Client key used to make the mutation safely repeatable.
+   * @returns Constructed or normalized result.
+   */
   public async createImport(input: {
     readonly actor: string;
     readonly correlationId: string;
@@ -114,6 +143,12 @@ export class AdminEconomicsServiceBase extends AdminServiceBase {
     return { ...status, created: result.created };
   }
 
+  /**
+   * Retrieves import.
+   *
+   * @param importId Import batch identifier selecting the durable operation.
+   * @returns Requested value or bounded result set.
+   */
   public async getImport(importId: string) {
     const row = await this.database.productEconomicsImport.findUnique({
       select: {
@@ -139,6 +174,13 @@ export class AdminEconomicsServiceBase extends AdminServiceBase {
     return serialize({ ...body, importId: id });
   }
 
+  /**
+   * Lists import items.
+   *
+   * @param importId Import batch identifier selecting the durable operation.
+   * @param query Validated filter and pagination query.
+   * @returns Requested value or bounded result set.
+   */
   public async listImportItems(importId: string, query: ListQuery & { status?: string }) {
     const page = pageFrom(query);
     const status = enumFilter<ImportItemStatus>(query.status, [

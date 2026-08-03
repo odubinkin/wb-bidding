@@ -1,9 +1,22 @@
-/* eslint-disable jsdoc/require-param, jsdoc/require-returns */
 import { Prisma } from './generated/prisma/client.js';
 import type { DatabaseClient, DatabaseTransaction } from './client.js';
 import { queryRaw } from './sql.js';
 
-/** Upserts one card target through its PostgreSQL partial unique index. */
+/**
+ * Upserts one card target through its PostgreSQL partial unique index.
+ *
+ * @param transaction Open database transaction used for atomic persistence.
+ * @param input Validated input values for the operation.
+ * @param input.bidChecksum bid checksum field of the validated input.
+ * @param input.bidMinor bid minor field of the validated input.
+ * @param input.campaignId Campaign identifier defining the operation scope.
+ * @param input.fetchedAt fetched at field of the validated input.
+ * @param input.id Identifier selecting the requested record.
+ * @param input.nmId Wildberries article identifier.
+ * @param input.placement placement field of the validated input.
+ * @param input.syncRunId sync run id field of the validated input.
+ * @returns Result produced by the upsert card campaign target operation.
+ */
 export async function upsertCardCampaignTarget(
   transaction: DatabaseTransaction,
   input: {
@@ -43,7 +56,17 @@ export async function upsertCardCampaignTarget(
   return id;
 }
 
-/** Upserts one cluster target through its PostgreSQL partial unique index. */
+/**
+ * Upserts one cluster target through its PostgreSQL partial unique index.
+ *
+ * @param transaction Open database transaction used for atomic persistence.
+ * @param input Validated input values for the operation.
+ * @param input.campaignId Campaign identifier defining the operation scope.
+ * @param input.id Identifier selecting the requested record.
+ * @param input.nmId Wildberries article identifier.
+ * @param input.normQueryCanonical norm query canonical field of the validated input.
+ * @param input.normQueryWire norm query wire field of the validated input.
+ */
 export async function upsertClusterCampaignTarget(
   transaction: DatabaseTransaction,
   input: {
@@ -72,7 +95,29 @@ export async function upsertClusterCampaignTarget(
   );
 }
 
-/** Upserts one cluster statistical day through its PostgreSQL partial unique index. */
+/**
+ * Upserts one cluster statistical day through its PostgreSQL partial unique index.
+ *
+ * @param transaction Open database transaction used for atomic persistence.
+ * @param input Validated input values for the operation.
+ * @param input.atbs atbs field of the validated input.
+ * @param input.attributedRevenueMinor attributed revenue minor field of the validated input.
+ * @param input.campaignId Campaign identifier defining the operation scope.
+ * @param input.clicks clicks field of the validated input.
+ * @param input.date date field of the validated input.
+ * @param input.fetchedAt fetched at field of the validated input.
+ * @param input.id Identifier selecting the requested record.
+ * @param input.nmId Wildberries article identifier.
+ * @param input.normQueryCanonical norm query canonical field of the validated input.
+ * @param input.normQueryWire norm query wire field of the validated input.
+ * @param input.orderedUnits ordered units field of the validated input.
+ * @param input.orders orders field of the validated input.
+ * @param input.runId run id field of the validated input.
+ * @param input.sourceChecksum source checksum field of the validated input.
+ * @param input.spendMinor spend minor field of the validated input.
+ * @param input.views views field of the validated input.
+ * @param input.wbCampaignId wb campaign id field of the validated input.
+ */
 export async function upsertClusterStatisticRecord(
   transaction: DatabaseTransaction,
   input: {
@@ -149,7 +194,18 @@ export interface DataSyncCampaignWorkRow {
   readonly wbCampaignId: string;
 }
 
-/** Loads the nested campaign work read model used by the slow synchronization job. */
+/**
+ * Loads the nested campaign work read model used by the slow synchronization job.
+ *
+ * @param database Database client used for the transactional operation.
+ * @param input Validated input values for the operation.
+ * @param input.afterWbCampaignId after wb campaign id field of the validated input.
+ * @param input.campaignIds campaign ids field of the validated input.
+ * @param input.includeReadyCampaigns include ready campaigns field of the validated input.
+ * @param input.limit Maximum number of records to process.
+ * @param input.targetIds target ids field of the validated input.
+ * @returns Requested value or bounded result set.
+ */
 export async function loadDataSyncCampaignWorkPage(
   database: DatabaseClient,
   input: {
@@ -254,7 +310,17 @@ export interface DataSyncPerformanceCandidateRow {
   readonly views: string | null;
 }
 
-/** Loads finalized-day candidates using the latest exact source-content version. */
+/**
+ * Loads finalized-day candidates using the latest exact source-content version.
+ *
+ * @param database Database client used for the transactional operation.
+ * @param input Validated input values for the operation.
+ * @param input.campaignId Campaign identifier defining the operation scope.
+ * @param input.conversionLagDays conversion lag days field of the validated input.
+ * @param input.stableMinutes stable minutes field of the validated input.
+ * @param input.stableReads stable reads field of the validated input.
+ * @returns Requested value or bounded result set.
+ */
 export async function loadDataSyncPerformanceCandidates(
   database: DatabaseClient,
   input: {

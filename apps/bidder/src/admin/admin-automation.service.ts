@@ -1,4 +1,4 @@
-/* eslint-disable jsdoc/require-jsdoc, @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
 import { randomUUID } from 'node:crypto';
 import type { AutomationDto, GlobalKillDto } from '../admin-dto.js';
 import { serialize } from './admin.helpers.js';
@@ -7,6 +7,11 @@ import { AdminPolicyServiceBase } from './admin-policy.service.js';
 
 /** Cohesive Admin application-service capability layer. */
 export class AdminAutomationServiceBase extends AdminPolicyServiceBase {
+  /**
+   * Retrieves automation.
+   *
+   * @returns Requested value or bounded result set.
+   */
   public async getAutomation() {
     const [control, campaigns, targets] = await Promise.all([
       this.database.deploymentControl.findUnique({
@@ -49,6 +54,12 @@ export class AdminAutomationServiceBase extends AdminPolicyServiceBase {
     });
   }
 
+  /**
+   * Updates automation.
+   *
+   * @param input Validated input values for the operation.
+   * @returns Result produced by the set automation operation.
+   */
   public async setAutomation(
     input: MutationContext & {
       readonly dto: AutomationDto;
@@ -99,6 +110,17 @@ export class AdminAutomationServiceBase extends AdminPolicyServiceBase {
     });
   }
 
+  /**
+   * Updates global kill.
+   *
+   * @param input Validated input values for the operation.
+   * @param input.actor Authenticated actor recorded in the audit trail.
+   * @param input.correlationId Correlation identifier propagated to audit and logs.
+   * @param input.dto Validated HTTP request payload.
+   * @param input.expectedVersion Optimistic-concurrency version required by the mutation.
+   * @param input.idempotencyKey Client key used to make the mutation safely repeatable.
+   * @returns Result produced by the set global kill operation.
+   */
   public async setGlobalKill(input: {
     readonly actor: string;
     readonly correlationId: string;
