@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "task_id": "202608030734-HMD66V",
+  "evaluator_id": "recovery-context",
+  "evaluator_profile": "EVALUATOR",
+  "generated_at": "2026-08-03T07:49:24.038Z",
+  "verdict": "pass",
+  "summary": "Six raw SQL executions were replaced without weakening database invariants, and Prisma-only single-consumer helpers are colocated with their repositories.",
+  "evaluated_sha": "5e23231c301e1bb144c293d35f7cfff3ed541a9e",
+  "blueprint_digest": "4f07550a028cf9040677b3c6786948a200c4586d1a028d3a82d7c78997eb2340",
+  "findings": [
+    "Snapshot idempotency uses createManyAndReturn plus findFirst; reconciliation preserves due ordering and latest pending attempt selection; cleanup retains FOR UPDATE SKIP LOCKED while using ordered Prisma deleteMany calls.",
+    "Strict static checks and PostgreSQL 18 integration tests 35/35 passed on the reviewed implementation commit."
+  ],
+  "evidence_refs": [
+    ".agentplane/tasks/202608030734-HMD66V/README.md",
+    "commit 5e23231c301e1bb144c293d35f7cfff3ed541a9e",
+    "pnpm run typecheck",
+    "pnpm run verify:database-architecture",
+    "PostgreSQL 18 pnpm run test:integration: 35/35",
+    "pnpm run format:check and pnpm run lint"
+  ],
+  "missing_tests": [],
+  "hidden_assumptions": [],
+  "residual_risks": []
+}
