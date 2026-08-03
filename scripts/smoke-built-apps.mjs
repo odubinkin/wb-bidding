@@ -71,7 +71,13 @@ async function waitForResponse(url, init) {
         signal: AbortSignal.timeout(1_000),
       });
       if (response.ok) {
-        return response;
+        // Consume under the request deadline; later parsing must not retain its abort signal.
+        const body = await response.arrayBuffer();
+        return new Response(body, {
+          headers: response.headers,
+          status: response.status,
+          statusText: response.statusText,
+        });
       }
     } catch {
       // Startup connection failures are expected until the bounded deadline.
