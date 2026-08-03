@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "task_id": "202608031004-TE4P8R",
+  "evaluator_id": "recovery-context",
+  "evaluator_profile": "EVALUATOR",
+  "generated_at": "2026-08-03T10:25:42.977Z",
+  "verdict": "pass",
+  "summary": "Documentation and production JSDoc satisfy the approved scope with runtime-neutral TypeScript output and all declared checks passing.",
+  "evaluated_sha": "38a0a2c9f97c96b55796d55336789c9a3527463d",
+  "blueprint_digest": "d0407206d6f786c697b34cbaa4f5c42a09f3cc5c0beb24042ef141bdbe1fa2f2",
+  "findings": [
+    "Current paths, configuration, acceptance evidence, exact module traceability, and JSDoc contracts now match the implementation; no executable TypeScript changes were detected."
+  ],
+  "evidence_refs": [
+    ".agentplane/tasks/202608031004-TE4P8R/README.md"
+  ],
+  "missing_tests": [],
+  "hidden_assumptions": [
+    "Generated Prisma sources and test files remain excluded from authored JSDoc requirements."
+  ],
+  "residual_risks": [
+    "External WB sandbox, hosted CI, and release-owner gates remain intentionally outside this task scope."
+  ]
+}
