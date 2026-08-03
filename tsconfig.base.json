@@ -9,6 +9,7 @@
     "exactOptionalPropertyTypes": true,
     "experimentalDecorators": true,
     "forceConsistentCasingInFileNames": true,
+    "ignoreDeprecations": "6.0",
     "isolatedModules": true,
     "lib": ["ES2024"],
     "module": "NodeNext",
@@ -33,6 +34,7 @@
     "sourceMap": true,
     "strict": true,
     "target": "ES2024",
+    "types": ["node"],
     "useDefineForClassFields": true,
     "verbatimModuleSyntax": true
   }
