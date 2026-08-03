@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "task_id": "202608031140-GTAYB9",
+  "evaluator_id": "recovery-context",
+  "evaluator_profile": "EVALUATOR",
+  "generated_at": "2026-08-03T11:43:29.746Z",
+  "verdict": "pass",
+  "summary": "The CI-only diff directly fixes the unresolved Trivy ref and replaces all deprecated Node.js 20 action runtimes with existing Node.js 24-compatible majors.",
+  "evaluated_sha": "be2876631ec9b2e03965576533c24742223c4c4e",
+  "blueprint_digest": "91b6568af90914ceb764a3ff46bf093c7b98247877e4e97e09c7a2344b4efe34",
+  "findings": [
+    "No correctness or scope defects found: both jobs retain their commands and inputs; only action refs changed."
+  ],
+  "evidence_refs": [
+    ".agentplane/tasks/202608031140-GTAYB9/README.md",
+    ".github/workflows/ci.yml",
+    "git ls-remote resolved v7, v7, v6, and v0.36.0 upstream refs",
+    "task verification record: prettier, YAML parse, doctor, and routing checks passed"
+  ],
+  "missing_tests": [],
+  "hidden_assumptions": [],
+  "residual_risks": [
+    "The corrected workflow has not yet run on GitHub because the local commit has not been pushed."
+  ]
+}
