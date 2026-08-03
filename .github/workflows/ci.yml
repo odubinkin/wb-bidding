@@ -30,11 +30,11 @@ jobs:
     env:
       DATABASE_URL: postgresql://wb_bidder:test-only-password@localhost:5432/wb_bidder_test
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
         with:
           version: 10.33.0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
@@ -59,7 +59,7 @@ jobs:
       - run: docker build --file Dockerfile.mock --tag wb-mock:${{ github.sha }} .
       - run: pnpm run smoke:compose
       - name: Scan bidder image
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: wb-bidder:${{ github.sha }}
           format: table
@@ -67,7 +67,7 @@ jobs:
           ignore-unfixed: true
           severity: HIGH,CRITICAL
       - name: Scan mock image
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: wb-mock:${{ github.sha }}
           format: table
@@ -79,11 +79,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
         with:
           version: 10.33.0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
