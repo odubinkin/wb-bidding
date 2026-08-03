@@ -1,10 +1,11 @@
 ---
 id: "202608031026-NBMN10"
 title: "Fix TypeScript lint rootDir errors"
-status: "DOING"
+result_summary: "Migrate workspace to TypeScript 6.0.3 and fix project boundaries"
+status: "DONE"
 priority: "med"
 owner: "CODER"
-revision: 16
+revision: 19
 origin:
   system: "manual"
 depends_on: []
@@ -18,14 +19,9 @@ plan_approval:
   note: null
 verification:
   state: "ok"
-  updated_at: "2026-08-03T10:38:41.001Z"
+  updated_at: "2026-08-03T10:39:06.884Z"
   updated_by: "CODER"
-  note: |-
-    Command: pnpm exec tsc --version; manifest/lock scan; pnpm install --frozen-lockfile. Result: pass. Evidence: Version 6.0.3, no 5.9.3 resolution, frozen install succeeded. Scope: compiler and lockfile consistency.
-    Command: TypeScript 6 no-emit check for all nine app/package tsconfigs. Result: pass. Evidence: every project exited 0 without TS5011, TS6059, or missing Node globals. Scope: workspace project boundaries.
-    Command: pnpm run lint; pnpm run typecheck; pnpm run build. Result: pass. Evidence: ESLint, repository typecheck, nine workspace builds, and declaration bundles succeeded. Scope: repository static and build compatibility.
-    Command: pnpm run test:unit. Result: pass. Evidence: 13 files and 126 tests passed. Scope: unit regressions.
-    Command: git diff --check; ap doctor; routing policy check. Result: pass. Evidence: no whitespace errors, doctor OK, policy routing OK. Scope: task diff and workflow integrity.
+  note: "verified-202608031026-NBMN10"
   attempts: 0
 quality_review:
   state: "pass"
@@ -43,11 +39,19 @@ quality_review:
     - "commits 5c122fd and 2200cca; pnpm tsc 6.0.3; lint/typecheck/build/unit logs"
   findings:
     - "All nine project configs, repository lint/typecheck/build, frozen install, and 126 unit tests pass; lockfile contains no unrelated dependency upgrades."
-commit: null
+commit:
+  hash: "bfd9baa7c39d4989a0483790a98cf4c6ccbbfa80"
+  message: "🚧 NBMN10 task: record evaluator pass"
 comments:
   -
     author: "CODER"
     body: "Start: continue direct-mode task in current checkout."
+  -
+    author: "CODER"
+    body: "Verified: verified-202608031026-NBMN10. Guided shortcut recorded verification and is closing the direct task with traceable commit metadata."
+  -
+    author: "CODER"
+    body: "Verified: migrated the workspace to TypeScript 6.0.3 and resolved TS5011, TS6059, and Node global diagnostics."
 events:
   -
     type: "status"
@@ -83,8 +87,28 @@ events:
       Command: pnpm run lint; pnpm run typecheck; pnpm run build. Result: pass. Evidence: ESLint, repository typecheck, nine workspace builds, and declaration bundles succeeded. Scope: repository static and build compatibility.
       Command: pnpm run test:unit. Result: pass. Evidence: 13 files and 126 tests passed. Scope: unit regressions.
       Command: git diff --check; ap doctor; routing policy check. Result: pass. Evidence: no whitespace errors, doctor OK, policy routing OK. Scope: task diff and workflow integrity.
+  -
+    type: "verify"
+    at: "2026-08-03T10:39:06.884Z"
+    author: "CODER"
+    state: "ok"
+    note: "verified-202608031026-NBMN10"
+  -
+    type: "status"
+    at: "2026-08-03T10:39:07.090Z"
+    author: "CODER"
+    from: "DOING"
+    to: "DONE"
+    note: "Verified: verified-202608031026-NBMN10. Guided shortcut recorded verification and is closing the direct task with traceable commit metadata."
+  -
+    type: "status"
+    at: "2026-08-03T10:39:37.998Z"
+    author: "CODER"
+    from: "DONE"
+    to: "DONE"
+    note: "Verified: migrated the workspace to TypeScript 6.0.3 and resolved TS5011, TS6059, and Node global diagnostics."
 doc_version: 3
-doc_updated_at: "2026-08-03T10:38:41.090Z"
+doc_updated_at: "2026-08-03T10:39:38.000Z"
 doc_updated_by: "CODER"
 description: "Resolve reported TypeScript rootDir diagnostics across bidder, wb-mock, config, and decision-engine with minimal configuration changes."
 sections:
@@ -203,6 +227,36 @@ sections:
     - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
     - risks: none
 
+    ### 2026-08-03T10:39:06.884Z — VERIFY — ok
+
+    By: CODER
+
+    Note: verified-202608031026-NBMN10
+    Attempts: 0
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-08-03T10:38:41.090Z, excerpt_hash=sha256:4ff591ef35f4c0311b75e8e3f22cc35c226ba50313a3cd06e78426c3b104b543
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202608031026-NBMN10/blueprint/resolved-snapshot.json
+    - old_digest: 3cb73a476d2755c2cc41b5f5cd365470ffd2012ea0943fb3df29cf51e25348b7
+    - current_digest: 3cb73a476d2755c2cc41b5f5cd365470ffd2012ea0943fb3df29cf51e25348b7
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202608031026-NBMN10
+
+    DecisionContextRef:
+    - operator_action: run_exact_argv
+    - can_execute_now: true
+    - safe_command: agentplane task complete 202608031026-NBMN10 --result verified-202608031026-NBMN10 --commit bfd9baa7c39d4989a0483790a98cf4c6ccbbfa80
+    - diagnostic_command: none
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: true
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: none
+
     <!-- END VERIFICATION RESULTS -->
   Rollback Plan: |-
     - Revert task-related commit(s).
@@ -211,6 +265,10 @@ sections:
     - Observation: TypeScript 6 reports TS5011 for package tsconfigs that inherit outDir but omit rootDir.
       Impact: Editors using TypeScript 6 still display configuration diagnostics despite TypeScript 5.9 checks passing.
       Resolution: Set rootDir explicitly to the packages directory in every affected cross-package emitting project, then rerun the verification suite.
+extensions:
+  implementation_commit:
+    hash: "2200cca31d3b913627bbbc42e36abce528dc8bae"
+    message: "🚧 NBMN10 task: migrate workspace to TypeScript 6"
 id_source: "generated"
 ---
 ## Summary
@@ -331,6 +389,36 @@ DecisionContextRef:
 - operator_action: run_exact_argv
 - can_execute_now: true
 - safe_command: agentplane task verify-show 202608031026-NBMN10
+- diagnostic_command: none
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: true
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: none
+
+### 2026-08-03T10:39:06.884Z — VERIFY — ok
+
+By: CODER
+
+Note: verified-202608031026-NBMN10
+Attempts: 0
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-08-03T10:38:41.090Z, excerpt_hash=sha256:4ff591ef35f4c0311b75e8e3f22cc35c226ba50313a3cd06e78426c3b104b543
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202608031026-NBMN10/blueprint/resolved-snapshot.json
+- old_digest: 3cb73a476d2755c2cc41b5f5cd365470ffd2012ea0943fb3df29cf51e25348b7
+- current_digest: 3cb73a476d2755c2cc41b5f5cd365470ffd2012ea0943fb3df29cf51e25348b7
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202608031026-NBMN10
+
+DecisionContextRef:
+- operator_action: run_exact_argv
+- can_execute_now: true
+- safe_command: agentplane task complete 202608031026-NBMN10 --result verified-202608031026-NBMN10 --commit bfd9baa7c39d4989a0483790a98cf4c6ccbbfa80
 - diagnostic_command: none
 - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
 - freshness: route=computed_local remote=remote_skipped
