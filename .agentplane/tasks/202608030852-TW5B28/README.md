@@ -1,10 +1,11 @@
 ---
 id: "202608030852-TW5B28"
 title: "Strengthen critical scenario test coverage"
-status: "DOING"
+result_summary: "verified-202608030852-TW5B28"
+status: "DONE"
 priority: "high"
 owner: "TESTER"
-revision: 16
+revision: 18
 origin:
   system: "manual"
 depends_on: []
@@ -31,7 +32,7 @@ plan_approval:
   note: null
 verification:
   state: "ok"
-  updated_at: "2026-08-03T09:17:52.226Z"
+  updated_at: "2026-08-03T09:18:16.189Z"
   updated_by: "CODER"
   note: "verified-202608030852-TW5B28"
   attempts: 0
@@ -55,11 +56,16 @@ quality_review:
   findings:
     - "The former narrow aggregate coverage gate is replaced by expanded per-file measurement with stronger domain overrides."
     - "Runtime bootstrap, scheduler shutdown, Admin success routes, Stage 5 populated upgrade, and real bidder bootstrap now have executable regression evidence."
-commit: null
+commit:
+  hash: "6cdf56757b43b6ce6d81e558580a969139d753f0"
+  message: "🚧 TW5B28 task: record coverage evaluation"
 comments:
   -
     author: "TESTER"
     body: "Start: implement the approved critical-scenario coverage and CI hardening plan in the current direct-mode checkout."
+  -
+    author: "CODER"
+    body: "Verified: verified-202608030852-TW5B28. Guided shortcut recorded verification and is closing the direct task with traceable commit metadata."
 events:
   -
     type: "status"
@@ -80,9 +86,22 @@ events:
     author: "CODER"
     state: "ok"
     note: "verified-202608030852-TW5B28"
+  -
+    type: "verify"
+    at: "2026-08-03T09:18:16.189Z"
+    author: "CODER"
+    state: "ok"
+    note: "verified-202608030852-TW5B28"
+  -
+    type: "status"
+    at: "2026-08-03T09:18:16.396Z"
+    author: "CODER"
+    from: "DOING"
+    to: "DONE"
+    note: "Verified: verified-202608030852-TW5B28. Guided shortcut recorded verification and is closing the direct task with traceable commit metadata."
 doc_version: 3
-doc_updated_at: "2026-08-03T09:17:52.396Z"
-doc_updated_by: "TESTER"
+doc_updated_at: "2026-08-03T09:18:16.397Z"
+doc_updated_by: "CODER"
 description: "Close the approved gaps in CI coverage gates, runtime composition, Admin API, runbook shutdown, database migration coverage, and representative system E2E tests without modifying production behavior."
 sections:
   Summary: |-
@@ -191,6 +210,36 @@ sections:
     - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
     - risks: none
 
+    ### 2026-08-03T09:18:16.189Z — VERIFY — ok
+
+    By: CODER
+
+    Note: verified-202608030852-TW5B28
+    Attempts: 0
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-08-03T09:17:52.396Z, excerpt_hash=sha256:843509e7ac560015434194ed758c1026e587da686a456122b3ccdc3d434303fa
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202608030852-TW5B28/blueprint/resolved-snapshot.json
+    - old_digest: d276a4ec4eaba10fd518dd9c6b4b8903a49d2861f382260e2fcc36ac5bf81166
+    - current_digest: d276a4ec4eaba10fd518dd9c6b4b8903a49d2861f382260e2fcc36ac5bf81166
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202608030852-TW5B28
+
+    DecisionContextRef:
+    - operator_action: run_exact_argv
+    - can_execute_now: true
+    - safe_command: agentplane task complete 202608030852-TW5B28 --result verified-202608030852-TW5B28 --commit 6cdf56757b43b6ce6d81e558580a969139d753f0
+    - diagnostic_command: none
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: true
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: none
+
     <!-- END VERIFICATION RESULTS -->
   Rollback Plan: |-
     - Revert the implementation commit and the deterministic AgentPlane close commit for this task.
@@ -208,6 +257,10 @@ sections:
       Resolution: Final database evidence used a freshly recreated PostgreSQL 18 service; suites were executed once in their normal order, with the long integration group split by file only to stay within the local command runner time limit.
       Promotion: incident-candidate
       Fixability: repo-fixable
+extensions:
+  implementation_commit:
+    hash: "19f36324952177c65827518a65472830e3c2b563"
+    message: "🚧 TW5B28 task: strengthen critical scenario coverage"
 id_source: "generated"
 ---
 ## Summary
@@ -318,6 +371,36 @@ DecisionContextRef:
 - operator_action: run_exact_argv
 - can_execute_now: true
 - safe_command: agentplane task complete 202608030852-TW5B28 --result verified-202608030852-TW5B28 --commit 19f36324952177c65827518a65472830e3c2b563
+- diagnostic_command: none
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: true
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: none
+
+### 2026-08-03T09:18:16.189Z — VERIFY — ok
+
+By: CODER
+
+Note: verified-202608030852-TW5B28
+Attempts: 0
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-08-03T09:17:52.396Z, excerpt_hash=sha256:843509e7ac560015434194ed758c1026e587da686a456122b3ccdc3d434303fa
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202608030852-TW5B28/blueprint/resolved-snapshot.json
+- old_digest: d276a4ec4eaba10fd518dd9c6b4b8903a49d2861f382260e2fcc36ac5bf81166
+- current_digest: d276a4ec4eaba10fd518dd9c6b4b8903a49d2861f382260e2fcc36ac5bf81166
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202608030852-TW5B28
+
+DecisionContextRef:
+- operator_action: run_exact_argv
+- can_execute_now: true
+- safe_command: agentplane task complete 202608030852-TW5B28 --result verified-202608030852-TW5B28 --commit 6cdf56757b43b6ce6d81e558580a969139d753f0
 - diagnostic_command: none
 - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
 - freshness: route=computed_local remote=remote_skipped
