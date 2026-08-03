@@ -4,7 +4,7 @@ title: "Remove runtime migration-table checks"
 status: "DOING"
 priority: "med"
 owner: "CODER"
-revision: 15
+revision: 16
 origin:
   system: "manual"
 depends_on: []
@@ -22,6 +22,22 @@ verification:
   updated_by: "CODER"
   note: "All declared checks passed, including the migration command and 35 integration tests on isolated PostgreSQL 18."
   attempts: 0
+quality_review:
+  state: "pass"
+  updated_at: "2026-08-03T08:06:47.080Z"
+  updated_by: "EVALUATOR"
+  note: "Runtime migration history reads removed and migration verification moved to the dedicated service."
+  evaluated_sha: "17917b4b8a336fc735e961d1cc3a169c3599d1ce"
+  blueprint_digest: "a37ba756dbfd564193ef408fa084b3785fef8913b86e6451078af5c71271dfed"
+  evidence_refs:
+    - ".agentplane/tasks/202608030801-AZPS5E/README.md"
+    - ".agentplane/tasks/202608030801-AZPS5E/quality/20260803-080647080-recovery-context/quality-report.json"
+    - ".agentplane/tasks/202608030801-AZPS5E/quality/20260803-080647080-recovery-context/evaluator-prompt.md"
+    - ".agentplane/tasks/202608030801-AZPS5E/quality/20260803-080647080-recovery-context/evaluator-opinion.md"
+    - ".agentplane/tasks/202608030801-AZPS5E/blueprint/resolved-snapshot.json"
+    - "commit 17917b4; pnpm run prisma:migrate:verify; pnpm run test:integration; pnpm run test:unit; pnpm run test:runbook; pnpm run typecheck; pnpm run verify:database-architecture"
+  findings:
+    - "No remaining bidder/database references to listAppliedMigrationNames or _prisma_migrations; focused readiness assertion forbids raw query use; migration verify and all 35 integration tests passed on PostgreSQL 18."
 commit: null
 comments:
   -
