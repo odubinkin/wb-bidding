@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { ObservabilityService } from '../../apps/bidder/src/observability.service.js';
-import { CronSchedule } from '../../apps/bidder/src/scheduler.service.js';
+import { CronSchedule } from '../../apps/bidder/src/scheduler/cron-schedule.js';
 import { RuntimeSafetyState } from '../../apps/bidder/src/runtime-state.js';
 import type { AppConfiguration } from '@wb-bidder/config';
 import type { DatabaseClient } from '@wb-bidder/database';

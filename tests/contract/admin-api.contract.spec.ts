@@ -7,7 +7,7 @@ import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { AppModule } from '../../apps/bidder/src/app.module.js';
-import { AdminService } from '../../apps/bidder/src/admin.service.js';
+import { AdminService } from '../../apps/bidder/src/admin/admin.service.js';
 import { buildBidderOpenApi } from '../../apps/bidder/src/openapi.js';
 import { configureBidderHttp } from '../../apps/bidder/src/main.js';
 

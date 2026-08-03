@@ -2,7 +2,7 @@
 import { performance } from 'node:perf_hooks';
 import { WbApiError } from '@wb-bidder/wb-api';
 
-import type { WritePipelineRepository } from './repository.js';
+import type { WritePipelineRepository } from './repository/index.js';
 import type {
   ClaimedQueueItem,
   DispatchReservation,

@@ -117,7 +117,7 @@ export default defineConfig({
         'apps/bidder/src/runtime-coordinator.service.ts',
         'apps/bidder/src/runtime-clock.service.ts',
         'apps/bidder/src/runtime-state.ts',
-        'apps/bidder/src/scheduler.service.ts',
+        'apps/bidder/src/scheduler/scheduler.service.ts',
         'apps/bidder/src/worker-identity.ts',
         'apps/bidder/src/write-runtime.service.ts',
         'packages/config/**/*.ts',
@@ -135,7 +135,7 @@ export default defineConfig({
         'packages/decision-engine/src/ids.ts',
         'packages/decision-engine/src/policy.ts',
         'packages/decision-engine/src/rational.ts',
-        'packages/wb-api/src/client.ts',
+        'packages/wb-api/src/client/**/*.ts',
         'packages/wb-api/src/endpoint-registry.ts',
         'packages/wb-api/src/money.ts',
         'packages/wb-api/src/rate-limiter.ts',
@@ -161,7 +161,7 @@ export default defineConfig({
           lines: 94,
           statements: 94,
         },
-        'apps/bidder/src/scheduler.service.ts': {
+        'apps/bidder/src/scheduler/scheduler.service.ts': {
           branches: 40,
           functions: 30,
           lines: 60,

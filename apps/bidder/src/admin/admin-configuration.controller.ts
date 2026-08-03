@@ -29,9 +29,7 @@ import {
   ApiTags,
   getSchemaPath,
 } from '@nestjs/swagger';
-import { randomUUID } from 'node:crypto';
 import type { Response } from 'express';
-
 import {
   AssignmentDto,
   AutomationResponseDto,
@@ -43,29 +41,28 @@ import {
   EconomicsUpdateDto,
   GlobalKillDto,
   ManualJobResponseDto,
-  ManualJobDto,
   PolicyResponseDto,
   PolicyCreateDto,
   ProblemDetailsDto,
   ProductEconomicsResponseDto,
   ReasonDto,
-  RetryDto,
   VersionedMutationResponseDto,
-} from './admin-dto.js';
-import {
-  AdminService,
-  parseExpectedVersion,
-  requireIdempotency,
-  type ListQuery,
-} from './admin.service.js';
+} from '../admin-dto.js';
 import {
   AdminAuthGuard,
   type AdminPrincipal,
   type AdminRequest,
   Principal,
   RequirePermission,
-} from './admin-security.js';
-import { AdminApiError } from './problem-details.js';
+} from '../admin-security.js';
+import { AdminService } from './admin.service.js';
+import { parseExpectedVersion, requireIdempotency, type ListQuery } from './admin.helpers.js';
+import {
+  correlationId,
+  positiveBigInt,
+  dateOrNow,
+  versionHeader,
+} from './admin-controller.helpers.js';
 
 @ApiBearerAuth('admin-service-token')
 @ApiProduces('application/json', 'application/problem+json')
@@ -152,7 +149,7 @@ import { AdminApiError } from './problem-details.js';
 })
 @UseGuards(AdminAuthGuard)
 @Controller('/api/v1')
-export class AdminController {
+export class AdminConfigurationController {
   public constructor(private readonly service: AdminService) {}
 
   @ApiTags('product-economics')
@@ -471,187 +468,4 @@ export class AdminController {
     response.setHeader('ETag', versionHeader('global-kill', result));
     return result;
   }
-
-  @ApiTags('jobs')
-  @ApiHeader({ name: 'Idempotency-Key', required: true })
-  @ApiAcceptedResponse({ type: ManualJobResponseDto })
-  @RequirePermission('jobs:trigger')
-  @Post('/jobs/resync')
-  public createResyncJob(
-    @Body() dto: ManualJobDto,
-    @Headers('idempotency-key') idempotencyKey: string | undefined,
-    @Principal() principal: AdminPrincipal,
-    @Req() request: AdminRequest,
-  ) {
-    return this.service.createJob({
-      actor: principal.actor,
-      correlationId: correlationId(request),
-      dto,
-      expectedVersion: 0n,
-      idempotencyKey: requireIdempotency(idempotencyKey),
-      scope: 'POST:/api/v1/jobs/resync',
-      type: 'RESYNC',
-    });
-  }
-
-  @ApiTags('jobs')
-  @ApiHeader({ name: 'Idempotency-Key', required: true })
-  @ApiAcceptedResponse({ type: ManualJobResponseDto })
-  @RequirePermission('jobs:trigger')
-  @Post('/jobs/recalculate')
-  public createRecalculateJob(
-    @Body() dto: ManualJobDto,
-    @Headers('idempotency-key') idempotencyKey: string | undefined,
-    @Principal() principal: AdminPrincipal,
-    @Req() request: AdminRequest,
-  ) {
-    return this.service.createJob({
-      actor: principal.actor,
-      correlationId: correlationId(request),
-      dto,
-      expectedVersion: 0n,
-      idempotencyKey: requireIdempotency(idempotencyKey),
-      scope: 'POST:/api/v1/jobs/recalculate',
-      type: 'RECALCULATE',
-    });
-  }
-
-  @ApiTags('jobs')
-  @ApiOkResponse({ type: ManualJobResponseDto })
-  @RequirePermission('jobs:read')
-  @Get('/jobs/:jobId')
-  public getJob(@Param('jobId', ParseUUIDPipe) jobId: string) {
-    return this.service.getJob(jobId);
-  }
-
-  @ApiTags('decisions')
-  @ApiOkResponse({ type: CursorPageDto })
-  @ApiQuery({ name: 'campaignId', required: false, type: String })
-  @ApiQuery({ name: 'targetId', required: false, type: String })
-  @ApiQuery({
-    name: 'action',
-    required: false,
-    enum: ['NO_CHANGE', 'INCREASE', 'DECREASE', 'RESTORE_ABSENT_OVERRIDE', 'BLOCKED'],
-  })
-  @ApiQuery({ name: 'cursor', required: false })
-  @ApiQuery({ name: 'limit', required: false, schema: { default: 100, maximum: 500, minimum: 1 } })
-  @RequirePermission('decisions:read')
-  @Get('/decisions')
-  public listDecisions(
-    @Query()
-    query: ListQuery & { action?: string; campaignId?: string; targetId?: string },
-  ) {
-    return this.service.listDecisions(query);
-  }
-
-  @ApiTags('decisions')
-  @ApiOkResponse({ type: DecisionResponseDto })
-  @RequirePermission('decisions:read')
-  @Get('/decisions/:decisionId')
-  public getDecision(@Param('decisionId', ParseUUIDPipe) decisionId: string) {
-    return this.service.getDecision(decisionId);
-  }
-
-  @ApiTags('queue')
-  @ApiOkResponse({ type: CursorPageDto })
-  @ApiQuery({ name: 'classification', required: false })
-  @ApiQuery({ name: 'cursor', required: false })
-  @ApiQuery({ name: 'limit', required: false, schema: { default: 100, maximum: 500, minimum: 1 } })
-  @RequirePermission('queue:read')
-  @Get('/queue/failures')
-  public listFailures(@Query() query: ListQuery & { classification?: string }) {
-    return this.service.listFailures(query);
-  }
-
-  @ApiTags('queue')
-  @ApiHeader({ name: 'Idempotency-Key', required: true })
-  @ApiHeader({ name: 'If-Match', required: true })
-  @ApiOkResponse({ type: VersionedMutationResponseDto })
-  @RequirePermission('queue:retry')
-  @Post('/queue/failures/:decisionId/retry')
-  public async retryFailure(
-    @Param('decisionId', ParseUUIDPipe) decisionId: string,
-    @Body() dto: RetryDto,
-    @Headers('idempotency-key') idempotencyKey: string | undefined,
-    @Headers('if-match') ifMatch: string | undefined,
-    @Principal() principal: AdminPrincipal,
-    @Req() request: AdminRequest,
-    @Res({ passthrough: true }) response: Response,
-  ) {
-    const mutationKey = requireIdempotency(idempotencyKey);
-    const result = await this.service.retryFailure({
-      actor: principal.actor,
-      correlationId: correlationId(request),
-      decisionId,
-      expectedVersion: parseExpectedVersion(ifMatch, 'queue'),
-      idempotencyKey: mutationKey,
-      reason: dto.changeReason,
-    });
-    response.setHeader('ETag', versionHeader('queue', result));
-    return result;
-  }
-
-  @ApiTags('audit')
-  @ApiOkResponse({ type: CursorPageDto })
-  @ApiQuery({ name: 'campaignId', required: false, type: String })
-  @ApiQuery({ name: 'targetId', required: false, type: String })
-  @ApiQuery({ name: 'correlationId', required: false, type: String })
-  @ApiQuery({ name: 'actor', required: false })
-  @ApiQuery({ name: 'action', required: false })
-  @ApiQuery({ name: 'entityType', required: false })
-  @ApiQuery({ name: 'entityId', required: false })
-  @ApiQuery({ name: 'createdFrom', required: false, type: String })
-  @ApiQuery({ name: 'createdTo', required: false, type: String })
-  @ApiQuery({ name: 'cursor', required: false })
-  @ApiQuery({ name: 'limit', required: false, schema: { default: 100, maximum: 500, minimum: 1 } })
-  @RequirePermission('audit:read')
-  @Get('/audit-events')
-  public listAudit(
-    @Query()
-    query: ListQuery & {
-      action?: string;
-      actor?: string;
-      campaignId?: string;
-      correlationId?: string;
-      createdFrom?: string;
-      createdTo?: string;
-      entityId?: string;
-      entityType?: string;
-      targetId?: string;
-    },
-  ) {
-    return this.service.listAudit(query);
-  }
-}
-
-function correlationId(request: AdminRequest): string {
-  if (request.correlationId !== undefined) return request.correlationId;
-  const supplied = request.header('x-correlation-id');
-  request.correlationId =
-    supplied !== undefined && /^[0-9a-f-]{36}$/iu.test(supplied) ? supplied : randomUUID();
-  return request.correlationId;
-}
-
-function positiveBigInt(value: string): bigint {
-  if (!/^[1-9][0-9]*$/u.test(value))
-    throw new AdminApiError(422, 'INVALID_NM_ID', 'nmId must be a positive decimal string.');
-  return BigInt(value);
-}
-
-function dateOrNow(value: string | undefined): Date | undefined {
-  if (value === undefined) return undefined;
-  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/u.test(value))
-    throw new AdminApiError(422, 'INVALID_DATE', 'at must be RFC 3339 UTC.');
-  const result = new Date(value);
-  if (result.toString() === 'Invalid Date')
-    throw new AdminApiError(422, 'INVALID_DATE', 'at must be RFC 3339 UTC.');
-  return result;
-}
-
-function versionHeader(prefix: string, result: unknown): string {
-  const version =
-    typeof result === 'object' && result !== null && 'version' in result
-      ? String(result.version)
-      : '0';
-  return `"${prefix}-${version}"`;
 }

@@ -8,8 +8,8 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 
-import { MockStateService, type MockFaultRule } from './mock-state.service.js';
-import type { TimeAdvanceResult } from './mock-state.service.js';
+import { MockStateService } from './mock-state/mock-state.service.js';
+import type { MockFaultRule, TimeAdvanceResult } from './mock-state/mock-state.types.js';
 
 /**
  * Positive virtual duration request.

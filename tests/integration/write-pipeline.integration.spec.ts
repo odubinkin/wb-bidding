@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { createTestDatabaseClient, type TestDatabaseClient } from '@wb-bidder/database';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { AdminService } from '../../apps/bidder/src/admin.service.js';
+import { AdminService } from '../../apps/bidder/src/admin/admin.service.js';
 import type { RuntimeClockService } from '../../apps/bidder/src/runtime-clock.service.js';
 import {
   WritePipelineRepository,

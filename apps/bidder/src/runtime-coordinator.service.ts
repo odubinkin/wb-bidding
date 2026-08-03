@@ -7,7 +7,8 @@ import { ObservabilityService } from './observability.service.js';
 import { DATA_SYNC_REPOSITORY, DECISION_REPOSITORY, WB_API_CLIENT } from './runtime.providers.js';
 import { RuntimeSafetyState } from './runtime-state.js';
 import { RuntimeClockService } from './runtime-clock.service.js';
-import { CronSchedule, SchedulerService } from './scheduler.service.js';
+import { CronSchedule } from './scheduler/cron-schedule.js';
+import { SchedulerService } from './scheduler/scheduler.service.js';
 import { WriteRuntimeService } from './write-runtime.service.js';
 import { WB_TOKEN_PROFILE } from './wb-integration.js';
 import {

@@ -1,4 +1,4 @@
-export * from './client.js';
+export * from './client/index.js';
 export * from './endpoint-registry.js';
 export * from './money.js';
 export * from './rate-limiter.js';

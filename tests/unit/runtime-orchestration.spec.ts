@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { RuntimeCoordinatorService } from '../../apps/bidder/src/runtime-coordinator.service.js';
-import { SchedulerService } from '../../apps/bidder/src/scheduler.service.js';
+import { SchedulerService } from '../../apps/bidder/src/scheduler/scheduler.service.js';
 import { RuntimeSafetyState } from '../../apps/bidder/src/runtime-state.js';
 import { WriteRuntimeService } from '../../apps/bidder/src/write-runtime.service.js';
 import { loadConfiguration, type AppConfiguration } from '@wb-bidder/config';
@@ -105,6 +105,36 @@ describe('scheduler lifecycle orchestration', () => {
     const productEconomicsImportUpdate = vi.fn().mockReturnValue(Promise.resolve({ count: 0 }));
     const manualJobUpdate = vi.fn().mockReturnValue(Promise.resolve({ count: 0 }));
     const transaction = vi.fn().mockResolvedValue([]);
+    const context = {
+      deadlineAt: new Date('2026-08-03T08:10:00.000Z'),
+      runId: '00000000-0000-4000-8000-000000000001',
+      signal: new AbortController().signal,
+    };
+    const dataWorker = {
+      synchronizeCurrentState: vi
+        .fn()
+        .mockResolvedValue({ counters: { campaigns: 2 }, started: true }),
+      synchronizeDataPage: vi.fn().mockResolvedValue({ counters: { campaigns: 3 }, started: true }),
+    };
+    const dataRepository = {
+      withSchedulerRun: vi.fn(
+        async (
+          _jobType: string,
+          _deadlineMs: number,
+          run: (value: typeof context) => Promise<unknown>,
+        ) => ({ result: await run(context), started: true }),
+      ),
+    };
+    const decisionRepository = { processNextEconomicsImport: vi.fn().mockResolvedValue(null) };
+    const decisionJob = { run: vi.fn().mockResolvedValue({ persisted: 0, skipped: 0 }) };
+    const experiments = { run: vi.fn().mockResolvedValue(0) };
+    const writeRuntime = {
+      cleanupRetention: vi.fn().mockResolvedValue(0),
+      executeOnce: vi.fn().mockResolvedValue(0),
+      reconcileOnce: vi.fn().mockResolvedValue(0),
+      recoverCrashWindows: vi.fn().mockResolvedValue({ prepared: 0, unknown: 0 }),
+      releaseLeases,
+    };
     const scheduler = new SchedulerService(
       configuration,
       {
@@ -112,17 +142,12 @@ describe('scheduler lifecycle orchestration', () => {
         manualJob: { updateMany: manualJobUpdate },
         productEconomicsImport: { updateMany: productEconomicsImportUpdate },
       } as never,
-      { synchronizeCurrentState: vi.fn(), synchronizeDataPage: vi.fn() } as never,
-      { withSchedulerRun: vi.fn() } as never,
-      { processNextEconomicsImport: vi.fn() } as never,
-      { run: vi.fn() } as never,
-      { run: vi.fn() } as never,
-      {
-        cleanupRetention: vi.fn(),
-        executeOnce: vi.fn(),
-        reconcileOnce: vi.fn(),
-        releaseLeases,
-      } as never,
+      dataWorker as never,
+      dataRepository as never,
+      decisionRepository as never,
+      decisionJob as never,
+      experiments as never,
+      writeRuntime as never,
       { ping: vi.fn() } as never,
       { snapshots: vi.fn().mockReturnValue({}) } as never,
       schedulerObservability() as never,
@@ -135,11 +160,14 @@ describe('scheduler lifecycle orchestration', () => {
     scheduler.start();
 
     const internals = scheduler as unknown as {
-      readonly registrations: readonly unknown[];
+      readonly registrations: readonly { readonly run: () => Promise<void> }[];
       readonly timers: ReadonlySet<NodeJS.Timeout>;
     };
     expect(internals.registrations).toHaveLength(6);
     expect(internals.timers.size).toBe(6);
+    for (const registration of internals.registrations) await registration.run();
+    expect(dataRepository.withSchedulerRun).toHaveBeenCalledTimes(4);
+    expect(writeRuntime.recoverCrashWindows).toHaveBeenCalledTimes(1);
     expect(() => {
       scheduler.setCapacityRefresh(vi.fn());
     }).toThrow('Scheduler capacity refresh cannot change after startup');

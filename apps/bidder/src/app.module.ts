@@ -3,15 +3,16 @@ import { APP_FILTER } from '@nestjs/core';
 import { LoggerModule } from 'nestjs-pino';
 import type { AppConfiguration } from '@wb-bidder/config';
 
-import { AdminController } from './admin.controller.js';
+import { AdminConfigurationController } from './admin/admin-configuration.controller.js';
+import { AdminOperationsController } from './admin/admin-operations.controller.js';
 import { AdminAuthGuard } from './admin-security.js';
-import { AdminService } from './admin.service.js';
+import { AdminService } from './admin/admin.service.js';
 import { APP_CONFIGURATION } from './application-config.js';
 import { ApplicationConfigurationModule } from './application-config.module.js';
 import { databaseClientProvider, DatabaseLifecycle } from './database.js';
 import { HealthController } from './health.controller.js';
-import { DecisionJobService } from './decision-job.service.js';
-import { ExperimentRuntimeService } from './experiment-runtime.service.js';
+import { DecisionJobService } from './decision-job/decision-job.service.js';
+import { ExperimentRuntimeService } from './experiment-runtime/experiment-runtime.service.js';
 import { ObservabilityService } from './observability.service.js';
 import { DatabasePreDispatchValidator } from './pre-dispatch-validator.js';
 import { ProblemDetailsFilter } from './problem-details.js';
@@ -19,7 +20,7 @@ import { RuntimeCoordinatorService } from './runtime-coordinator.service.js';
 import { RuntimeClockService } from './runtime-clock.service.js';
 import { runtimeProviders } from './runtime.providers.js';
 import { RuntimeSafetyState } from './runtime-state.js';
-import { SchedulerService } from './scheduler.service.js';
+import { SchedulerService } from './scheduler/scheduler.service.js';
 import { ServiceInfoController } from './service-info.controller.js';
 import { WriteRuntimeService } from './write-runtime.service.js';
 import { createWbTokenProfile, WB_TOKEN_PROFILE } from './wb-integration.js';
@@ -30,7 +31,12 @@ import { createWbTokenProfile, WB_TOKEN_PROFILE } from './wb-integration.js';
  * Side effects are limited to constructing validated configuration and structured logging.
  */
 @Module({
-  controllers: [AdminController, HealthController, ServiceInfoController],
+  controllers: [
+    AdminConfigurationController,
+    AdminOperationsController,
+    HealthController,
+    ServiceInfoController,
+  ],
   imports: [
     ApplicationConfigurationModule,
     LoggerModule.forRootAsync({

@@ -3,8 +3,8 @@ import { readFile } from 'node:fs/promises';
 import { createTestDatabaseClient, type TestDatabaseClient } from '@wb-bidder/database';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { ExperimentRuntimeService } from '../../apps/bidder/src/experiment-runtime.service.js';
-import { DecisionJobService } from '../../apps/bidder/src/decision-job.service.js';
+import { ExperimentRuntimeService } from '../../apps/bidder/src/experiment-runtime/experiment-runtime.service.js';
+import { DecisionJobService } from '../../apps/bidder/src/decision-job/decision-job.service.js';
 import { claimManualJob } from '../../apps/bidder/src/manual-job-lease.js';
 import { ObservabilityService } from '../../apps/bidder/src/observability.service.js';
 import { RuntimeSafetyState } from '../../apps/bidder/src/runtime-state.js';

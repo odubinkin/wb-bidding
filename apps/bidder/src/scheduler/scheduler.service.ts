@@ -1,34 +1,35 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { BeforeApplicationShutdown } from '@nestjs/common';
 import { performance } from 'node:perf_hooks';
-
-import { APP_CONFIGURATION } from './application-config.js';
-import { DATABASE_CLIENT } from './database.js';
-import { DecisionJobService } from './decision-job.service.js';
-import { ExperimentRuntimeService } from './experiment-runtime.service.js';
-import { claimManualJob } from './manual-job-lease.js';
-import { ObservabilityService } from './observability.service.js';
+import { APP_CONFIGURATION } from '../application-config.js';
+import { DATABASE_CLIENT } from '../database.js';
+import { DecisionJobService } from '../decision-job/decision-job.service.js';
+import { ExperimentRuntimeService } from '../experiment-runtime/experiment-runtime.service.js';
+import { claimManualJob } from '../manual-job-lease.js';
+import { ObservabilityService } from '../observability.service.js';
 import {
   DATA_SYNC_REPOSITORY,
   DATA_SYNC_WORKER,
   DECISION_REPOSITORY,
   WB_API_CLIENT,
   WB_BREAKERS,
-} from './runtime.providers.js';
-import { RuntimeSafetyState } from './runtime-state.js';
-import { RuntimeClockService } from './runtime-clock.service.js';
-import { PROCESS_WORKER_IDENTITY, releaseOwnedSchedulerLeases } from './worker-identity.js';
-import { WriteRuntimeService } from './write-runtime.service.js';
+} from '../runtime.providers.js';
+import { RuntimeSafetyState } from '../runtime-state.js';
+import { RuntimeClockService } from '../runtime-clock.service.js';
+import { PROCESS_WORKER_IDENTITY, releaseOwnedSchedulerLeases } from '../worker-identity.js';
+import { WriteRuntimeService } from '../write-runtime.service.js';
 import type { AppConfiguration } from '@wb-bidder/config';
 import { Prisma, type DatabaseClient } from '@wb-bidder/database';
 import {
   DataSyncRepository,
   WbDataSyncWorker,
   type SchedulerRunContext,
-  type SyncDataKind,
 } from '@wb-bidder/data-sync';
 import { DecisionRepository } from '@wb-bidder/decision-engine';
 import { CircuitBreakerRegistry, WbApiClient } from '@wb-bidder/wb-api';
+import { CronSchedule } from './cron-schedule.js';
+import { parseManualScope, type ManualJobScope } from './manual-job.parser.js';
+import { safeErrorCode } from './scheduler.errors.js';
 
 const SHUTDOWN_GRACE_MS = 30_000;
 const SECOND_MS = 1_000;
@@ -48,103 +49,9 @@ interface CronRegistration {
 /**
  * Six-field cron schedule supporting lists, ranges, and positive steps.
  */
-export class CronSchedule {
-  private readonly fields: readonly Set<number>[];
-  private readonly dayOfMonthWildcard: boolean;
-  private readonly dayOfWeekWildcard: boolean;
-
-  /**
-   * Parses a six-field cron expression.
-   *
-   * @param expression - Seconds through day-of-week cron fields.
-   * @throws {Error} When syntax or a value is invalid.
-   */
-  public constructor(expression: string) {
-    const parts = expression.trim().split(/\s+/u);
-    if (parts.length !== 6) throw new Error('Cron expression must contain six fields');
-    const ranges = [
-      [0, 59],
-      [0, 59],
-      [0, 23],
-      [1, 31],
-      [1, 12],
-      [0, 6],
-    ] as const;
-    this.fields = Object.freeze(
-      parts.map((part, index) => {
-        const range = ranges[index];
-        if (range === undefined) throw new Error('Cron field range missing');
-        return parseCronField(part, range[0], range[1]);
-      }),
-    );
-    this.dayOfMonthWildcard = parts[3] === '*';
-    this.dayOfWeekWildcard = parts[5] === '*';
-  }
-
-  /**
-   * Tests a UTC instant against the cron expression.
-   *
-   * @param instant - Tick instant.
-   * @returns Whether the callback is due.
-   */
-  public matches(instant: Date): boolean {
-    const values = [
-      instant.getUTCSeconds(),
-      instant.getUTCMinutes(),
-      instant.getUTCHours(),
-      instant.getUTCDate(),
-      instant.getUTCMonth() + 1,
-      instant.getUTCDay(),
-    ];
-    const baseMatches = values
-      .slice(0, 3)
-      .every((value, index) => this.fields[index]?.has(value) === true);
-    const monthMatches = this.fields[4]?.has(values[4] ?? -1) === true;
-    const domMatches = this.fields[3]?.has(values[3] ?? -1) === true;
-    const dowMatches = this.fields[5]?.has(values[5] ?? -1) === true;
-    const dayMatches =
-      this.dayOfMonthWildcard || this.dayOfWeekWildcard
-        ? domMatches && dowMatches
-        : domMatches || dowMatches;
-    return baseMatches && monthMatches && dayMatches;
-  }
-
-  /**
-   * Computes a bounded minimum interval for startup capacity checks.
-   *
-   * @param from - Search origin.
-   * @returns Minimum interval in minutes across the next eight matches.
-   */
-  public minimumIntervalMinutes(from: Date = new Date()): number {
-    const matches: number[] = [];
-    const start = Math.floor(from.getTime() / SECOND_MS) * SECOND_MS;
-    const firstMinute = Math.floor(start / 60_000) * 60_000;
-    const limit = start + 400 * 86_400_000;
-    const seconds = [...(this.fields[0] ?? [])].sort((left, right) => left - right);
-    for (let minute = firstMinute; minute <= limit && matches.length < 8; minute += 60_000) {
-      for (const second of seconds) {
-        const value = minute + second * SECOND_MS;
-        if (value < start || value > limit) continue;
-        if (this.matches(new Date(value))) matches.push(value);
-        if (matches.length === 8) break;
-      }
-    }
-    if (matches.length < 2) throw new Error('Cron interval cannot be proven within 400 days');
-    let minimum = Number.POSITIVE_INFINITY;
-    for (let index = 1; index < matches.length; index += 1) {
-      const current = matches[index];
-      const previous = matches[index - 1];
-      if (current === undefined || previous === undefined) {
-        throw new Error('Cron match sequence is incomplete');
-      }
-      minimum = Math.min(minimum, (current - previous) / 60_000);
-    }
-    return minimum;
-  }
-}
 
 /**
- * Permanent scheduler registering independent non-backlogging jobs.
+ *
  */
 @Injectable()
 export class SchedulerService implements BeforeApplicationShutdown {
@@ -500,142 +407,4 @@ export class SchedulerService implements BeforeApplicationShutdown {
   private workerId(suffix: string): string {
     return PROCESS_WORKER_IDENTITY.owner(suffix);
   }
-}
-
-/**
- * Parses a single cron field.
- *
- * @param source - Field text.
- * @param minimum - Inclusive lower bound.
- * @param maximum - Inclusive upper bound.
- * @returns Accepted values.
- */
-function parseCronField(source: string, minimum: number, maximum: number): Set<number> {
-  const values = new Set<number>();
-  for (const segment of source.split(',')) {
-    const [rangeSource, stepSource] = segment.split('/');
-    const step = stepSource === undefined ? 1 : Number(stepSource);
-    if (!Number.isInteger(step) || step < 1 || rangeSource === undefined) {
-      throw new Error(`Invalid cron field: ${source}`);
-    }
-    const [start, end] =
-      rangeSource === '*'
-        ? [minimum, maximum]
-        : rangeSource.includes('-')
-          ? rangeSource.split('-').map(Number)
-          : [Number(rangeSource), Number(rangeSource)];
-    if (
-      start === undefined ||
-      end === undefined ||
-      !Number.isInteger(start) ||
-      !Number.isInteger(end) ||
-      start < minimum ||
-      end > maximum ||
-      start > end
-    ) {
-      throw new Error(`Cron field is out of range: ${source}`);
-    }
-    for (let value = start; value <= end; value += step) values.add(value);
-  }
-  return values;
-}
-
-/** Validated scope shared by manual resync and recalculation jobs. */
-interface ManualJobScope {
-  readonly campaignIds?: readonly string[];
-  readonly dataKinds?: readonly SyncDataKind[];
-  readonly targetIds?: readonly string[];
-}
-
-/**
- * Parses only bounded manual-job scope fields.
- *
- * @param source - Stored manual-job scope.
- * @returns Validated scope.
- */
-function parseManualScope(source: unknown): ManualJobScope {
-  if (typeof source !== 'object' || source === null || Array.isArray(source)) {
-    throw new Error('INVALID_MANUAL_JOB_SCOPE');
-  }
-  const record = source as Readonly<Record<string, unknown>>;
-  const campaignIds = parseUuidArray(record.campaignIds);
-  const dataKinds = parseDataKinds(record.dataKinds);
-  const targetIds = parseUuidArray(record.targetIds);
-  return Object.freeze({
-    ...(campaignIds === undefined ? {} : { campaignIds }),
-    ...(dataKinds === undefined ? {} : { dataKinds }),
-    ...(targetIds === undefined ? {} : { targetIds }),
-  });
-}
-
-/**
- * Parses an optional bounded UUID array.
- *
- * @param source - Unknown field.
- * @returns Frozen values or undefined.
- */
-function parseUuidArray(source: unknown): readonly string[] | undefined {
-  if (source === undefined) return undefined;
-  if (!Array.isArray(source) || source.length > 500) {
-    throw new Error('INVALID_MANUAL_JOB_SCOPE');
-  }
-  if (source.length === 0) return undefined;
-  const values: string[] = [];
-  for (const value of source) {
-    if (
-      typeof value !== 'string' ||
-      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value)
-    ) {
-      throw new Error('INVALID_MANUAL_JOB_SCOPE');
-    }
-    values.push(value);
-  }
-  return Object.freeze(values);
-}
-
-const SYNC_DATA_KINDS = new Set<SyncDataKind>([
-  'CAMPAIGN_DISCOVERY',
-  'CAMPAIGN_DETAILS',
-  'CURRENT_BID',
-  'MINIMUM_BID',
-  'CAMPAIGN_STATISTICS',
-  'CLUSTER_LIST',
-  'CLUSTER_STATISTICS',
-  'BID_RECOMMENDATION',
-  'BUDGET_DIAGNOSTIC',
-  'SAME_DAY_SPEND',
-]);
-
-/**
- * Parses an optional closed-list data-kind selection.
- *
- * @param source - Stored JSON field.
- * @returns Validated data kinds or undefined for the default full resync.
- */
-function parseDataKinds(source: unknown): readonly SyncDataKind[] | undefined {
-  if (source === undefined) return undefined;
-  if (
-    !Array.isArray(source) ||
-    source.length > SYNC_DATA_KINDS.size ||
-    source.some((value) => typeof value !== 'string' || !SYNC_DATA_KINDS.has(value as SyncDataKind))
-  ) {
-    throw new Error('INVALID_MANUAL_JOB_DATA_KIND');
-  }
-  if (source.length === 0) return undefined;
-  return Object.freeze([...new Set(source as SyncDataKind[])]);
-}
-
-/**
- * Returns a stable error class without including payloads or secrets.
- *
- * @param error - Unknown failure.
- * @returns Redacted code.
- */
-function safeErrorCode(error: unknown): string {
-  if (typeof error === 'object' && error !== null && 'code' in error) {
-    const code = (error as Readonly<{ code?: unknown }>).code;
-    if (typeof code === 'string' && /^[A-Z0-9_]{2,80}$/u.test(code)) return code;
-  }
-  if (error instanceof Error && /^[A-Z0-9_]{2,80}$/u.test(error.message)) return error.message;
-  return 'JOB_FAILED';
 }

@@ -4,7 +4,7 @@ import { LoggerModule } from 'nestjs-pino';
 
 import { MockController } from './mock.controller.js';
 import { MockHttpExceptionFilter } from './mock-exception.filter.js';
-import { MockStateService } from './mock-state.service.js';
+import { MockStateService } from './mock-state/mock-state.service.js';
 import { PromotionController } from './promotion.controller.js';
 import { MOCK_CONFIGURATION, createMockConfiguration } from './mock-config.js';
 

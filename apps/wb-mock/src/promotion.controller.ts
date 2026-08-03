@@ -22,7 +22,7 @@ import {
 } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
 
-import { MockStateService } from './mock-state.service.js';
+import { MockStateService } from './mock-state/mock-state.service.js';
 import {
   BidRecommendationsResponseDto,
   CampaignBudgetResponseDto,

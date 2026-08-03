@@ -5,5 +5,5 @@ export * from './experiments.js';
 export * from './ids.js';
 export * from './policy.js';
 export * from './rational.js';
-export * from './repository.js';
+export * from './repository/index.js';
 export type * from './types.js';

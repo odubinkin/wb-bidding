@@ -364,6 +364,131 @@ describe('WB errors, retries and breaker', () => {
   });
 });
 
+describe('WB client endpoint modules', () => {
+  it('dispatches campaign, cluster, insight, seller, and ping operations through the split client', async () => {
+    const fetch = vi.fn((input: string | URL, init?: RequestInit) => {
+      const url = new URL(input);
+      const requestPayload = (): unknown => {
+        if (typeof init?.body !== 'string') throw new Error('EXPECTED_JSON_TEST_BODY');
+        return JSON.parse(init.body) as unknown;
+      };
+      let payload: unknown;
+      if (url.pathname === '/adv/v1/promotion/count') payload = { adverts: [], all: 0 };
+      else if (url.pathname === '/api/advert/v2/adverts') payload = { adverts: [] };
+      else if (url.pathname === '/api/advert/v1/bids/min') payload = { bids: [] };
+      else if (url.pathname === '/api/advert/v1/bids') {
+        payload = requestPayload();
+      } else if (url.pathname === '/adv/v0/normquery/list') payload = { items: [] };
+      else if (url.pathname === '/adv/v0/normquery/get-bids') payload = { bids: [] };
+      else if (url.pathname === '/adv/v0/normquery/bids') {
+        payload = requestPayload();
+      } else if (url.pathname === '/adv/v3/fullstats') payload = [];
+      else if (url.pathname === '/adv/v1/normquery/stats') payload = { items: [] };
+      else if (url.pathname === '/api/advert/v0/bids/recommendations') {
+        payload = {
+          advertId: 1,
+          base: {
+            competitiveBid: { bidKopecks: 100 },
+            leadersBid: { bidKopecks: 120 },
+            top2: { bidKopecks: 110 },
+          },
+          nmId: 2,
+          normQueries: [],
+        };
+      } else if (url.pathname === '/adv/v1/budget') {
+        payload = { cash: '1', netting: '2', total: '3' };
+      } else if (url.pathname === '/api/v1/seller-info') {
+        payload = { name: 'Synthetic Seller', sid: '00000000-0000-4000-8000-000000000001' };
+      } else if (url.pathname === '/ping') {
+        payload = { Status: 'OK', TS: '2026-08-03T00:00:00.000Z' };
+      } else {
+        throw new Error(`UNEXPECTED_TEST_ENDPOINT:${url.pathname}`);
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), {
+          headers: { 'content-type': 'application/json' },
+          status: 200,
+        }),
+      );
+    });
+    const client = new WbApiClient({
+      baseUrl: new URL('http://127.0.0.1:3001'),
+      breakers: new CircuitBreakerRegistry(),
+      commonBaseUrl: new URL('http://127.0.0.1:3001'),
+      contractMode: 'verified-mock',
+      fetch,
+      maxInFlight: 2,
+      rateLimiter: new WbRateLimiter(
+        'seller-endpoints',
+        selectRateLimitProfile('PERSONAL+PROD'),
+        { burst: 100, intervalMs: 1_000, requests: 100 },
+        new InMemoryRateLimitStore(),
+      ),
+      readRetryPolicy: { baseMs: 1, capMs: 1, deadlineMs: 100, maxAttempts: 1 },
+      timeoutMs: 1_000,
+      token: 'synthetic',
+      writesEnabled: true,
+    });
+
+    await expect(client.getCampaignCount()).resolves.toEqual({ adverts: [], all: 0 });
+    await expect(client.getCampaignDetails([1], [9], 'cpm')).resolves.toEqual({ adverts: [] });
+    await expect(
+      client.getCampaignDetails(Array.from({ length: 51 }, (_, index) => index + 1)),
+    ).rejects.toThrow('at most 50');
+    await expect(
+      client.getMinimumBids({
+        advert_id: 1,
+        nm_ids: [2],
+        payment_type: 'cpm',
+        placement_types: ['search'],
+      }),
+    ).resolves.toEqual({
+      bids: [],
+    });
+
+    const pair = { items: [{ advert_id: 1, nm_id: 2 }] };
+    const clusterWrite = {
+      bids: [{ advert_id: 1, bid: 100, nm_id: 2, norm_query: 'query' }],
+    };
+    await expect(client.getClusterBids(pair)).resolves.toEqual({ bids: [] });
+    await expect(client.listClusters(pair)).resolves.toEqual({ items: [] });
+    await expect(client.writeClusterBids(clusterWrite)).resolves.toEqual(clusterWrite);
+    await expect(client.deleteClusterBids(clusterWrite)).resolves.toEqual(clusterWrite);
+    const reservation = await client.reserveClusterBidWrite('clusterWriteBids');
+    await expect(reservation.dispatch(clusterWrite)).resolves.toEqual(clusterWrite);
+    await expect(reservation.dispatch(clusterWrite)).rejects.toThrow('already consumed');
+    const released = await client.reserveClusterBidWrite('clusterDeleteBids');
+    released.release();
+    await expect(released.dispatch(clusterWrite)).rejects.toThrow('already consumed');
+
+    await expect(client.getCampaignStatistics([1], '2026-08-01', '2026-08-02')).resolves.toEqual(
+      [],
+    );
+    await expect(client.getCampaignStatistics([], '2026-08-01', '2026-08-02')).rejects.toThrow(
+      '1..50',
+    );
+    await expect(
+      client.getClusterStatistics({
+        from: '2026-08-01',
+        items: [{ advert_id: 1, nm_id: 2 }],
+        to: '2026-08-02',
+      }),
+    ).resolves.toEqual({ items: [] });
+    await expect(client.getBidRecommendations(1, 2)).resolves.toMatchObject({
+      advertId: 1,
+      nmId: 2,
+    });
+    await expect(client.getCampaignBudget(1)).resolves.toEqual({
+      cash: '1',
+      netting: '2',
+      total: '3',
+    });
+    await expect(client.getSellerInfo()).resolves.toMatchObject({ name: 'Synthetic Seller' });
+    await expect(client.ping()).resolves.toMatchObject({ Status: 'OK' });
+    expect(fetch).toHaveBeenCalled();
+  });
+});
+
 function jwt(claims: Readonly<Record<string, unknown>>): string {
   const encode = (value: unknown): string =>
     Buffer.from(JSON.stringify(value)).toString('base64url');

@@ -6,7 +6,7 @@ import type { Server } from 'node:http';
 import { createTestDatabaseClient, type TestDatabaseClient } from '@wb-bidder/database';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { DecisionJobService } from '../../apps/bidder/src/decision-job.service.js';
+import { DecisionJobService } from '../../apps/bidder/src/decision-job/decision-job.service.js';
 import { ObservabilityService } from '../../apps/bidder/src/observability.service.js';
 import { DatabasePreDispatchValidator } from '../../apps/bidder/src/pre-dispatch-validator.js';
 import { RuntimeClockService } from '../../apps/bidder/src/runtime-clock.service.js';

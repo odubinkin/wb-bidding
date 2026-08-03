@@ -1,7 +1,7 @@
 import http, { type IncomingMessage, type RequestOptions } from 'node:http';
 import https from 'node:https';
 
-import type { WbFetch } from './client.js';
+import type { WbFetch } from './client/index.js';
 
 const MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
 
