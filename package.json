@@ -50,7 +50,7 @@
     "smoke:built": "node scripts/smoke-built-apps.mjs",
     "smoke:compose": "node scripts/compose-smoke.mjs",
     "smoke:sandbox": "node scripts/sandbox-smoke.mjs",
-    "quality": "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run scripts:check && pnpm run verify:database-architecture && pnpm run test:unit && pnpm run test:golden && pnpm run test:openapi && pnpm run test:contract && pnpm run prisma:validate && pnpm run profile:checksum && pnpm run verify:wb-contract-fixtures && pnpm run verify:deprecated-endpoints"
+    "quality": "pnpm run prisma:generate && pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run scripts:check && pnpm run verify:database-architecture && pnpm run test:unit && pnpm run test:golden && pnpm run test:openapi && pnpm run test:contract && pnpm run prisma:validate && pnpm run profile:checksum && pnpm run verify:wb-contract-fixtures && pnpm run verify:deprecated-endpoints"
   },
   "dependencies": {
     "@nestjs/common": "11.1.28",
