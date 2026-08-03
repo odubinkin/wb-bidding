@@ -1,10 +1,11 @@
 ---
 id: "202608031040-RDFEWP"
 title: "Harden repository utility scripts"
-status: "DOING"
+result_summary: "Hardened repository utility scripts and added their canonical documentation"
+status: "DONE"
 priority: "med"
 owner: "CODER"
-revision: 13
+revision: 16
 origin:
   system: "manual"
 depends_on: []
@@ -18,7 +19,7 @@ plan_approval:
   note: null
 verification:
   state: "ok"
-  updated_at: "2026-08-03T10:50:46.933Z"
+  updated_at: "2026-08-03T10:51:08.621Z"
   updated_by: "CODER"
   note: "verified-202608031040-RDFEWP"
   attempts: 0
@@ -38,11 +39,19 @@ quality_review:
     - "pnpm run quality"
   findings:
     - "All declared local checks passed; stateful Docker and WB sandbox smoke remain delegated to their existing CI/release environments."
-commit: null
+commit:
+  hash: "3d0589fde1d09af7be4878451b6d2aee2b048576"
+  message: "🚧 RDFEWP task: record evaluator evidence"
 comments:
   -
     author: "CODER"
     body: "Start: harden repository scripts and add their canonical documentation while preserving fixed ports."
+  -
+    author: "CODER"
+    body: "Verified: verified-202608031040-RDFEWP. Guided shortcut recorded verification and is closing the direct task with traceable commit metadata."
+  -
+    author: "CODER"
+    body: "Verified: repository utility scripts were hardened, fixed ports were preserved, and every script is documented with passing local quality evidence."
 events:
   -
     type: "status"
@@ -63,8 +72,28 @@ events:
     author: "CODER"
     state: "ok"
     note: "verified-202608031040-RDFEWP"
+  -
+    type: "verify"
+    at: "2026-08-03T10:51:08.621Z"
+    author: "CODER"
+    state: "ok"
+    note: "verified-202608031040-RDFEWP"
+  -
+    type: "status"
+    at: "2026-08-03T10:51:08.828Z"
+    author: "CODER"
+    from: "DOING"
+    to: "DONE"
+    note: "Verified: verified-202608031040-RDFEWP. Guided shortcut recorded verification and is closing the direct task with traceable commit metadata."
+  -
+    type: "status"
+    at: "2026-08-03T10:51:43.817Z"
+    author: "CODER"
+    from: "DONE"
+    to: "DONE"
+    note: "Verified: repository utility scripts were hardened, fixed ports were preserved, and every script is documented with passing local quality evidence."
 doc_version: 3
-doc_updated_at: "2026-08-03T10:50:47.025Z"
+doc_updated_at: "2026-08-03T10:51:43.820Z"
 doc_updated_by: "CODER"
 description: "Improve correctness and diagnostics of scripts/, preserve fixed ports, and add documentation covering every script."
 sections:
@@ -136,12 +165,46 @@ sections:
     - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
     - risks: none
 
+    ### 2026-08-03T10:51:08.621Z — VERIFY — ok
+
+    By: CODER
+
+    Note: verified-202608031040-RDFEWP
+    Attempts: 0
+
+    VerifyStepsRef: doc_version=3, doc_updated_at=2026-08-03T10:50:47.025Z, excerpt_hash=sha256:268e95107b0b58b6ee6947f19d49de0a8308f0f28e3d8aab9cb19e4965117d6c
+
+    Details:
+
+    BlueprintSnapshotRef:
+    - state: current
+    - path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202608031040-RDFEWP/blueprint/resolved-snapshot.json
+    - old_digest: dec22f996ec0a884227ff7d1db7cb03930cac8b42aa806d80b795deca87a50af
+    - current_digest: dec22f996ec0a884227ff7d1db7cb03930cac8b42aa806d80b795deca87a50af
+    - route_changed: no
+    - safe_command: agentplane blueprint snapshot 202608031040-RDFEWP
+
+    DecisionContextRef:
+    - operator_action: run_exact_argv
+    - can_execute_now: true
+    - safe_command: agentplane task complete 202608031040-RDFEWP --result verified-202608031040-RDFEWP --commit 3d0589fde1d09af7be4878451b6d2aee2b048576
+    - diagnostic_command: none
+    - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+    - freshness: route=computed_local remote=remote_skipped
+    - repeat_allowed: true
+    - repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+    - risks: none
+
     <!-- END VERIFICATION RESULTS -->
   Rollback Plan: "Revert only the task-scoped script and documentation changes. No data migration or external rollback is required because real sandbox, Docker Compose, and database-backed smoke execution are excluded."
   Findings: |-
     - Observation: Stateful smoke commands smoke:compose, smoke:built, and smoke:sandbox were not executed under the approved local verification plan.
       Impact: Docker topology and external WB sandbox behavior were not re-exercised in this task; syntax, lint, static policy checks, and existing contract/runtime-independent tests cover the changed code paths.
       Resolution: Keep CI smoke:compose and smoke:built as the runtime evidence; run smoke:sandbox only in the separately provisioned release environment with explicit write confirmation.
+extensions:
+  implementation_commit:
+    hash: "a92aa1018c95bc4db361e92569788f7778b3cbd6"
+    message: "🚧 RDFEWP task: harden repository utility scripts"
 id_source: "generated"
 ---
 ## Summary
@@ -218,6 +281,36 @@ DecisionContextRef:
 - operator_action: run_exact_argv
 - can_execute_now: true
 - safe_command: agentplane task complete 202608031040-RDFEWP --result verified-202608031040-RDFEWP --commit a92aa1018c95bc4db361e92569788f7778b3cbd6
+- diagnostic_command: none
+- source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
+- freshness: route=computed_local remote=remote_skipped
+- repeat_allowed: true
+- repeat_stop_condition: after any non-zero exit or completed mutation, recompute task next-action before a second step
+- risks: none
+
+### 2026-08-03T10:51:08.621Z — VERIFY — ok
+
+By: CODER
+
+Note: verified-202608031040-RDFEWP
+Attempts: 0
+
+VerifyStepsRef: doc_version=3, doc_updated_at=2026-08-03T10:50:47.025Z, excerpt_hash=sha256:268e95107b0b58b6ee6947f19d49de0a8308f0f28e3d8aab9cb19e4965117d6c
+
+Details:
+
+BlueprintSnapshotRef:
+- state: current
+- path: /Users/odubinkin/Projects/wb-bidding/.agentplane/tasks/202608031040-RDFEWP/blueprint/resolved-snapshot.json
+- old_digest: dec22f996ec0a884227ff7d1db7cb03930cac8b42aa806d80b795deca87a50af
+- current_digest: dec22f996ec0a884227ff7d1db7cb03930cac8b42aa806d80b795deca87a50af
+- route_changed: no
+- safe_command: agentplane blueprint snapshot 202608031040-RDFEWP
+
+DecisionContextRef:
+- operator_action: run_exact_argv
+- can_execute_now: true
+- safe_command: agentplane task complete 202608031040-RDFEWP --result verified-202608031040-RDFEWP --commit 3d0589fde1d09af7be4878451b6d2aee2b048576
 - diagnostic_command: none
 - source_of_truth: route=task_next_action diagnostic=task_next_action remote=not_checked
 - freshness: route=computed_local remote=remote_skipped
