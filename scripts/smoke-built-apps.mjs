@@ -5,6 +5,7 @@ const bidderPort = 31_90;
 const mockPort = 31_91;
 const adminServiceToken = 'test-admin-token-with-32-characters';
 const databaseUrl = process.env.DATABASE_URL;
+const maximumCapturedOutput = 8_000;
 
 if (databaseUrl === undefined || databaseUrl.length === 0) {
   throw new Error('DATABASE_URL is required for the built bidder smoke');
@@ -24,6 +25,8 @@ const mock = spawn('node', ['apps/wb-mock/dist/main.js'], {
 
 let output = '';
 let bidder;
+let childFailure;
+let shuttingDown = false;
 
 /**
  * Captures bounded child output for failure diagnostics.
@@ -31,12 +34,21 @@ let bidder;
  * @param {import('node:child_process').ChildProcess} child - Local smoke process.
  */
 function capture(child) {
+  child.once('exit', (code, signal) => {
+    if (!shuttingDown) {
+      childFailure = `Child process exited before smoke completion: code=${String(code)}, signal=${String(signal)}`;
+    }
+  });
   child.stdout?.on('data', (chunk) => {
-    output += String(chunk);
+    appendOutput(chunk);
   });
   child.stderr?.on('data', (chunk) => {
-    output += String(chunk);
+    appendOutput(chunk);
   });
+}
+
+function appendOutput(chunk) {
+  output = `${output}${String(chunk)}`.slice(-maximumCapturedOutput);
 }
 capture(mock);
 
@@ -50,8 +62,14 @@ capture(mock);
 async function waitForResponse(url, init) {
   const deadline = Date.now() + 10_000;
   while (Date.now() < deadline) {
+    if (childFailure !== undefined) {
+      throw new Error(childFailure);
+    }
     try {
-      const response = await fetch(url, init);
+      const response = await fetch(url, {
+        ...init,
+        signal: AbortSignal.timeout(1_000),
+      });
       if (response.ok) {
         return response;
       }
@@ -116,12 +134,30 @@ try {
   ) {
     throw new Error('Built application smoke response did not satisfy safety invariants');
   }
+  if (childFailure !== undefined) {
+    throw new Error(childFailure);
+  }
 
   process.stdout.write('Built bidder and mock smoke passed.\n');
 } catch (error) {
   process.stderr.write(`${String(error)}\n${output.slice(-4_000)}\n`);
   process.exitCode = 1;
 } finally {
-  bidder?.kill('SIGTERM');
-  mock.kill('SIGTERM');
+  shuttingDown = true;
+  await Promise.all([stopChild(bidder), stopChild(mock)]);
+}
+
+async function stopChild(child) {
+  if (child === undefined || child.exitCode !== null || child.signalCode !== null) return;
+  child.kill('SIGTERM');
+  const closed = await new Promise((resolve) => {
+    const timeout = setTimeout(() => resolve(false), 5_000);
+    child.once('close', () => {
+      clearTimeout(timeout);
+      resolve(true);
+    });
+  });
+  if (!closed && child.exitCode === null && child.signalCode === null) {
+    child.kill('SIGKILL');
+  }
 }

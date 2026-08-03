@@ -23,24 +23,50 @@ const patterns = [
   ['AWS access key', /\bAKIA[0-9A-Z]{16}\b/u],
   ['GitHub token', /\bgh[pousr]_[A-Za-z0-9]{36,}\b/u],
   ['Slack token', /\bxox[baprs]-[A-Za-z0-9-]{20,}\b/u],
-  [
-    'WB token literal',
-    /WB_API_TOKEN\s*:\s*["'](?!replace-|missing-token|mock-test-token|header\.payload\.signature|test-)[^"']{16,}["']/u,
-  ],
-  [
-    'WB token env assignment',
-    /^WB_API_TOKEN=(?!\$\{|replace-|missing-token|mock-test-token|header\.payload\.signature|test-)[^\s#]{16,}$/mu,
-  ],
-  [
-    'Admin token literal',
-    /ADMIN_API_SERVICE_TOKEN\s*:\s*["'](?!replace-|mock-admin-service-token|test-|runtime-test-)[^"']{32,}["']/u,
-  ],
-  [
-    'Admin token env assignment',
-    /^ADMIN_API_SERVICE_TOKEN=(?!\$\{|replace-|mock-admin-service-token|test-|runtime-test-)[^\s#]{32,}$/mu,
-  ],
 ];
-const findings = [];
+const tokenPatterns = [
+  {
+    allowed: (value) =>
+      [
+        'header.payload.signature',
+        'injected-by-secret-manager',
+        'missing-token',
+        'mock-test-token',
+      ].includes(value) ||
+      value.startsWith('replace-') ||
+      value.startsWith('test-'),
+    name: 'WB token assignment',
+    pattern: /\bWB_API_TOKEN\s*(?::|=)\s*["']([^"']{16,})["']/gu,
+  },
+  {
+    allowed: (value) =>
+      value === 'runtime-e2e-admin-token-with-32-chars' ||
+      value.startsWith('mock-admin-service-token') ||
+      value.startsWith('replace-') ||
+      value.startsWith('runtime-test-') ||
+      value.startsWith('test-'),
+    name: 'Admin token assignment',
+    pattern: /\bADMIN_API_SERVICE_TOKEN\s*(?::|=)\s*["']([^"']{32,})["']/gu,
+  },
+  {
+    allowed: (value) =>
+      ['header.payload.signature', 'missing-token', 'mock-test-token'].includes(value) ||
+      value.startsWith('replace-') ||
+      value.startsWith('test-'),
+    name: 'WB token env assignment',
+    pattern: /^WB_API_TOKEN\s*=\s*([^\s#"']{16,})\s*$/gmu,
+  },
+  {
+    allowed: (value) =>
+      value.startsWith('mock-admin-service-token') ||
+      value.startsWith('replace-') ||
+      value.startsWith('runtime-test-') ||
+      value.startsWith('test-'),
+    name: 'Admin token env assignment',
+    pattern: /^ADMIN_API_SERVICE_TOKEN\s*=\s*([^\s#"']{32,})\s*$/gmu,
+  },
+];
+const findings = new Set();
 
 for (const relativePath of listed) {
   if (ignoredPrefixes.some((prefix) => relativePath.startsWith(prefix))) continue;
@@ -52,12 +78,18 @@ for (const relativePath of listed) {
   }
   if (source.includes('\0')) continue;
   for (const [name, pattern] of patterns) {
-    if (pattern.test(source)) findings.push(`${relativePath}: ${name}`);
+    if (pattern.test(source)) findings.add(`${relativePath}: ${name}`);
+  }
+  for (const { allowed, name, pattern } of tokenPatterns) {
+    for (const match of source.matchAll(pattern)) {
+      const value = match[1] ?? '';
+      if (!allowed(value)) findings.add(`${relativePath}: ${name}`);
+    }
   }
 }
 
-if (findings.length > 0) {
-  process.stderr.write(`${findings.join('\n')}\n`);
+if (findings.size > 0) {
+  process.stderr.write(`${[...findings].join('\n')}\n`);
   process.exitCode = 1;
 } else {
   process.stdout.write(`Secret scan: проверено ${String(listed.length)} файлов, совпадений нет.\n`);

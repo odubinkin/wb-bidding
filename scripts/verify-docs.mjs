@@ -16,6 +16,7 @@ const requiredDocuments = [
   'docs/bidding-algorithm.md',
   'docs/data-model.md',
   'docs/mock-server.md',
+  'docs/scripts.md',
   'docs/testing.md',
   'docs/observability.md',
   'docs/security.md',
@@ -45,7 +46,7 @@ async function listTypeScriptSources(directory) {
           ? []
           : listTypeScriptSources(absolute);
       }
-      return entry.isFile() && entry.name.endsWith('.ts')
+      return entry.isFile() && /\.tsx?$/u.test(entry.name)
         ? [path.relative(repositoryRoot, absolute)]
         : [];
     }),
@@ -77,7 +78,13 @@ for (const relativePath of requiredDocuments) {
     if (target === '' || target.startsWith('#') || /^(?:https?:|mailto:)/u.test(target)) {
       continue;
     }
-    const withoutFragment = decodeURIComponent(target.split('#')[0] ?? '');
+    let withoutFragment;
+    try {
+      withoutFragment = decodeURIComponent(target.split('#')[0] ?? '');
+    } catch {
+      failures.push(`${relativePath}: некорректная escape-последовательность в ссылке ${target}`);
+      continue;
+    }
     const linkedPath = path.resolve(path.dirname(absolutePath), withoutFragment);
     try {
       await access(linkedPath);
@@ -105,6 +112,9 @@ const readme = await readFile(path.join(repositoryRoot, 'README.md'), 'utf8');
 if (!readme.includes('[путеводитель по проекту](docs/project-guide.md)')) {
   failures.push('README.md: нет ссылки на вводный путеводитель');
 }
+if (!readme.includes('[служебные скрипты](docs/scripts.md)')) {
+  failures.push('README.md: нет ссылки на справочник служебных скриптов');
+}
 for (const sourceDirectory of ['apps', 'packages']) {
   for (const relativePath of await listTypeScriptSources(
     path.join(repositoryRoot, sourceDirectory),
@@ -130,38 +140,25 @@ if (!dataModel.includes('```mermaid')) {
 if (!dataModel.includes('## Построчный справочник таблиц и столбцов')) {
   failures.push('docs/data-model.md: отсутствует подробный справочник таблиц и столбцов');
 }
-for (const modelName of [
-  'DeploymentAccountBinding',
-  'Campaign',
-  'CampaignTarget',
-  'CampaignStatDaily',
-  'BidPerformanceDay',
-  'ProductEconomics',
-  'ProductEconomicsImport',
-  'ProductEconomicsImportItem',
-  'BiddingPolicy',
-  'MetricSnapshot',
-  'BidDecision',
-  'BidExperiment',
-  'DecisionQueueItem',
-  'WbWriteAttempt',
-  'WbWriteAttemptItem',
-  'DeploymentControl',
-  'CampaignAutomation',
-  'TargetAutomation',
-  'ManualJob',
-  'ReconciliationRead',
-  'AuditEvent',
-  'SchedulerRun',
-  'SyncCheckpoint',
-  'BidStateObservation',
-  'SyncSourceSnapshot',
-  'TargetDataSnapshot',
-  'IdempotencyRecord',
-  'WbRateLimitBucket',
-]) {
+const prismaSchema = await readFile(path.join(repositoryRoot, 'prisma/schema.prisma'), 'utf8');
+const modelNames = [...prismaSchema.matchAll(/^model\s+(\w+)\s+\{/gmu)].map((match) => match[1]);
+if (modelNames.length === 0) {
+  failures.push('prisma/schema.prisma: модели Prisma не найдены');
+}
+for (const modelName of modelNames) {
   if (!dataModel.includes(`\`${modelName}\``)) {
     failures.push(`docs/data-model.md: нет назначения модели ${modelName}`);
+  }
+}
+
+const scriptsGuide = await readFile(path.join(repositoryRoot, 'docs/scripts.md'), 'utf8');
+const scriptEntries = await readdir(path.join(repositoryRoot, 'scripts'), { withFileTypes: true });
+for (const entry of scriptEntries) {
+  if (entry.isFile() && entry.name.endsWith('.mjs')) {
+    const scriptPath = `scripts/${entry.name}`;
+    if (!scriptsGuide.includes(`\`${scriptPath}\``)) {
+      failures.push(`docs/scripts.md: отсутствует описание ${scriptPath}`);
+    }
   }
 }
 

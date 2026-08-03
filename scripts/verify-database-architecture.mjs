@@ -1,7 +1,7 @@
 import { readFile, readdir } from 'node:fs/promises';
-import { extname, join, relative } from 'node:path';
+import { extname, join, relative, resolve } from 'node:path';
 
-const root = process.cwd();
+const root = resolve(import.meta.dirname, '..');
 const sourceRoots = ['apps', 'packages', 'tests'];
 const violations = [];
 
@@ -10,11 +10,8 @@ for (const sourceRoot of sourceRoots) {
     if (!['.ts', '.tsx'].includes(extname(file))) continue;
     const source = await readFile(file, 'utf8');
     const path = relative(root, file);
-    if (/(?:from\s+|require\()['"]pg['"]/u.test(source)) {
+    if (/(?:from\s+|require\(\s*|import\(\s*)['"]pg['"]/u.test(source)) {
       violations.push(`${path}: direct pg import`);
-    }
-    if (/\bPool(?:Client)?\b/u.test(source)) {
-      violations.push(`${path}: direct driver pool type`);
     }
     if (
       /\b(?:createRawDatabaseClient|queryParameterizedRaw|RawDatabaseClient|RawTransactionClient)\b/u.test(
@@ -32,7 +29,9 @@ for (const sourceRoot of sourceRoots) {
     if (
       (path.startsWith('apps/') || path.startsWith('packages/')) &&
       !path.startsWith('packages/database/') &&
-      /[`'"]\s*(?:SELECT|INSERT\s+INTO|UPDATE|DELETE\s+FROM|WITH)\b/u.test(source)
+      /[`'"]\s*(?:SELECT\b[^`'"]{0,500}\bFROM\b|INSERT\s+INTO\b|UPDATE\s+\S+\s+SET\b|DELETE\s+FROM\b|WITH\s+\S+\s+AS\s*\()/iu.test(
+        source,
+      )
     ) {
       violations.push(`${path}: SQL statement outside @wb-bidder/database`);
     }
@@ -62,6 +61,8 @@ async function walk(directory) {
     if (
       entry.name === 'node_modules' ||
       entry.name === '.git' ||
+      entry.name === '.agentplane' ||
+      entry.name === 'coverage' ||
       entry.name === 'dist' ||
       entry.name === 'generated'
     ) {

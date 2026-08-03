@@ -63,98 +63,129 @@ const client = new WbApiClient({
 });
 
 const startedAt = new Date();
-const campaignCount = await client.getCampaignCount();
-const advertisedIds = new Set(
-  campaignCount.adverts.flatMap((group) => group.advert_list.map((campaign) => campaign.advertId)),
-);
-for (const campaign of manifest.campaigns) {
-  if (!advertisedIds.has(campaign.advertId)) {
-    throw new Error(
-      `Sandbox campaign ${String(campaign.advertId)} is absent from authorized scope`,
-    );
-  }
-}
-
-const details = await client.getCampaignDetails(
-  manifest.campaigns.map((campaign) => campaign.advertId),
-);
-for (const campaign of manifest.campaigns) {
-  const actual = details.adverts.find((item) => item.id === campaign.advertId);
-  if (actual === undefined) {
-    throw new Error(`Sandbox campaign ${String(campaign.advertId)} details are absent`);
-  }
-  for (const nmId of campaign.nmIds) {
-    if (!actual.nm_settings.some((item) => item.nm_id === nmId)) {
-      throw new Error(
-        `Sandbox article ${String(nmId)} is absent from campaign ${String(campaign.advertId)}`,
-      );
-    }
-  }
-  await client.getMinimumBids({
-    advert_id: campaign.advertId,
-    nm_ids: campaign.nmIds,
-    payment_type: campaign.paymentType,
-    placement_types: campaign.placements,
-  });
-}
-
-const end = startedAt.toISOString().slice(0, 10);
-const begin = new Date(startedAt.getTime() - 6 * 86_400_000).toISOString().slice(0, 10);
-await client.getCampaignStatistics(
-  manifest.campaigns.map((campaign) => campaign.advertId),
-  begin,
-  end,
-);
-
-let canaryResult = 'NOT_REQUESTED';
-if (manifest.writeCanary !== null) {
-  const canary = manifest.writeCanary;
-  const current = readCardBid(details, canary.advertId, canary.nmId, canary.placement);
-  if (current !== canary.originalBidKopecks) {
-    throw new Error('Sandbox canary baseline differs from externally provisioned manifest');
-  }
-  let canaryAttempted = false;
-  try {
-    canaryAttempted = true;
-    await client.writeCardBids(cardWrite(canary, canary.canaryBidKopecks));
-    await waitForBid(client, canary, canary.canaryBidKopecks);
-    canaryResult = 'CANARY_VERIFIED';
-  } finally {
-    if (canaryAttempted) {
-      const observed = await reconcileCanaryAttempt(client, canary);
-      if (observed === canary.canaryBidKopecks) {
-        await client.writeCardBids(cardWrite(canary, canary.originalBidKopecks));
-        await waitForBid(client, canary, canary.originalBidKopecks);
-        canaryResult = `${canaryResult}_ROLLBACK_VERIFIED`;
-      } else {
-        canaryResult = `${canaryResult}_ORIGINAL_STATE_CONFIRMED`;
-      }
-    }
-  }
-}
-
-const evidence = {
-  campaignCount: manifest.campaigns.length,
-  canaryResult,
-  completedAt: new Date().toISOString(),
-  endpointProfileId: 'wb-promotion-2026-07-28-v1',
-  manifestChecksum: await sha256(JSON.stringify(manifest)),
-  manifestVersion: manifest.version,
-  observations,
-  profile: 'sandbox-smoke',
-  sellerFingerprint: tokenProfile.identityFingerprint,
-  startedAt: startedAt.toISOString(),
-  status: 'PASSED',
-};
+const manifestChecksum = await sha256(JSON.stringify(manifest));
 const outputPath = path.resolve(
   process.env.SANDBOX_EVIDENCE_OUTPUT ?? 'artifacts/sandbox-smoke-evidence.json',
 );
-await mkdir(path.dirname(outputPath), { recursive: true });
-await writeFile(outputPath, `${JSON.stringify(evidence, null, 2)}\n`, {
-  encoding: 'utf8',
-  mode: 0o600,
-});
-process.stdout.write(`Sandbox smoke PASSED; redacted evidence: ${outputPath}\n`);
+let canaryResult = 'NOT_REQUESTED';
+let stage = 'campaign-count';
+
+try {
+  const campaignCount = await client.getCampaignCount();
+  const advertisedIds = new Set(
+    campaignCount.adverts.flatMap((group) =>
+      group.advert_list.map((campaign) => campaign.advertId),
+    ),
+  );
+  for (const campaign of manifest.campaigns) {
+    if (!advertisedIds.has(campaign.advertId)) {
+      throw new Error(
+        `Sandbox campaign ${String(campaign.advertId)} is absent from authorized scope`,
+      );
+    }
+  }
+
+  stage = 'campaign-details';
+  const details = await client.getCampaignDetails(
+    manifest.campaigns.map((campaign) => campaign.advertId),
+  );
+  for (const campaign of manifest.campaigns) {
+    const actual = details.adverts.find((item) => item.id === campaign.advertId);
+    if (actual === undefined) {
+      throw new Error(`Sandbox campaign ${String(campaign.advertId)} details are absent`);
+    }
+    for (const nmId of campaign.nmIds) {
+      if (!actual.nm_settings.some((item) => item.nm_id === nmId)) {
+        throw new Error(
+          `Sandbox article ${String(nmId)} is absent from campaign ${String(campaign.advertId)}`,
+        );
+      }
+    }
+    stage = 'minimum-bids';
+    await client.getMinimumBids({
+      advert_id: campaign.advertId,
+      nm_ids: campaign.nmIds,
+      payment_type: campaign.paymentType,
+      placement_types: campaign.placements,
+    });
+  }
+
+  stage = 'campaign-statistics';
+  const end = startedAt.toISOString().slice(0, 10);
+  const begin = new Date(startedAt.getTime() - 6 * 86_400_000).toISOString().slice(0, 10);
+  await client.getCampaignStatistics(
+    manifest.campaigns.map((campaign) => campaign.advertId),
+    begin,
+    end,
+  );
+
+  if (manifest.writeCanary !== null) {
+    const canary = manifest.writeCanary;
+    stage = 'canary-baseline';
+    const current = readCardBid(details, canary.advertId, canary.nmId, canary.placement);
+    if (current !== canary.originalBidKopecks) {
+      throw new Error('Sandbox canary baseline differs from externally provisioned manifest');
+    }
+    let canaryAttempted = false;
+    try {
+      canaryAttempted = true;
+      stage = 'canary-write';
+      await client.writeCardBids(cardWrite(canary, canary.canaryBidKopecks));
+      stage = 'canary-visibility';
+      await waitForBid(client, canary, canary.canaryBidKopecks);
+      canaryResult = 'CANARY_VERIFIED';
+    } finally {
+      if (canaryAttempted) {
+        stage = 'canary-reconciliation';
+        const observed = await reconcileCanaryAttempt(client, canary);
+        if (observed === canary.canaryBidKopecks) {
+          stage = 'canary-rollback';
+          await client.writeCardBids(cardWrite(canary, canary.originalBidKopecks));
+          await waitForBid(client, canary, canary.originalBidKopecks);
+          canaryResult = `${canaryResult}_ROLLBACK_VERIFIED`;
+        } else {
+          canaryResult = `${canaryResult}_ORIGINAL_STATE_CONFIRMED`;
+        }
+      }
+    }
+  }
+
+  stage = 'evidence-write';
+  await writeEvidence({ status: 'PASSED' });
+  process.stdout.write(`Sandbox smoke PASSED; redacted evidence: ${outputPath}\n`);
+} catch (error) {
+  try {
+    await writeEvidence({
+      failureKind: error instanceof Error ? error.name : 'UnknownError',
+      failureStage: stage,
+      status: 'FAILED',
+    });
+  } catch (evidenceError) {
+    process.stderr.write(`Unable to write sandbox failure evidence: ${String(evidenceError)}\n`);
+  }
+  throw error;
+}
+
+async function writeEvidence(result) {
+  const evidence = {
+    campaignCount: manifest.campaigns.length,
+    canaryResult,
+    completedAt: new Date().toISOString(),
+    endpointProfileId: 'wb-promotion-2026-07-28-v1',
+    manifestChecksum,
+    manifestVersion: manifest.version,
+    observations,
+    profile: 'sandbox-smoke',
+    sellerFingerprint: tokenProfile.identityFingerprint,
+    startedAt: startedAt.toISOString(),
+    ...result,
+  };
+  await mkdir(path.dirname(outputPath), { recursive: true });
+  await writeFile(outputPath, `${JSON.stringify(evidence, null, 2)}\n`, {
+    encoding: 'utf8',
+    mode: 0o600,
+  });
+}
 
 function parseManifest(value) {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -297,11 +328,14 @@ async function reconcileCanaryAttempt(client, canary) {
 }
 
 async function waitForBidSet(client, canary, expected) {
-  const deadline = Date.now() + 180_000;
+  const deadline = Date.now() + canary.propagationWindowMs;
   while (Date.now() < deadline) {
     const details = await client.getCampaignDetails([canary.advertId]);
     const observed = readCardBid(details, canary.advertId, canary.nmId, canary.placement);
     if (expected.includes(observed)) return observed;
+    await new Promise((resolve) => {
+      setTimeout(resolve, 5_000);
+    });
   }
   throw new Error(`Sandbox canary visibility timeout for expected bid set ${expected.join(',')}`);
 }
